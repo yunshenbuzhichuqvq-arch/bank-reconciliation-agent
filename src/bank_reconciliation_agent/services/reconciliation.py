@@ -86,6 +86,15 @@ class ReconciliationMatchSummary(NamedTuple):
     pending_human_rows: int
 
 
+class ReconciliationMatchResult(NamedTuple):
+    flow_id: str
+    status: str
+    error_type: str | None
+    bank_amount: Decimal | None
+    clear_amount: Decimal | None
+    amount_diff: Decimal | None
+
+
 class ReconciliationService:
     """对账任务服务，负责上传解析、任务启动和状态查询等业务编排。"""
 
@@ -144,25 +153,62 @@ class ReconciliationService:
         clear_df: pd.DataFrame,
     ) -> ReconciliationMatchSummary:
         """执行 MVP-0 基础匹配：精确平账、金额差错、单边缺失。"""
+        results = self._build_match_results(bank_df, clear_df)
+        return ReconciliationMatchSummary(
+            auto_fixed_rows=sum(result.status == "AUTO_FIXED" for result in results),
+            pending_ai_rows=sum(result.status == "PENDING_AI" for result in results),
+            pending_human_rows=sum(result.status == "PENDING_HUMAN" for result in results),
+        )
+
+    def _build_match_results(
+        self,
+        bank_df: pd.DataFrame,
+        clear_df: pd.DataFrame,
+    ) -> list[ReconciliationMatchResult]:
+        """生成基础对账结果明细，供后续差错队列、RAG 和台账复用。"""
         bank_by_flow_id = self._amounts_by_flow_id(bank_df)
         clear_by_flow_id = self._amounts_by_flow_id(clear_df)
-        shared_flow_ids = bank_by_flow_id.keys() & clear_by_flow_id.keys()
+        results: list[ReconciliationMatchResult] = []
 
-        auto_fixed_rows = 0
-        pending_ai_rows = 0
-        for flow_id in shared_flow_ids:
-            if bank_by_flow_id[flow_id] == clear_by_flow_id[flow_id]:
-                auto_fixed_rows += 1
+        for flow_id in sorted(bank_by_flow_id.keys() | clear_by_flow_id.keys()):
+            bank_amount = bank_by_flow_id.get(flow_id)
+            clear_amount = clear_by_flow_id.get(flow_id)
+
+            if bank_amount is None or clear_amount is None:
+                results.append(
+                    ReconciliationMatchResult(
+                        flow_id=flow_id,
+                        status="PENDING_HUMAN",
+                        error_type="SINGLE_SIDE_MISSING",
+                        bank_amount=bank_amount,
+                        clear_amount=clear_amount,
+                        amount_diff=None,
+                    )
+                )
+            elif bank_amount == clear_amount:
+                results.append(
+                    ReconciliationMatchResult(
+                        flow_id=flow_id,
+                        status="AUTO_FIXED",
+                        error_type=None,
+                        bank_amount=bank_amount,
+                        clear_amount=clear_amount,
+                        amount_diff=Decimal("0.00"),
+                    )
+                )
             else:
-                pending_ai_rows += 1
+                results.append(
+                    ReconciliationMatchResult(
+                        flow_id=flow_id,
+                        status="PENDING_AI",
+                        error_type="AMOUNT_MISMATCH",
+                        bank_amount=bank_amount,
+                        clear_amount=clear_amount,
+                        amount_diff=bank_amount - clear_amount,
+                    )
+                )
 
-        bank_only_rows = len(bank_by_flow_id.keys() - clear_by_flow_id.keys())
-        clear_only_rows = len(clear_by_flow_id.keys() - bank_by_flow_id.keys())
-        return ReconciliationMatchSummary(
-            auto_fixed_rows=auto_fixed_rows,
-            pending_ai_rows=pending_ai_rows,
-            pending_human_rows=bank_only_rows + clear_only_rows,
-        )
+        return results
 
     def _amounts_by_flow_id(self, dataframe: pd.DataFrame) -> dict[str, Decimal]:
         """按流水号提取标准金额，使用 Decimal 避免浮点比较误差。"""
