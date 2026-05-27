@@ -36,9 +36,9 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert body["message"] == "upload success"
     assert body["data"]["total_bank_rows"] == 10
     assert body["data"]["total_clear_rows"] == 10
-    assert body["data"]["auto_fixed_rows"] == 0
-    assert body["data"]["pending_ai_rows"] == 0
-    assert body["data"]["pending_human_rows"] == 0
+    assert body["data"]["auto_fixed_rows"] == 8
+    assert body["data"]["pending_ai_rows"] == 1
+    assert body["data"]["pending_human_rows"] == 2
 
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(

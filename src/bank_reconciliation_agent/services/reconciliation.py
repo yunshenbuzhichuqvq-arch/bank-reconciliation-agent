@@ -1,5 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 from io import BytesIO
+from typing import NamedTuple
 
 import pandas as pd
 from fastapi import HTTPException, UploadFile
@@ -78,6 +80,12 @@ CLEAR_REQUIRED_COLUMNS = [
 ]
 
 
+class ReconciliationMatchSummary(NamedTuple):
+    auto_fixed_rows: int
+    pending_ai_rows: int
+    pending_human_rows: int
+
+
 class ReconciliationService:
     """对账任务服务，负责上传解析、任务启动和状态查询等业务编排。"""
 
@@ -92,15 +100,16 @@ class ReconciliationService:
         clear_df = await self._read_excel(clear_file, "clear_file")
         self._validate_columns(bank_df, BANK_REQUIRED_COLUMNS, "bank_file")
         self._validate_columns(clear_df, CLEAR_REQUIRED_COLUMNS, "clear_file")
+        match_summary = self._match_transactions(bank_df, clear_df)
 
         task_id = f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         return ReconciliationUploadResponse(
             task_id=task_id,
             total_bank_rows=len(bank_df),
             total_clear_rows=len(clear_df),
-            auto_fixed_rows=0,
-            pending_ai_rows=0,
-            pending_human_rows=0,
+            auto_fixed_rows=match_summary.auto_fixed_rows,
+            pending_ai_rows=match_summary.pending_ai_rows,
+            pending_human_rows=match_summary.pending_human_rows,
         )
 
     async def _read_excel(self, upload_file: UploadFile, file_label: str) -> pd.DataFrame:
@@ -128,6 +137,39 @@ class ReconciliationService:
                 status_code=400,
                 detail=f"{file_label} missing required columns: {', '.join(missing_columns)}",
             )
+
+    def _match_transactions(
+        self,
+        bank_df: pd.DataFrame,
+        clear_df: pd.DataFrame,
+    ) -> ReconciliationMatchSummary:
+        """执行 MVP-0 基础匹配：精确平账、金额差错、单边缺失。"""
+        bank_by_flow_id = self._amounts_by_flow_id(bank_df)
+        clear_by_flow_id = self._amounts_by_flow_id(clear_df)
+        shared_flow_ids = bank_by_flow_id.keys() & clear_by_flow_id.keys()
+
+        auto_fixed_rows = 0
+        pending_ai_rows = 0
+        for flow_id in shared_flow_ids:
+            if bank_by_flow_id[flow_id] == clear_by_flow_id[flow_id]:
+                auto_fixed_rows += 1
+            else:
+                pending_ai_rows += 1
+
+        bank_only_rows = len(bank_by_flow_id.keys() - clear_by_flow_id.keys())
+        clear_only_rows = len(clear_by_flow_id.keys() - bank_by_flow_id.keys())
+        return ReconciliationMatchSummary(
+            auto_fixed_rows=auto_fixed_rows,
+            pending_ai_rows=pending_ai_rows,
+            pending_human_rows=bank_only_rows + clear_only_rows,
+        )
+
+    def _amounts_by_flow_id(self, dataframe: pd.DataFrame) -> dict[str, Decimal]:
+        """按流水号提取标准金额，使用 Decimal 避免浮点比较误差。"""
+        return {
+            str(row.flow_id): Decimal(str(row.amount)).quantize(Decimal("0.01"))
+            for row in dataframe[["flow_id", "amount"]].itertuples(index=False)
+        }
 
     def start(self, task_id: str) -> ReconciliationStartResponse:
         """启动对账工作流；当前 MVP-0 骨架先返回固定运行状态。"""
