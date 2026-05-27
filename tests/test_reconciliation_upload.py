@@ -42,6 +42,39 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert body["data"]["pending_ai_rows"] == 1
     assert body["data"]["pending_human_rows"] == 2
 
+    task_id = body["data"]["task_id"]
+    status_response = client.get(f"/api/v1/reconcile/{task_id}/status")
+    assert status_response.status_code == 200
+    status_body = status_response.json()["data"]
+    assert status_body["task_id"] == task_id
+    assert status_body["status"] == "UPLOADED"
+    assert status_body["auto_fixed_rows"] == 8
+    assert status_body["pending_ai_rows"] == 1
+    assert status_body["pending_human_rows"] == 2
+    assert status_body["unresolved_rows"] == 3
+
+    exceptions_response = client.get(f"/api/v1/reconcile/{task_id}/exceptions")
+    assert exceptions_response.status_code == 200
+    exceptions_body = exceptions_response.json()["data"]
+    assert exceptions_body["task_id"] == task_id
+    assert exceptions_body["total"] == 3
+    exceptions_by_flow_id = {
+        item["flow_id"]: item for item in exceptions_body["items"]
+    }
+    assert exceptions_by_flow_id["F1004"]["status"] == "PENDING_AI"
+    assert exceptions_by_flow_id["F1004"]["error_type"] == "AMOUNT_MISMATCH"
+    assert exceptions_by_flow_id["F1004"]["bank_amount"] == "300.00"
+    assert exceptions_by_flow_id["F1004"]["clear_amount"] == "295.00"
+    assert exceptions_by_flow_id["F1004"]["amount_diff"] == "5.00"
+    assert exceptions_by_flow_id["F1005"]["status"] == "PENDING_HUMAN"
+    assert exceptions_by_flow_id["F1005"]["error_type"] == "SINGLE_SIDE_MISSING"
+    assert exceptions_by_flow_id["F1005"]["bank_amount"] == "120.00"
+    assert exceptions_by_flow_id["F1005"]["clear_amount"] is None
+    assert exceptions_by_flow_id["F1006"]["status"] == "PENDING_HUMAN"
+    assert exceptions_by_flow_id["F1006"]["error_type"] == "SINGLE_SIDE_MISSING"
+    assert exceptions_by_flow_id["F1006"]["bank_amount"] is None
+    assert exceptions_by_flow_id["F1006"]["clear_amount"] == "45.00"
+
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
     tmp_path: Path,

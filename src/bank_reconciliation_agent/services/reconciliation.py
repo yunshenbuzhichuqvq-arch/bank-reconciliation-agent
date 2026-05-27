@@ -7,6 +7,8 @@ import pandas as pd
 from fastapi import HTTPException, UploadFile
 
 from bank_reconciliation_agent.schemas.reconciliation import (
+    ReconciliationExceptionItem,
+    ReconciliationExceptionListResponse,
     ReconciliationStartResponse,
     ReconciliationStatusResponse,
     ReconciliationUploadResponse,
@@ -95,8 +97,19 @@ class ReconciliationMatchResult(NamedTuple):
     amount_diff: Decimal | None
 
 
+class ReconciliationTaskRecord(NamedTuple):
+    task_id: str
+    status: str
+    total_bank_rows: int
+    total_clear_rows: int
+    results: list[ReconciliationMatchResult]
+
+
 class ReconciliationService:
     """对账任务服务，负责上传解析、任务启动和状态查询等业务编排。"""
+
+    def __init__(self) -> None:
+        self._tasks: dict[str, ReconciliationTaskRecord] = {}
 
     async def upload(
         self,
@@ -104,14 +117,21 @@ class ReconciliationService:
         clear_file: UploadFile,
     ) -> ReconciliationUploadResponse:
         """读取双端 Excel，校验字段完整性，并返回上传阶段的基础统计。"""
-        # 当前上传阶段只做解析和字段校验；具体对账匹配放到下一步实现。
         bank_df = await self._read_excel(bank_file, "bank_file")
         clear_df = await self._read_excel(clear_file, "clear_file")
         self._validate_columns(bank_df, BANK_REQUIRED_COLUMNS, "bank_file")
         self._validate_columns(clear_df, CLEAR_REQUIRED_COLUMNS, "clear_file")
-        match_summary = self._match_transactions(bank_df, clear_df)
+        match_results = self._build_match_results(bank_df, clear_df)
+        match_summary = self._summarize_match_results(match_results)
 
         task_id = f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self._tasks[task_id] = ReconciliationTaskRecord(
+            task_id=task_id,
+            status="UPLOADED",
+            total_bank_rows=len(bank_df),
+            total_clear_rows=len(clear_df),
+            results=match_results,
+        )
         return ReconciliationUploadResponse(
             task_id=task_id,
             total_bank_rows=len(bank_df),
@@ -154,6 +174,13 @@ class ReconciliationService:
     ) -> ReconciliationMatchSummary:
         """执行 MVP-0 基础匹配：精确平账、金额差错、单边缺失。"""
         results = self._build_match_results(bank_df, clear_df)
+        return self._summarize_match_results(results)
+
+    def _summarize_match_results(
+        self,
+        results: list[ReconciliationMatchResult],
+    ) -> ReconciliationMatchSummary:
+        """从结构化对账结果聚合上传和任务状态统计。"""
         return ReconciliationMatchSummary(
             auto_fixed_rows=sum(result.status == "AUTO_FIXED" for result in results),
             pending_ai_rows=sum(result.status == "PENDING_AI" for result in results),
@@ -222,15 +249,50 @@ class ReconciliationService:
         return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
 
     def get_status(self, task_id: str) -> ReconciliationStatusResponse:
-        """查询任务状态；当前 MVP-0 骨架先返回固定统计结果。"""
+        """查询任务状态和基础对账统计。"""
+        task = self._get_task(task_id)
+        summary = self._summarize_match_results(task.results)
         return ReconciliationStatusResponse(
             task_id=task_id,
-            status="UPLOADED",
-            auto_fixed_rows=0,
+            status=task.status,
+            auto_fixed_rows=summary.auto_fixed_rows,
+            pending_ai_rows=summary.pending_ai_rows,
             ai_processed_rows=0,
-            pending_human_rows=0,
-            unresolved_rows=0,
+            pending_human_rows=summary.pending_human_rows,
+            unresolved_rows=summary.pending_ai_rows + summary.pending_human_rows,
         )
+
+    def get_exceptions(self, task_id: str) -> ReconciliationExceptionListResponse:
+        """查询待 AI 审计和待人工复核的异常明细。"""
+        task = self._get_task(task_id)
+        items = [
+            ReconciliationExceptionItem(
+                flow_id=result.flow_id,
+                status=result.status,
+                error_type=result.error_type or "",
+                bank_amount=self._format_optional_decimal(result.bank_amount),
+                clear_amount=self._format_optional_decimal(result.clear_amount),
+                amount_diff=self._format_optional_decimal(result.amount_diff),
+            )
+            for result in task.results
+            if result.status != "AUTO_FIXED"
+        ]
+        return ReconciliationExceptionListResponse(
+            task_id=task_id,
+            total=len(items),
+            items=items,
+        )
+
+    def _get_task(self, task_id: str) -> ReconciliationTaskRecord:
+        try:
+            return self._tasks[task_id]
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="reconciliation task not found") from exc
+
+    def _format_optional_decimal(self, value: Decimal | None) -> str | None:
+        if value is None:
+            return None
+        return f"{value:.2f}"
 
 
 reconciliation_service = ReconciliationService()
