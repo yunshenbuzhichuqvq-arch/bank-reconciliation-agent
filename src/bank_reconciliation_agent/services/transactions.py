@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 import pandas as pd
@@ -137,7 +138,7 @@ class TransactionService:
             "account_no_masked": row.get("account_no_masked"),
             "customer_name_masked": row.get("customer_name_masked"),
             "amount": self._to_decimal(row["amount"]),
-            "trade_time": pd.to_datetime(row["trade_time"]).to_pydatetime(),
+            "trade_time": self._to_datetime(row["trade_time"]),
             "summary": row.get("summary"),
         }
 
@@ -147,12 +148,19 @@ class TransactionService:
             "flow_id": str(row["flow_id"]),
             "channel": row.get("channel"),
             "amount": self._to_decimal(row["amount"]),
-            "trade_time": pd.to_datetime(row["trade_time"]).to_pydatetime(),
+            "trade_time": self._to_datetime(row["trade_time"]),
             "summary": row.get("summary"),
         }
 
     def _to_decimal(self, value: object) -> Decimal:
         return Decimal(str(value)).quantize(Decimal("0.01"))
+
+    def _to_datetime(self, value: object) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, pd.Timestamp):
+            return value.to_pydatetime()
+        return datetime.fromisoformat(str(value))
 
     def _normalize_value(self, value: object) -> object:
         if isinstance(value, Decimal):
