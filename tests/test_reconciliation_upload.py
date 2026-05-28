@@ -66,10 +66,18 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert exceptions_by_flow_id["F1004"]["bank_amount"] == "300.00"
     assert exceptions_by_flow_id["F1004"]["clear_amount"] == "295.00"
     assert exceptions_by_flow_id["F1004"]["amount_diff"] == "5.00"
+    assert exceptions_by_flow_id["F1004"]["rag_evidence"]
+    assert "amount_mismatch" in exceptions_by_flow_id["F1004"]["rag_evidence"][0]["business_tags"]
+    assert exceptions_by_flow_id["F1004"]["rag_evidence"][0]["chunk_id"]
+    assert exceptions_by_flow_id["F1004"]["rag_evidence"][0]["source_url"].startswith("https://")
     assert exceptions_by_flow_id["F1005"]["status"] == "PENDING_HUMAN"
     assert exceptions_by_flow_id["F1005"]["error_type"] == "SINGLE_SIDE_MISSING"
     assert exceptions_by_flow_id["F1005"]["bank_amount"] == "120.00"
     assert exceptions_by_flow_id["F1005"]["clear_amount"] is None
+    assert exceptions_by_flow_id["F1005"]["rag_evidence"]
+    assert "single_side_missing" in exceptions_by_flow_id["F1005"]["rag_evidence"][0][
+        "business_tags"
+    ]
     assert exceptions_by_flow_id["F1006"]["status"] == "PENDING_HUMAN"
     assert exceptions_by_flow_id["F1006"]["error_type"] == "SINGLE_SIDE_MISSING"
     assert exceptions_by_flow_id["F1006"]["bank_amount"] is None

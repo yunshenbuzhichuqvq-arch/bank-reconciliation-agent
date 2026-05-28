@@ -25,6 +25,19 @@ class ReconciliationStatusResponse(BaseModel):
     unresolved_rows: int
 
 
+class ReconciliationRagEvidence(BaseModel):
+    chunk_id: str
+    source: str
+    source_name: str
+    source_url: str
+    source_file: str
+    section_title: str
+    element_type: str
+    business_tags: list[str]
+    score: float
+    content: str
+
+
 class ReconciliationExceptionItem(BaseModel):
     flow_id: str
     status: str
@@ -32,6 +45,7 @@ class ReconciliationExceptionItem(BaseModel):
     bank_amount: str | None
     clear_amount: str | None
     amount_diff: str | None
+    rag_evidence: list[ReconciliationRagEvidence]
 
 
 class ReconciliationExceptionListResponse(BaseModel):

@@ -6,9 +6,12 @@ from typing import NamedTuple
 import pandas as pd
 from fastapi import HTTPException, UploadFile
 
+from bank_reconciliation_agent.rag.retriever import rule_retriever
+from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
 from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationExceptionItem,
     ReconciliationExceptionListResponse,
+    ReconciliationRagEvidence,
     ReconciliationStartResponse,
     ReconciliationStatusResponse,
     ReconciliationUploadResponse,
@@ -273,6 +276,7 @@ class ReconciliationService:
                 bank_amount=self._format_optional_decimal(result.bank_amount),
                 clear_amount=self._format_optional_decimal(result.clear_amount),
                 amount_diff=self._format_optional_decimal(result.amount_diff),
+                rag_evidence=self._retrieve_rag_evidence(result),
             )
             for result in task.results
             if result.status != "AUTO_FIXED"
@@ -293,6 +297,49 @@ class ReconciliationService:
         if value is None:
             return None
         return f"{value:.2f}"
+
+    def _retrieve_rag_evidence(
+        self,
+        result: ReconciliationMatchResult,
+    ) -> list[ReconciliationRagEvidence]:
+        query = self._build_rag_query(result)
+        response = rule_retriever.search(RagSearchRequest(query=query, top_k=2))
+        return [self._to_reconciliation_evidence(item) for item in response.items]
+
+    def _build_rag_query(self, result: ReconciliationMatchResult) -> str:
+        if result.error_type == "AMOUNT_MISMATCH":
+            return (
+                "AMOUNT_MISMATCH amount_mismatch 金额差异 对账不平 "
+                f"bank_amount={self._format_optional_decimal(result.bank_amount)} "
+                f"clear_amount={self._format_optional_decimal(result.clear_amount)} "
+                f"amount_diff={self._format_optional_decimal(result.amount_diff)}"
+            )
+        if result.error_type == "SINGLE_SIDE_MISSING":
+            missing_side = "clear" if result.clear_amount is None else "bank"
+            return (
+                "SINGLE_SIDE_MISSING single_side_missing 单边缺失 查询查复 "
+                f"missing_side={missing_side} "
+                f"bank_amount={self._format_optional_decimal(result.bank_amount)} "
+                f"clear_amount={self._format_optional_decimal(result.clear_amount)}"
+            )
+        return f"{result.error_type or ''} reconciliation exception"
+
+    def _to_reconciliation_evidence(
+        self,
+        item: RagSearchItem,
+    ) -> ReconciliationRagEvidence:
+        return ReconciliationRagEvidence(
+            chunk_id=item.chunk_id,
+            source=item.source,
+            source_name=item.source_name,
+            source_url=item.source_url,
+            source_file=item.source_file,
+            section_title=item.section_title,
+            element_type=item.element_type,
+            business_tags=item.business_tags,
+            score=item.score,
+            content=item.content,
+        )
 
 
 reconciliation_service = ReconciliationService()
