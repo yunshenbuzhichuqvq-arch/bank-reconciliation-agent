@@ -33,9 +33,8 @@ packages = ["src/bank_reconciliation_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = [".", "src"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-

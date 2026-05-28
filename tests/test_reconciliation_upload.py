@@ -97,6 +97,15 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert "金额不一致" in ledger_by_flow_id["F1004"]["ai_audit_opinion"]
     assert ledger_by_flow_id["F1004"]["ai_confidence"] == "0.7700"
     assert "unionpay_reconciliation_faq_001" in ledger_by_flow_id["F1004"]["rag_source"]
+    assert status_body["ai_processed_rows"] == exceptions_body["total"] == ledger_body["total"]
+
+    start_response = client.post(f"/api/v1/reconcile/{task_id}/start")
+    assert start_response.status_code == 200
+    assert start_response.json()["data"]["status"] == "AI_RUNNING"
+
+    running_status_response = client.get(f"/api/v1/reconcile/{task_id}/status")
+    assert running_status_response.status_code == 200
+    assert running_status_response.json()["data"]["status"] == "AI_RUNNING"
 
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(

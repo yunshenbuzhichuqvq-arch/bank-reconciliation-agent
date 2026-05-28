@@ -253,7 +253,9 @@ class ReconciliationService:
         }
 
     def start(self, task_id: str) -> ReconciliationStartResponse:
-        """启动对账工作流；当前 MVP-0 骨架先返回固定运行状态。"""
+        """启动对账工作流，并记录当前任务进入 AI 处理状态。"""
+        task = self._get_task(task_id)
+        self._tasks[task_id] = task._replace(status="AI_RUNNING")
         return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
 
     def get_status(self, task_id: str) -> ReconciliationStatusResponse:
@@ -265,7 +267,7 @@ class ReconciliationService:
             status=task.status,
             auto_fixed_rows=summary.auto_fixed_rows,
             pending_ai_rows=summary.pending_ai_rows,
-            ai_processed_rows=0,
+            ai_processed_rows=summary.pending_ai_rows + summary.pending_human_rows,
             pending_human_rows=summary.pending_human_rows,
             unresolved_rows=summary.pending_ai_rows + summary.pending_human_rows,
         )
