@@ -1,0 +1,26 @@
+[
+  {
+    "source_id": "pbc_epayment_guideline",
+    "source_name": "中国人民银行《电子支付指引（第一号）》公开条款摘录",
+    "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",
+    "source_file": "data/rag/raw_sources/pbc_epayment_guideline.md",
+    "source_type": "html_excerpt",
+    "business_tags": ["audit_trail", "error_handling"]
+  },
+  {
+    "source_id": "pbc_small_payment_query_reply",
+    "source_name": "小额支付系统业务处理手续公开材料摘录",
+    "source_url": "https://www.pbc.gov.cn/eportal/fileDir/history_file/files/att_19041_2.pdf",
+    "source_file": "data/rag/raw_sources/pbc_small_payment_query_reply.md",
+    "source_type": "pdf_excerpt",
+    "business_tags": ["single_side_missing", "query_reply", "error_handling"]
+  },
+  {
+    "source_id": "unionpay_reconciliation_faq",
+    "source_name": "银联一窗办清算对账公开 FAQ 摘录",
+    "source_url": "https://pcs.unionpay.com/ycb/pcweb/NEWbzzx/cjwt/ywcp/jcyw/dj/FKYW/art/2024/art_bc798a9bee334e5d8a19286b66bbfe61.html",
+    "source_file": "data/rag/raw_sources/unionpay_reconciliation_faq.md",
+    "source_type": "html_excerpt",
+    "business_tags": ["amount_mismatch", "single_side_missing", "clearing_file_exception"]
+  }
+]
