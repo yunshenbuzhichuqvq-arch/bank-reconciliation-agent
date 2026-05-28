@@ -6,9 +6,11 @@ from typing import NamedTuple
 import pandas as pd
 from fastapi import HTTPException, UploadFile
 
+from bank_reconciliation_agent.agents.audit_agent import AuditDecision, audit_agent
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
 from bank_reconciliation_agent.schemas.reconciliation import (
+    ReconciliationAuditDecision,
     ReconciliationExceptionItem,
     ReconciliationExceptionListResponse,
     ReconciliationRagEvidence,
@@ -268,19 +270,34 @@ class ReconciliationService:
     def get_exceptions(self, task_id: str) -> ReconciliationExceptionListResponse:
         """查询待 AI 审计和待人工复核的异常明细。"""
         task = self._get_task(task_id)
-        items = [
-            ReconciliationExceptionItem(
+        items: list[ReconciliationExceptionItem] = []
+        for result in task.results:
+            if result.status == "AUTO_FIXED":
+                continue
+
+            rag_items = self._retrieve_rag_items(result)
+            rag_evidence = [self._to_reconciliation_evidence(item) for item in rag_items]
+            audit_decision = audit_agent.decide(
                 flow_id=result.flow_id,
-                status=result.status,
                 error_type=result.error_type or "",
                 bank_amount=self._format_optional_decimal(result.bank_amount),
                 clear_amount=self._format_optional_decimal(result.clear_amount),
                 amount_diff=self._format_optional_decimal(result.amount_diff),
-                rag_evidence=self._retrieve_rag_evidence(result),
+                evidence=rag_items,
             )
-            for result in task.results
-            if result.status != "AUTO_FIXED"
-        ]
+            items.append(
+                ReconciliationExceptionItem(
+                    flow_id=result.flow_id,
+                    status=result.status,
+                    error_type=result.error_type or "",
+                    bank_amount=self._format_optional_decimal(result.bank_amount),
+                    clear_amount=self._format_optional_decimal(result.clear_amount),
+                    amount_diff=self._format_optional_decimal(result.amount_diff),
+                    rag_evidence=rag_evidence,
+                    audit_decision=self._to_reconciliation_audit_decision(audit_decision),
+                )
+            )
+
         return ReconciliationExceptionListResponse(
             task_id=task_id,
             total=len(items),
@@ -298,13 +315,13 @@ class ReconciliationService:
             return None
         return f"{value:.2f}"
 
-    def _retrieve_rag_evidence(
+    def _retrieve_rag_items(
         self,
         result: ReconciliationMatchResult,
-    ) -> list[ReconciliationRagEvidence]:
+    ) -> list[RagSearchItem]:
         query = self._build_rag_query(result)
         response = rule_retriever.search(RagSearchRequest(query=query, top_k=2))
-        return [self._to_reconciliation_evidence(item) for item in response.items]
+        return response.items
 
     def _build_rag_query(self, result: ReconciliationMatchResult) -> str:
         if result.error_type == "AMOUNT_MISMATCH":
@@ -339,6 +356,19 @@ class ReconciliationService:
             business_tags=item.business_tags,
             score=item.score,
             content=item.content,
+        )
+
+    def _to_reconciliation_audit_decision(
+        self,
+        decision: AuditDecision,
+    ) -> ReconciliationAuditDecision:
+        return ReconciliationAuditDecision(
+            flow_id=decision.flow_id,
+            decision=decision.decision,
+            risk_level=decision.risk_level,
+            reason=decision.reason,
+            evidence=[self._to_reconciliation_evidence(item) for item in decision.evidence],
+            confidence=decision.confidence,
         )
 
 

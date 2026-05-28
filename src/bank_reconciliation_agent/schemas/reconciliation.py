@@ -38,6 +38,15 @@ class ReconciliationRagEvidence(BaseModel):
     content: str
 
 
+class ReconciliationAuditDecision(BaseModel):
+    flow_id: str
+    decision: str
+    risk_level: str
+    reason: str
+    evidence: list[ReconciliationRagEvidence]
+    confidence: float
+
+
 class ReconciliationExceptionItem(BaseModel):
     flow_id: str
     status: str
@@ -46,6 +55,7 @@ class ReconciliationExceptionItem(BaseModel):
     clear_amount: str | None
     amount_diff: str | None
     rag_evidence: list[ReconciliationRagEvidence]
+    audit_decision: ReconciliationAuditDecision
 
 
 class ReconciliationExceptionListResponse(BaseModel):

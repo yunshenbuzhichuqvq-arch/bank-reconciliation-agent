@@ -70,6 +70,9 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert "amount_mismatch" in exceptions_by_flow_id["F1004"]["rag_evidence"][0]["business_tags"]
     assert exceptions_by_flow_id["F1004"]["rag_evidence"][0]["chunk_id"]
     assert exceptions_by_flow_id["F1004"]["rag_evidence"][0]["source_url"].startswith("https://")
+    assert exceptions_by_flow_id["F1004"]["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert exceptions_by_flow_id["F1004"]["audit_decision"]["risk_level"] == "MEDIUM"
+    assert exceptions_by_flow_id["F1004"]["audit_decision"]["evidence"][0]["chunk_id"]
     assert exceptions_by_flow_id["F1005"]["status"] == "PENDING_HUMAN"
     assert exceptions_by_flow_id["F1005"]["error_type"] == "SINGLE_SIDE_MISSING"
     assert exceptions_by_flow_id["F1005"]["bank_amount"] == "120.00"
