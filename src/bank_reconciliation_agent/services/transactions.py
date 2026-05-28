@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import cast
 
 import pandas as pd
 from sqlalchemy import (
@@ -83,14 +84,14 @@ class TransactionService:
             if not bank_df.empty:
                 connection.execute(
                     insert(bank_transaction_table),
-                    [self._to_bank_insert_values(task_id, row) for row in bank_df.to_dict("records")],
+                    [self._to_bank_insert_values(task_id, row) for row in self._records(bank_df)],
                 )
             if not clear_df.empty:
                 connection.execute(
                     insert(clear_transaction_table),
                     [
                         self._to_clear_insert_values(task_id, row)
-                        for row in clear_df.to_dict("records")
+                        for row in self._records(clear_df)
                     ],
                 )
 
@@ -154,6 +155,9 @@ class TransactionService:
 
     def _to_decimal(self, value: object) -> Decimal:
         return Decimal(str(value)).quantize(Decimal("0.01"))
+
+    def _records(self, dataframe: pd.DataFrame) -> list[dict[str, object]]:
+        return cast(list[dict[str, object]], dataframe.to_dict("records"))
 
     def _to_datetime(self, value: object) -> datetime:
         if isinstance(value, datetime):
