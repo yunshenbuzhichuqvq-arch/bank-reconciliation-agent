@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService
+from bank_reconciliation_agent.services.queue import QueueService
+from bank_reconciliation_agent.services.rag_log import RagLogService
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.transactions import TransactionService
 from scripts.generate_mock_excel import generate_mock_excel
@@ -132,6 +134,21 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert clear_f1004["amount"] == Decimal("295.00")
     assert bank_f1004["summary"] == "清算金额差异"
     assert clear_f1004["summary"] == "清算金额差异"
+
+    persisted_queue = QueueService()
+    assert persisted_queue.count_rows(task_id) == 3
+    queue_f1004 = persisted_queue.get_row(task_id, "F1004")
+    assert queue_f1004 is not None
+    assert queue_f1004["error_type"] == "AMOUNT_MISMATCH"
+    assert queue_f1004["status"] == "PENDING_AI"
+
+    persisted_rag_logs = RagLogService()
+    assert persisted_rag_logs.count_rows(task_id) == 3
+    rag_log_f1004 = persisted_rag_logs.get_latest_row(task_id, "AMOUNT_MISMATCH")
+    assert rag_log_f1004 is not None
+    assert rag_log_f1004["top_k"] == 2
+    assert "bank_amount=300.00" in rag_log_f1004["query_text"]
+    assert "unionpay_reconciliation_faq_001" in rag_log_f1004["sources"]
 
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(

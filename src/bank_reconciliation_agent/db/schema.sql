@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS t_clear_transaction (
 CREATE TABLE IF NOT EXISTS t_reconciliation_queue (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   task_id VARCHAR(64) NOT NULL,
+  flow_id VARCHAR(64) NOT NULL,
   bank_transaction_id BIGINT NULL,
   clear_transaction_id BIGINT NULL,
   error_type VARCHAR(32) NOT NULL,
@@ -52,8 +53,9 @@ CREATE TABLE IF NOT EXISTS t_reconciliation_queue (
   retry_count INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_task_status (task_id, status),
-  INDEX idx_error_type (error_type)
+  INDEX idx_queue_task_flow (task_id, flow_id),
+  INDEX idx_queue_task_status (task_id, status),
+  INDEX idx_queue_error_type (error_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS t_error_ledger (
@@ -88,5 +90,5 @@ CREATE TABLE IF NOT EXISTS t_rag_retrieval_log (
   best_score DECIMAL(8,4),
   sources JSON,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_task_queue (task_id, queue_id)
+  INDEX idx_rag_task_queue (task_id, queue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

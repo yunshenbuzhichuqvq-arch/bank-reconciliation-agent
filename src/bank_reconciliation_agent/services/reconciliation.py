@@ -20,6 +20,8 @@ from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationUploadResponse,
 )
 from bank_reconciliation_agent.services.ledger import ledger_service
+from bank_reconciliation_agent.services.queue import queue_service
+from bank_reconciliation_agent.services.rag_log import rag_log_service
 from bank_reconciliation_agent.services.task import task_service
 from bank_reconciliation_agent.services.transactions import transaction_service
 
@@ -150,6 +152,7 @@ class ReconciliationService:
             pending_human_rows=match_summary.pending_human_rows,
         )
         transaction_service.replace_task_rows(task_id, bank_df, clear_df)
+        self._write_queue_entries(task_id, match_results)
         self._write_ledger_entries(task_id, match_results)
         return ReconciliationUploadResponse(
             task_id=task_id,
@@ -339,6 +342,9 @@ class ReconciliationService:
         result: ReconciliationMatchResult,
     ) -> list[RagSearchItem]:
         query = self._build_rag_query(result)
+        return self._retrieve_rag_items_by_query(query)
+
+    def _retrieve_rag_items_by_query(self, query: str) -> list[RagSearchItem]:
         response = rule_retriever.search(RagSearchRequest(query=query, top_k=2))
         return response.items
 
@@ -396,11 +402,21 @@ class ReconciliationService:
         results: list[ReconciliationMatchResult],
     ) -> None:
         rows: list[LedgerRow] = []
+        rag_log_rows: list[dict[str, object]] = []
         for result in results:
             if result.status == "AUTO_FIXED":
                 continue
 
-            rag_items = self._retrieve_rag_items(result)
+            rag_query = self._build_rag_query(result)
+            rag_items = self._retrieve_rag_items_by_query(rag_query)
+            rag_log_rows.append(
+                rag_log_service.build_row(
+                    task_id=task_id,
+                    query_text=rag_query,
+                    top_k=2,
+                    items=rag_items,
+                )
+            )
             audit_decision = audit_agent.decide(
                 flow_id=result.flow_id,
                 error_type=result.error_type or "",
@@ -428,6 +444,31 @@ class ReconciliationService:
             )
 
         ledger_service.replace_task_rows(task_id, rows)
+        rag_log_service.replace_task_rows(task_id, rag_log_rows)
+
+    def _write_queue_entries(
+        self,
+        task_id: str,
+        results: list[ReconciliationMatchResult],
+    ) -> None:
+        queue_rows: list[dict[str, object]] = []
+        for result in results:
+            if result.status == "AUTO_FIXED":
+                continue
+            queue_rows.append(
+                {
+                    "task_id": task_id,
+                    "flow_id": result.flow_id,
+                    "bank_transaction_id": None,
+                    "clear_transaction_id": None,
+                    "error_type": result.error_type or "",
+                    "status": result.status,
+                    "risk_level": "MEDIUM",
+                    "retry_count": 0,
+                }
+            )
+
+        queue_service.replace_task_rows(task_id, queue_rows)
 
     def _ledger_discrepancy_amount(self, result: ReconciliationMatchResult) -> Decimal:
         if result.amount_diff is not None:
