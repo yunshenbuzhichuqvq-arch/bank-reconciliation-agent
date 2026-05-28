@@ -60,10 +60,14 @@ CREATE TABLE IF NOT EXISTS t_error_ledger (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   queue_id BIGINT NOT NULL,
   task_id VARCHAR(64) NOT NULL,
+  flow_id VARCHAR(64) NOT NULL,
   error_type VARCHAR(32) NOT NULL,
+  bank_amount DECIMAL(18,2) DEFAULT NULL,
+  clear_amount DECIMAL(18,2) DEFAULT NULL,
   discrepancy_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   ai_cleaned_json JSON,
   ai_audit_opinion TEXT,
+  ai_confidence DECIMAL(5,4) DEFAULT NULL,
   rag_source VARCHAR(512),
   handle_status VARCHAR(32) NOT NULL DEFAULT 'UNTREATED',
   handler_username VARCHAR(64),
@@ -71,6 +75,7 @@ CREATE TABLE IF NOT EXISTS t_error_ledger (
   handled_at DATETIME,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_task_error (task_id, error_type),
+  INDEX idx_task_flow (task_id, flow_id),
   INDEX idx_handle_status (handle_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -85,4 +90,3 @@ CREATE TABLE IF NOT EXISTS t_rag_retrieval_log (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_task_queue (task_id, queue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-

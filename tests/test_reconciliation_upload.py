@@ -6,6 +6,8 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from bank_reconciliation_agent.main import app
+from bank_reconciliation_agent.schemas.ledger import LedgerQuery
+from bank_reconciliation_agent.services.ledger import LedgerService
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from scripts.generate_mock_excel import generate_mock_excel
 
@@ -106,6 +108,10 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     running_status_response = client.get(f"/api/v1/reconcile/{task_id}/status")
     assert running_status_response.status_code == 200
     assert running_status_response.json()["data"]["status"] == "AI_RUNNING"
+
+    persisted_ledger_page = LedgerService().list(LedgerQuery(task_id=task_id))
+    assert persisted_ledger_page.total == 3
+    assert {row.flow_id for row in persisted_ledger_page.items} == {"F1004", "F1005", "F1006"}
 
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
