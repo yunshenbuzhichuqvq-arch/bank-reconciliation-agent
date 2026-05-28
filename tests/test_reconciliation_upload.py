@@ -9,6 +9,7 @@ from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
+from bank_reconciliation_agent.services.transactions import TransactionService
 from scripts.generate_mock_excel import generate_mock_excel
 
 
@@ -119,6 +120,18 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     persisted_ledger_page = LedgerService().list(LedgerQuery(task_id=task_id))
     assert persisted_ledger_page.total == 3
     assert {row.flow_id for row in persisted_ledger_page.items} == {"F1004", "F1005", "F1006"}
+
+    persisted_transactions = TransactionService()
+    assert persisted_transactions.count_bank_rows(task_id) == 10
+    assert persisted_transactions.count_clear_rows(task_id) == 10
+    bank_f1004 = persisted_transactions.get_bank_row(task_id, "F1004")
+    clear_f1004 = persisted_transactions.get_clear_row(task_id, "F1004")
+    assert bank_f1004 is not None
+    assert clear_f1004 is not None
+    assert bank_f1004["amount"] == Decimal("300.00")
+    assert clear_f1004["amount"] == Decimal("295.00")
+    assert bank_f1004["summary"] == "清算金额差异"
+    assert clear_f1004["summary"] == "清算金额差异"
 
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(

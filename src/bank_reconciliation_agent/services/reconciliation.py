@@ -21,6 +21,7 @@ from bank_reconciliation_agent.schemas.reconciliation import (
 )
 from bank_reconciliation_agent.services.ledger import ledger_service
 from bank_reconciliation_agent.services.task import task_service
+from bank_reconciliation_agent.services.transactions import transaction_service
 
 
 # MVP-0 上传契约：这些字段与生成的模拟对账单保持一致。
@@ -148,6 +149,7 @@ class ReconciliationService:
             pending_ai_rows=match_summary.pending_ai_rows,
             pending_human_rows=match_summary.pending_human_rows,
         )
+        transaction_service.replace_task_rows(task_id, bank_df, clear_df)
         self._write_ledger_entries(task_id, match_results)
         return ReconciliationUploadResponse(
             task_id=task_id,
