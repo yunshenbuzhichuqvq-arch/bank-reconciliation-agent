@@ -109,6 +109,13 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert running_status_response.status_code == 200
     assert running_status_response.json()["data"]["status"] == "AI_RUNNING"
 
+    persisted_status = ReconciliationService().get_status(task_id)
+    assert persisted_status.status == "AI_RUNNING"
+    assert persisted_status.auto_fixed_rows == 8
+    assert persisted_status.pending_ai_rows == 1
+    assert persisted_status.pending_human_rows == 2
+    assert persisted_status.unresolved_rows == 3
+
     persisted_ledger_page = LedgerService().list(LedgerQuery(task_id=task_id))
     assert persisted_ledger_page.total == 3
     assert {row.flow_id for row in persisted_ledger_page.items} == {"F1004", "F1005", "F1006"}

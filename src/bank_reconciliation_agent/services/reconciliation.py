@@ -20,6 +20,7 @@ from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationUploadResponse,
 )
 from bank_reconciliation_agent.services.ledger import ledger_service
+from bank_reconciliation_agent.services.task import task_service
 
 
 # MVP-0 上传契约：这些字段与生成的模拟对账单保持一致。
@@ -139,6 +140,14 @@ class ReconciliationService:
             total_clear_rows=len(clear_df),
             results=match_results,
         )
+        task_service.replace_task(
+            task_id=task_id,
+            total_bank_rows=len(bank_df),
+            total_clear_rows=len(clear_df),
+            auto_fixed_rows=match_summary.auto_fixed_rows,
+            pending_ai_rows=match_summary.pending_ai_rows,
+            pending_human_rows=match_summary.pending_human_rows,
+        )
         self._write_ledger_entries(task_id, match_results)
         return ReconciliationUploadResponse(
             task_id=task_id,
@@ -254,22 +263,25 @@ class ReconciliationService:
 
     def start(self, task_id: str) -> ReconciliationStartResponse:
         """启动对账工作流，并记录当前任务进入 AI 处理状态。"""
-        task = self._get_task(task_id)
-        self._tasks[task_id] = task._replace(status="AI_RUNNING")
+        if not task_service.update_status(task_id, "AI_RUNNING"):
+            raise HTTPException(status_code=404, detail="reconciliation task not found")
+        if task_id in self._tasks:
+            self._tasks[task_id] = self._tasks[task_id]._replace(status="AI_RUNNING")
         return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
 
     def get_status(self, task_id: str) -> ReconciliationStatusResponse:
         """查询任务状态和基础对账统计。"""
-        task = self._get_task(task_id)
-        summary = self._summarize_match_results(task.results)
+        task = task_service.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="reconciliation task not found")
         return ReconciliationStatusResponse(
             task_id=task_id,
             status=task.status,
-            auto_fixed_rows=summary.auto_fixed_rows,
-            pending_ai_rows=summary.pending_ai_rows,
-            ai_processed_rows=summary.pending_ai_rows + summary.pending_human_rows,
-            pending_human_rows=summary.pending_human_rows,
-            unresolved_rows=summary.pending_ai_rows + summary.pending_human_rows,
+            auto_fixed_rows=task.auto_fixed_rows,
+            pending_ai_rows=task.pending_ai_rows,
+            ai_processed_rows=task.unresolved_rows,
+            pending_human_rows=task.pending_human_rows,
+            unresolved_rows=task.unresolved_rows,
         )
 
     def get_exceptions(self, task_id: str) -> ReconciliationExceptionListResponse:
