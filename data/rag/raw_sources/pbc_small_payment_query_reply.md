@@ -1,3 +1,10 @@
+---
+source_name: 小额支付系统业务处理手续公开材料摘录
+source_url: https://www.pbc.gov.cn/eportal/fileDir/history_file/files/att_19041_2.pdf
+source_type: pdf_excerpt
+business_tags: single_side_missing, query_reply, error_handling
+---
+
 # 小额支付系统业务处理手续公开材料摘录
 
 ## 单笔业务查询查复

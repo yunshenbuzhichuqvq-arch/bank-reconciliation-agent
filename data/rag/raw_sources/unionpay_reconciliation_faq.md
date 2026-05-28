@@ -1,3 +1,10 @@
+---
+source_name: 银联一窗办清算对账公开 FAQ 摘录
+source_url: https://pcs.unionpay.com/ycb/pcweb/NEWbzzx/cjwt/ywcp/jcyw/dj/FKYW/art/2024/art_bc798a9bee334e5d8a19286b66bbfe61.html
+source_type: html_excerpt
+business_tags: amount_mismatch, single_side_missing, clearing_file_exception
+---
+
 # 银联一窗办清算对账公开 FAQ 摘录
 
 ## 清算文件流水与资金核对不平

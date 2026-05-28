@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.rag.retriever import RuleRetriever
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest
-from scripts.build_rule_chunks import build_rule_chunks
+from scripts.build_rule_chunks import build_rule_chunks, build_sources_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,49 @@ def test_build_rule_chunks_preserves_public_source_metadata(tmp_path: Path) -> N
 
     tags = {tag for chunk in chunks for tag in chunk["business_tags"]}
     assert {"amount_mismatch", "single_side_missing", "audit_trail"} <= tags
+
+
+def test_build_sources_manifest_discovers_markdown_files(tmp_path: Path) -> None:
+    raw_sources_dir = tmp_path / "raw_sources"
+    raw_sources_dir.mkdir()
+    source_file = raw_sources_dir / "fee_difference_rule.md"
+    source_file.write_text(
+        "\n".join(
+            [
+                "---",
+                "source_name: 手续费差异处理规则",
+                "source_url: https://example.com/fee-rule",
+                "source_type: markdown",
+                "business_tags: amount_mismatch, fee_difference, audit_trail",
+                "---",
+                "# 手续费差异处理规则",
+                "",
+                "## 手续费差异审计",
+                "手续费差异需要保留手续费、净额和渠道来源。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    manifest_path = tmp_path / "sources.json"
+    sources = build_sources_manifest(
+        raw_sources_dir=raw_sources_dir,
+        sources_path=manifest_path,
+        project_root=tmp_path,
+    )
+
+    assert manifest_path.exists()
+    assert sources == json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert sources == [
+        {
+            "source_id": "fee_difference_rule",
+            "source_name": "手续费差异处理规则",
+            "source_url": "https://example.com/fee-rule",
+            "source_file": "raw_sources/fee_difference_rule.md",
+            "source_type": "markdown",
+            "business_tags": ["amount_mismatch", "fee_difference", "audit_trail"],
+        }
+    ]
 
 
 def test_rule_retriever_searches_generated_chunks(tmp_path: Path) -> None:

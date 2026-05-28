@@ -1,3 +1,10 @@
+---
+source_name: 中国人民银行《电子支付指引（第一号）》公开条款摘录
+source_url: https://www.gov.cn/gongbao/content/2006/content_375800.htm
+source_type: html_excerpt
+business_tags: audit_trail, error_handling
+---
+
 # 中国人民银行《电子支付指引（第一号）》公开条款摘录
 
 ## 电子支付差错登记和审计留痕
