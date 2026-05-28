@@ -86,6 +86,18 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert exceptions_by_flow_id["F1006"]["bank_amount"] is None
     assert exceptions_by_flow_id["F1006"]["clear_amount"] == "45.00"
 
+    ledger_response = client.get(f"/api/v1/ledger?task_id={task_id}")
+    assert ledger_response.status_code == 200
+    ledger_body = ledger_response.json()["data"]
+    assert ledger_body["total"] == 3
+    ledger_by_flow_id = {item["flow_id"]: item for item in ledger_body["items"]}
+    assert ledger_by_flow_id["F1004"]["error_type"] == "AMOUNT_MISMATCH"
+    assert ledger_by_flow_id["F1004"]["discrepancy_amount"] == "5.00"
+    assert ledger_by_flow_id["F1004"]["handle_status"] == "PENDING_HUMAN"
+    assert "金额不一致" in ledger_by_flow_id["F1004"]["ai_audit_opinion"]
+    assert ledger_by_flow_id["F1004"]["ai_confidence"] == "0.7700"
+    assert "unionpay_reconciliation_faq_001" in ledger_by_flow_id["F1004"]["rag_source"]
+
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
     tmp_path: Path,

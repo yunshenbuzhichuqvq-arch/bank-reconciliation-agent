@@ -16,9 +16,12 @@ class LedgerQuery(BaseModel):
 class LedgerRow(BaseModel):
     id: int
     task_id: str
+    flow_id: str
     error_type: str
+    bank_amount: Decimal | None
+    clear_amount: Decimal | None
     discrepancy_amount: Decimal
     ai_audit_opinion: str | None
+    ai_confidence: Decimal | None
     rag_source: str | None
     handle_status: str
-

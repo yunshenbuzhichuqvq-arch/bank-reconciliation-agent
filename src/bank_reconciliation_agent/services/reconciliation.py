@@ -9,6 +9,7 @@ from fastapi import HTTPException, UploadFile
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision, audit_agent
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
+from bank_reconciliation_agent.schemas.ledger import LedgerRow
 from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationAuditDecision,
     ReconciliationExceptionItem,
@@ -18,6 +19,7 @@ from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationStatusResponse,
     ReconciliationUploadResponse,
 )
+from bank_reconciliation_agent.services.ledger import ledger_service
 
 
 # MVP-0 上传契约：这些字段与生成的模拟对账单保持一致。
@@ -137,6 +139,7 @@ class ReconciliationService:
             total_clear_rows=len(clear_df),
             results=match_results,
         )
+        self._write_ledger_entries(task_id, match_results)
         return ReconciliationUploadResponse(
             task_id=task_id,
             total_bank_rows=len(bank_df),
@@ -370,6 +373,54 @@ class ReconciliationService:
             evidence=[self._to_reconciliation_evidence(item) for item in decision.evidence],
             confidence=decision.confidence,
         )
+
+    def _write_ledger_entries(
+        self,
+        task_id: str,
+        results: list[ReconciliationMatchResult],
+    ) -> None:
+        rows: list[LedgerRow] = []
+        for result in results:
+            if result.status == "AUTO_FIXED":
+                continue
+
+            rag_items = self._retrieve_rag_items(result)
+            audit_decision = audit_agent.decide(
+                flow_id=result.flow_id,
+                error_type=result.error_type or "",
+                bank_amount=self._format_optional_decimal(result.bank_amount),
+                clear_amount=self._format_optional_decimal(result.clear_amount),
+                amount_diff=self._format_optional_decimal(result.amount_diff),
+                evidence=rag_items,
+            )
+            rows.append(
+                LedgerRow(
+                    id=0,
+                    task_id=task_id,
+                    flow_id=result.flow_id,
+                    error_type=result.error_type or "",
+                    bank_amount=result.bank_amount,
+                    clear_amount=result.clear_amount,
+                    discrepancy_amount=self._ledger_discrepancy_amount(result),
+                    ai_audit_opinion=audit_decision.reason,
+                    ai_confidence=Decimal(str(audit_decision.confidence)).quantize(
+                        Decimal("0.0001")
+                    ),
+                    rag_source=", ".join(item.chunk_id for item in rag_items) or None,
+                    handle_status=audit_decision.decision,
+                )
+            )
+
+        ledger_service.replace_task_rows(task_id, rows)
+
+    def _ledger_discrepancy_amount(self, result: ReconciliationMatchResult) -> Decimal:
+        if result.amount_diff is not None:
+            return abs(result.amount_diff)
+        if result.bank_amount is not None:
+            return result.bank_amount
+        if result.clear_amount is not None:
+            return result.clear_amount
+        return Decimal("0.00")
 
 
 reconciliation_service = ReconciliationService()
