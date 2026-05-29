@@ -1,18 +1,41 @@
-from fastapi import FastAPI
+from __future__ import annotations
+
+import uuid
+
+from fastapi import FastAPI, Request
+from sqlalchemy import text
 
 from bank_reconciliation_agent.api.v1.router import api_router
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.db.session import get_engine
 
 
 def create_app() -> FastAPI:
-    """创建 FastAPI 应用实例，并统一挂载当前版本的 API 路由。"""
     app = FastAPI(title=settings.app_name)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex[:12])
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
     @app.get("/health", tags=["health"])
     def health_check() -> dict[str, str]:
-        """返回服务健康状态，用于本地调试和部署后的存活检查。"""
-        return {"status": "ok", "service": settings.app_name}
+        db_status = "ok"
+        try:
+            engine = get_engine()
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception:
+            db_status = "unavailable"
+        return {
+            "status": "ok" if db_status == "ok" else "degraded",
+            "service": settings.app_name,
+            "db": db_status,
+        }
 
     return app
 

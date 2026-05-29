@@ -123,19 +123,19 @@ class RuleRetriever:
         self,
         chunks_path: Path = DEFAULT_CHUNKS_PATH,
         chroma_path: Path | None = None,
-        min_score: float = 0.0,
     ) -> None:
         self.store = ChromaRuleStore(chunks_path=chunks_path, chroma_path=chroma_path)
-        self.min_score = min_score
 
     def search(self, request: RagSearchRequest) -> RagSearchResponse:
         """Search traceable public-source rule chunks with ChromaDB Top-K retrieval."""
-        results = self.store.query(query_text=request.query, top_k=request.top_k)
+        top_k = max(1, min(request.top_k, self.store.count()))
+        results = self.store.query(query_text=request.query, top_k=top_k)
+        threshold = max(request.min_score, 0.0)
         return RagSearchResponse(
             items=[
                 self._to_search_item(score, metadata, content)
                 for score, metadata, content in results
-                if score > self.min_score
+                if score > threshold
             ]
         )
 

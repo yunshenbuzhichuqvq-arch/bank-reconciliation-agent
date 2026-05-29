@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     delete,
     func,
     insert,
@@ -49,7 +50,7 @@ error_ledger_table = Table(
     Column("handled_at", DateTime, nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     Index("idx_task_error", "task_id", "error_type"),
-    Index("idx_task_flow", "task_id", "flow_id"),
+    UniqueConstraint("task_id", "flow_id", name="uk_ledger_task_flow"),
     Index("idx_handle_status", "handle_status"),
 )
 

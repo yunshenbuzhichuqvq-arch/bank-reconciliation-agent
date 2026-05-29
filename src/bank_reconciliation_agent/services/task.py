@@ -19,6 +19,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
+from sqlalchemy.engine import Connection
+
 from bank_reconciliation_agent.db.session import get_engine
 
 
@@ -68,17 +70,19 @@ class TaskService:
         auto_fixed_rows: int,
         pending_ai_rows: int,
         pending_human_rows: int,
+        connection: Connection | None = None,
     ) -> None:
         """写入上传后的任务状态；同 task_id 重试时覆盖旧任务统计。"""
         self._ensure_initialized()
         unresolved_rows = pending_ai_rows + pending_human_rows
-        with self._engine.begin() as connection:
-            connection.execute(
+
+        def _execute(conn: Connection) -> None:
+            conn.execute(
                 delete(reconciliation_task_table).where(
                     reconciliation_task_table.c.task_id == task_id
                 )
             )
-            connection.execute(
+            conn.execute(
                 insert(reconciliation_task_table).values(
                     task_id=task_id,
                     task_name=f"{task_id} reconciliation",
@@ -91,6 +95,12 @@ class TaskService:
                     unresolved_rows=unresolved_rows,
                 )
             )
+
+        if connection is not None:
+            _execute(connection)
+        else:
+            with self._engine.begin() as conn:
+                _execute(conn)
 
     def update_status(self, task_id: str, status: str) -> bool:
         self._ensure_initialized()

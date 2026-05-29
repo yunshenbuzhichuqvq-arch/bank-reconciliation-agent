@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 class ReconciliationUploadResponse(BaseModel):
     task_id: str
+    status: str = "UPLOADED"
     total_bank_rows: int
     total_clear_rows: int
     auto_fixed_rows: int

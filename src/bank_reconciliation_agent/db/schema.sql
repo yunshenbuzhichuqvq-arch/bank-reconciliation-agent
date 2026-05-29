@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS t_error_ledger (
   handled_at DATETIME,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_task_error (task_id, error_type),
-  INDEX idx_task_flow (task_id, flow_id),
+  UNIQUE KEY uk_ledger_task_flow (task_id, flow_id),
   INDEX idx_handle_status (handle_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

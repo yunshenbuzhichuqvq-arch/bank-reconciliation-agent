@@ -23,7 +23,7 @@ from sqlalchemy import (
     insert,
     select,
 )
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from bank_reconciliation_agent.db.session import get_engine
 
@@ -125,31 +125,39 @@ class TransactionService:
         task_id: str,
         bank_df: pd.DataFrame,
         clear_df: pd.DataFrame,
+        connection: Connection | None = None,
     ) -> None:
         """覆盖写入同一对账任务的银行端和清算端标准流水。"""
         self._ensure_initialized()
-        with self._engine.begin() as connection:
-            connection.execute(
+
+        def _execute(conn: Connection) -> None:
+            conn.execute(
                 delete(bank_transaction_table).where(bank_transaction_table.c.task_id == task_id)
             )
-            connection.execute(
+            conn.execute(
                 delete(clear_transaction_table).where(
                     clear_transaction_table.c.task_id == task_id
                 )
             )
             if not bank_df.empty:
-                connection.execute(
+                conn.execute(
                     insert(bank_transaction_table),
                     [self._to_bank_insert_values(task_id, row) for row in self._records(bank_df)],
                 )
             if not clear_df.empty:
-                connection.execute(
+                conn.execute(
                     insert(clear_transaction_table),
                     [
                         self._to_clear_insert_values(task_id, row)
                         for row in self._records(clear_df)
                     ],
                 )
+
+        if connection is not None:
+            _execute(connection)
+        else:
+            with self._engine.begin() as conn:
+                _execute(conn)
 
     def count_bank_rows(self, task_id: str) -> int:
         return self._count_rows(bank_transaction_table, task_id)
