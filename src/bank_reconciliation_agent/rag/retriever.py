@@ -1,47 +1,98 @@
+from __future__ import annotations
+
+import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
 
+import chromadb
+from chromadb.api.models.Collection import Collection
+from chromadb.api.types import EmbeddingFunction
+
+from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest, RagSearchResponse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks.jsonl"
 TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+")
+EMBEDDING_DIMENSIONS = 128
 
 
-class RuleRetriever:
-    def __init__(self, chunks_path: Path = DEFAULT_CHUNKS_PATH) -> None:
+class HashEmbeddingFunction(EmbeddingFunction[list[str]]):
+    """Deterministic local embeddings for MVP-0, avoiding external model downloads."""
+
+    def __init__(self) -> None:
+        pass
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        return [_embed_text(text) for text in input]
+
+    @staticmethod
+    def name() -> str:
+        return "bank_reconciliation_hash_embedding"
+
+    @staticmethod
+    def build_from_config(config: dict[str, Any]) -> "HashEmbeddingFunction":
+        return HashEmbeddingFunction()
+
+    def get_config(self) -> dict[str, Any]:
+        return {"dimensions": EMBEDDING_DIMENSIONS}
+
+
+class ChromaRuleStore:
+    def __init__(
+        self,
+        chunks_path: Path = DEFAULT_CHUNKS_PATH,
+        chroma_path: Path | None = None,
+        collection_name: str = "mvp0_rule_chunks",
+    ) -> None:
         self.chunks_path = chunks_path
+        self.chroma_path = chroma_path or Path(settings.chroma_path)
+        self.collection_name = collection_name
+        self.embedding_function = HashEmbeddingFunction()
+        self._collection: Collection | None = None
 
-    def search(self, request: RagSearchRequest) -> RagSearchResponse:
-        """Search traceable public-source rule chunks with a minimal lexical scorer."""
-        query_tokens = _tokenize(request.query)
-        scored_items = []
+    def collection(self) -> Collection:
+        if self._collection is None:
+            self.chroma_path.mkdir(parents=True, exist_ok=True)
+            client = chromadb.PersistentClient(path=str(self.chroma_path))
+            self._collection = client.get_or_create_collection(
+                name=self.collection_name,
+                embedding_function=self.embedding_function,
+            )
+            self._sync_chunks()
+        return self._collection
 
-        for chunk in self._load_chunks():
-            score = _score_chunk(query_tokens, chunk)
-            if score > 0:
-                scored_items.append((score, chunk))
+    def count(self) -> int:
+        return self.collection().count()
 
-        scored_items.sort(key=lambda item: (-item[0], item[1]["chunk_id"]))
-        return RagSearchResponse(
-            items=[
-                RagSearchItem(
-                    chunk_id=chunk["chunk_id"],
-                    source=f"{chunk['source_file']}#{chunk['section_title']}",
-                    source_name=chunk["source_name"],
-                    source_url=chunk["source_url"],
-                    source_file=chunk["source_file"],
-                    section_title=chunk["section_title"],
-                    element_type=chunk["element_type"],
-                    business_tags=chunk["business_tags"],
-                    score=score,
-                    content=chunk["content"],
-                )
-                for score, chunk in scored_items[: request.top_k]
-            ]
+    def query(self, query_text: str, top_k: int) -> list[tuple[float, dict[str, Any], str]]:
+        result = self.collection().query(
+            query_texts=[query_text],
+            n_results=top_k,
+            include=["documents", "distances", "metadatas"],
+        )
+        documents = result["documents"][0]
+        distances = result["distances"][0]
+        metadatas = result["metadatas"][0]
+        return [
+            (_score_from_distance(distance), dict(metadata), document)
+            for distance, metadata, document in zip(distances, metadatas, documents, strict=True)
+        ]
+
+    def _sync_chunks(self) -> None:
+        chunks = self._load_chunks()
+        if not chunks:
+            return
+
+        collection = self.collection()
+        collection.upsert(
+            ids=[chunk["chunk_id"] for chunk in chunks],
+            documents=[chunk["content"] for chunk in chunks],
+            metadatas=[self._to_metadata(chunk) for chunk in chunks],
         )
 
     def _load_chunks(self) -> list[dict[str, Any]]:
@@ -53,19 +104,80 @@ class RuleRetriever:
             if line.strip()
         ]
 
+    def _to_metadata(self, chunk: dict[str, Any]) -> dict[str, str | int | float | bool | None]:
+        return {
+            "chunk_id": chunk["chunk_id"],
+            "source_name": chunk["source_name"],
+            "source_url": chunk["source_url"],
+            "source_file": chunk["source_file"],
+            "source_type": chunk["source_type"],
+            "section_title": chunk["section_title"],
+            "page_no": chunk["page_no"],
+            "element_type": chunk["element_type"],
+            "business_tags": json.dumps(chunk["business_tags"], ensure_ascii=False),
+        }
 
-def _score_chunk(query_tokens: set[str], chunk: dict[str, Any]) -> float:
-    searchable_text = " ".join(
-        [
-            chunk["section_title"],
-            chunk["content"],
-            " ".join(chunk["business_tags"]),
-        ]
-    )
-    chunk_tokens = _tokenize(searchable_text)
-    token_hits = len(query_tokens & chunk_tokens)
-    tag_hits = sum(1 for tag in chunk["business_tags"] if tag in query_tokens)
-    return float(token_hits + tag_hits * 2)
+
+class RuleRetriever:
+    def __init__(
+        self,
+        chunks_path: Path = DEFAULT_CHUNKS_PATH,
+        chroma_path: Path | None = None,
+        min_score: float = 0.0,
+    ) -> None:
+        self.store = ChromaRuleStore(chunks_path=chunks_path, chroma_path=chroma_path)
+        self.min_score = min_score
+
+    def search(self, request: RagSearchRequest) -> RagSearchResponse:
+        """Search traceable public-source rule chunks with ChromaDB Top-K retrieval."""
+        results = self.store.query(query_text=request.query, top_k=request.top_k)
+        return RagSearchResponse(
+            items=[
+                self._to_search_item(score, metadata, content)
+                for score, metadata, content in results
+                if score > self.min_score
+            ]
+        )
+
+    def collection_count(self) -> int:
+        return self.store.count()
+
+    def _to_search_item(
+        self,
+        score: float,
+        metadata: dict[str, Any],
+        content: str,
+    ) -> RagSearchItem:
+        return RagSearchItem(
+            chunk_id=str(metadata["chunk_id"]),
+            source=f"{metadata['source_file']}#{metadata['section_title']}",
+            source_name=str(metadata["source_name"]),
+            source_url=str(metadata["source_url"]),
+            source_file=str(metadata["source_file"]),
+            section_title=str(metadata["section_title"]),
+            element_type=str(metadata["element_type"]),
+            business_tags=json.loads(str(metadata["business_tags"])),
+            score=score,
+            content=content,
+        )
+
+
+def _embed_text(text: str) -> list[float]:
+    vector = [0.0] * EMBEDDING_DIMENSIONS
+    for token in _tokenize(text):
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        index = int.from_bytes(digest[:4], "big") % EMBEDDING_DIMENSIONS
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vector[index] += sign
+
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0:
+        return vector
+    return [value / norm for value in vector]
+
+
+def _score_from_distance(distance: float) -> float:
+    return 1.0 / (1.0 + distance)
 
 
 def _tokenize(text: str) -> set[str]:

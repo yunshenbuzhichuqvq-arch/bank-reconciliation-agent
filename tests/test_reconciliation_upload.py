@@ -105,7 +105,7 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert ledger_by_flow_id["F1004"]["discrepancy_amount"] == "5.00"
     assert ledger_by_flow_id["F1004"]["handle_status"] == "PENDING_HUMAN"
     assert "金额不一致" in ledger_by_flow_id["F1004"]["ai_audit_opinion"]
-    assert ledger_by_flow_id["F1004"]["ai_confidence"] == "0.7700"
+    assert ledger_by_flow_id["F1004"]["ai_confidence"] == "0.7000"
     assert "unionpay_reconciliation_faq_001" in ledger_by_flow_id["F1004"]["rag_source"]
     assert status_body["ai_processed_rows"] == exceptions_body["total"] == ledger_body["total"]
 

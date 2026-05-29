@@ -58,6 +58,8 @@ class AuditAgent:
 
     def _confidence_from_evidence(self, evidence: list[RagSearchItem]) -> float:
         best_score = max(item.score for item in evidence)
+        if best_score <= 1:
+            return round(min(0.85, 0.60 + best_score * 0.25), 2)
         return round(min(0.85, 0.60 + best_score / 100), 2)
 
 

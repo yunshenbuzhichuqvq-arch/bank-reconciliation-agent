@@ -86,7 +86,7 @@ def test_rule_retriever_searches_generated_chunks(tmp_path: Path) -> None:
         sources_path=ROOT / "data/rag/sources.json",
         output_path=chunks_path,
     )
-    retriever = RuleRetriever(chunks_path=chunks_path)
+    retriever = RuleRetriever(chunks_path=chunks_path, chroma_path=tmp_path / "chroma")
 
     response = retriever.search(RagSearchRequest(query="金额差异 对账不平", top_k=2))
 
@@ -97,6 +97,8 @@ def test_rule_retriever_searches_generated_chunks(tmp_path: Path) -> None:
     assert "amount_mismatch" in first_item.business_tags
     assert first_item.score > 0
     assert "固定结果模拟" not in first_item.content
+    assert retriever.collection_count() >= 3
+    assert (tmp_path / "chroma").exists()
 
 
 def test_rag_search_api_returns_traceable_rule_chunks() -> None:
