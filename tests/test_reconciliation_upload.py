@@ -12,7 +12,7 @@ from bank_reconciliation_agent.services.queue import QueueService
 from bank_reconciliation_agent.services.rag_log import RagLogService
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.transactions import TransactionService
-from scripts.generate_mock_excel import generate_mock_excel
+from scripts.generate_mock_excel import BANK_COLUMNS, CLEAR_COLUMNS, generate_mock_excel
 
 
 client = TestClient(app)
@@ -130,8 +130,16 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     clear_f1004 = persisted_transactions.get_clear_row(task_id, "F1004")
     assert bank_f1004 is not None
     assert clear_f1004 is not None
+    assert all(column in bank_f1004 for column in BANK_COLUMNS)
+    assert all(column in clear_f1004 for column in CLEAR_COLUMNS)
     assert bank_f1004["amount"] == Decimal("300.00")
     assert clear_f1004["amount"] == Decimal("295.00")
+    assert bank_f1004["bank_serial_no"] == "B202605210004"
+    assert bank_f1004["credit_amount"] == Decimal("300.00")
+    assert bank_f1004["remark"] == "金额差错样例"
+    assert clear_f1004["clearing_serial_no"] == "C202605210004"
+    assert clear_f1004["transaction_amount"] == Decimal("295.00")
+    assert clear_f1004["remark"] == "金额差错样例"
     assert bank_f1004["summary"] == "清算金额差异"
     assert clear_f1004["summary"] == "清算金额差异"
 
@@ -180,6 +188,68 @@ def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
     assert response.status_code == 400
     assert "bank_file missing required columns" in response.json()["detail"]
     assert "bank_serial_no" in response.json()["detail"]
+
+
+def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
+    tmp_path: Path,
+) -> None:
+    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_df = pd.read_excel(bank_path)
+    bank_df.loc[1, "flow_id"] = bank_df.loc[0, "flow_id"]
+    invalid_bank = BytesIO()
+    bank_df.to_excel(invalid_bank, index=False)
+    invalid_bank.seek(0)
+
+    with clear_path.open("rb") as clear_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    invalid_bank,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    clear_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "bank_file contains duplicate flow_id: F1001"
+
+
+def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
+    tmp_path: Path,
+) -> None:
+    bank_path, clear_path = generate_mock_excel(tmp_path)
+    clear_df = pd.read_excel(clear_path)
+    clear_df.loc[1, "flow_id"] = clear_df.loc[0, "flow_id"]
+    invalid_clear = BytesIO()
+    clear_df.to_excel(invalid_clear, index=False)
+    invalid_clear.seek(0)
+
+    with bank_path.open("rb") as bank_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    bank_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    invalid_clear,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "clear_file contains duplicate flow_id: F1001"
 
 
 def test_reconciliation_service_builds_structured_match_results(tmp_path: Path) -> None:

@@ -132,6 +132,8 @@ class ReconciliationService:
         clear_df = await self._read_excel(clear_file, "clear_file")
         self._validate_columns(bank_df, BANK_REQUIRED_COLUMNS, "bank_file")
         self._validate_columns(clear_df, CLEAR_REQUIRED_COLUMNS, "clear_file")
+        self._validate_unique_flow_ids(bank_df, "bank_file")
+        self._validate_unique_flow_ids(clear_df, "clear_file")
         match_results = self._build_match_results(bank_df, clear_df)
         match_summary = self._summarize_match_results(match_results)
 
@@ -188,6 +190,17 @@ class ReconciliationService:
                 status_code=400,
                 detail=f"{file_label} missing required columns: {', '.join(missing_columns)}",
             )
+
+    def _validate_unique_flow_ids(self, dataframe: pd.DataFrame, file_label: str) -> None:
+        """同一上传文件内 flow_id 必须唯一，避免同一任务内重复流水。"""
+        duplicated_flow_ids = dataframe.loc[dataframe["flow_id"].duplicated(), "flow_id"]
+        if duplicated_flow_ids.empty:
+            return
+        duplicate = str(duplicated_flow_ids.iloc[0])
+        raise HTTPException(
+            status_code=400,
+            detail=f"{file_label} contains duplicate flow_id: {duplicate}",
+        )
 
     def _match_transactions(
         self,
