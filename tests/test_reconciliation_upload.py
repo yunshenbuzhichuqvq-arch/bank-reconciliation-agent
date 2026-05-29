@@ -76,9 +76,14 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert exceptions_by_flow_id["F1004"]["bank_amount"] == "300.00"
     assert exceptions_by_flow_id["F1004"]["clear_amount"] == "295.00"
     assert exceptions_by_flow_id["F1004"]["amount_diff"] == "5.00"
+    assert exceptions_by_flow_id["F1004"]["rag_evidence"]
+    assert exceptions_by_flow_id["F1004"]["rag_evidence"][0]["chunk_id"]
+    assert exceptions_by_flow_id["F1004"]["rag_evidence"][0]["source_url"].startswith("https://")
     assert exceptions_by_flow_id["F1004"]["audit_decision"]["decision"] == "PENDING_HUMAN"
     assert exceptions_by_flow_id["F1004"]["audit_decision"]["risk_level"] == "MEDIUM"
     assert "金额不一致" in exceptions_by_flow_id["F1004"]["audit_decision"]["reason"]
+    assert exceptions_by_flow_id["F1004"]["audit_decision"]["evidence"]
+    assert exceptions_by_flow_id["F1004"]["audit_decision"]["evidence"][0]["chunk_id"]
     assert exceptions_by_flow_id["F1005"]["status"] == "PENDING_HUMAN"
     assert exceptions_by_flow_id["F1005"]["error_type"] == "SINGLE_SIDE_MISSING"
     assert exceptions_by_flow_id["F1005"]["bank_amount"] == "120.00"
@@ -253,6 +258,67 @@ def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "clear_file contains duplicate flow_id: F1001"
+
+
+def test_upload_reconciliation_files_uses_stable_task_id_for_same_content(
+    tmp_path: Path,
+) -> None:
+    bank_path, clear_path = generate_mock_excel(tmp_path)
+
+    def upload_once() -> str:
+        with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
+            response = client.post(
+                "/api/v1/reconcile/upload",
+                headers=DEMO_HEADERS,
+                files={
+                    "bank_file": (
+                        "bank_transactions.xlsx",
+                        bank_file,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                    "clear_file": (
+                        "clear_transactions.xlsx",
+                        clear_file,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                },
+            )
+        assert response.status_code == 200
+        return response.json()["data"]["task_id"]
+
+    assert upload_once() == upload_once()
+
+
+def test_upload_reconciliation_files_rejects_empty_bank_flow_id(
+    tmp_path: Path,
+) -> None:
+    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_df = pd.read_excel(bank_path)
+    bank_df.loc[0, "flow_id"] = None
+    invalid_bank = BytesIO()
+    bank_df.to_excel(invalid_bank, index=False)
+    invalid_bank.seek(0)
+
+    with clear_path.open("rb") as clear_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    invalid_bank,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    clear_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "bank_file contains empty flow_id values"
 
 
 def test_reconciliation_service_builds_structured_match_results(tmp_path: Path) -> None:

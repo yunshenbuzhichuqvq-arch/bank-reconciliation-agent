@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 from typing import NamedTuple
@@ -120,7 +119,7 @@ class ReconciliationService:
 
     def _generate_task_id(self, content: bytes) -> str:
         digest = hashlib.sha256(content).hexdigest()[:12]
-        return f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{digest}"
+        return f"TASK_{digest}"
 
     def _validate_file_size(self, upload_file: UploadFile, content_length: int) -> None:
         if content_length > settings.max_upload_bytes:
@@ -173,9 +172,16 @@ class ReconciliationService:
                     ),
                 )
 
+        if dataframe["flow_id"].isna().any():
+            raise HTTPException(
+                status_code=400,
+                detail=f"{file_label} contains empty flow_id values",
+            )
+
         flow_id_series = dataframe["flow_id"].astype(str)
         empty_flow_ids = flow_id_series.str.strip().eq("")
-        if empty_flow_ids.any():
+        invalid_flow_ids = flow_id_series.str.strip().str.lower().isin({"nan", "none", "null"})
+        if empty_flow_ids.any() or invalid_flow_ids.any():
             raise HTTPException(
                 status_code=400,
                 detail=f"{file_label} contains empty flow_id values",
@@ -268,6 +274,7 @@ class ReconciliationService:
         for row in page.items:
             amount_diff = self._format_optional_decimal(row.discrepancy_amount)
             match_status = "PENDING_AI" if row.error_type == "AMOUNT_MISMATCH" else "PENDING_HUMAN"
+            evidence = self._evidence_from_rag_source(row.rag_source)
             items.append(ReconciliationExceptionItem(
                 flow_id=row.flow_id,
                 status=match_status,  # match status derived from error_type
@@ -275,13 +282,13 @@ class ReconciliationService:
                 bank_amount=self._format_optional_decimal(row.bank_amount),
                 clear_amount=self._format_optional_decimal(row.clear_amount),
                 amount_diff=amount_diff,
-                rag_evidence=[],
+                rag_evidence=evidence,
                 audit_decision=ReconciliationAuditDecision(
                     flow_id=row.flow_id,
                     decision=row.handle_status,
                     risk_level="MEDIUM",
                     reason=row.ai_audit_opinion or "",
-                    evidence=[],
+                    evidence=evidence,
                     confidence=float(row.ai_confidence) if row.ai_confidence else 0.0,
                 ),
             ))
@@ -298,6 +305,15 @@ class ReconciliationService:
     def _retrieve_rag_items_by_query(self, query: str) -> list[RagSearchItem]:
         response = rule_retriever.search(RagSearchRequest(query=query, top_k=2, min_score=0.0))
         return response.items
+
+    def _evidence_from_rag_source(self, rag_source: str | None) -> list[ReconciliationRagEvidence]:
+        if not rag_source:
+            return []
+        chunk_ids = [chunk_id.strip() for chunk_id in rag_source.split(",") if chunk_id.strip()]
+        return [
+            self._to_reconciliation_evidence(item)
+            for item in rule_retriever.get_by_chunk_ids(chunk_ids)
+        ]
 
     def _build_rag_query(self, result: ReconciliationMatchResult) -> str:
         if result.error_type == "AMOUNT_MISMATCH":

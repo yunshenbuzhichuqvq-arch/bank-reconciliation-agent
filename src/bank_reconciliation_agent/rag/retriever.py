@@ -83,6 +83,20 @@ class ChromaRuleStore:
             for distance, metadata, document in zip(distances, metadatas, documents, strict=True)
         ]
 
+    def get_by_ids(self, chunk_ids: list[str]) -> list[tuple[float, dict[str, Any], str]]:
+        if not chunk_ids:
+            return []
+        result = self.collection().get(
+            ids=chunk_ids,
+            include=["documents", "metadatas"],
+        )
+        documents = result["documents"] or []
+        metadatas = result["metadatas"] or []
+        return [
+            (0.0, dict(metadata), document)
+            for metadata, document in zip(metadatas, documents, strict=True)
+        ]
+
     def _sync_chunks(self) -> None:
         chunks = self._load_chunks()
         if not chunks:
@@ -141,6 +155,12 @@ class RuleRetriever:
 
     def collection_count(self) -> int:
         return self.store.count()
+
+    def get_by_chunk_ids(self, chunk_ids: list[str]) -> list[RagSearchItem]:
+        return [
+            self._to_search_item(score, metadata, content)
+            for score, metadata, content in self.store.get_by_ids(chunk_ids)
+        ]
 
     def _to_search_item(
         self,
