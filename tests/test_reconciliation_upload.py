@@ -16,6 +16,7 @@ from scripts.generate_mock_excel import BANK_COLUMNS, CLEAR_COLUMNS, generate_mo
 
 
 client = TestClient(app)
+DEMO_HEADERS = {"X-User-ID": "demo_user"}
 
 
 def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) -> None:
@@ -24,6 +25,7 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
         response = client.post(
             "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
             files={
                 "bank_file": (
                     "bank_transactions.xlsx",
@@ -48,7 +50,7 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert body["data"]["pending_human_rows"] == 2
 
     task_id = body["data"]["task_id"]
-    status_response = client.get(f"/api/v1/reconcile/{task_id}/status")
+    status_response = client.get(f"/api/v1/reconcile/{task_id}/status", headers=DEMO_HEADERS)
     assert status_response.status_code == 200
     status_body = status_response.json()["data"]
     assert status_body["task_id"] == task_id
@@ -58,7 +60,10 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert status_body["pending_human_rows"] == 2
     assert status_body["unresolved_rows"] == 3
 
-    exceptions_response = client.get(f"/api/v1/reconcile/{task_id}/exceptions")
+    exceptions_response = client.get(
+        f"/api/v1/reconcile/{task_id}/exceptions",
+        headers=DEMO_HEADERS,
+    )
     assert exceptions_response.status_code == 200
     exceptions_body = exceptions_response.json()["data"]
     assert exceptions_body["task_id"] == task_id
@@ -91,7 +96,7 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert exceptions_by_flow_id["F1006"]["bank_amount"] is None
     assert exceptions_by_flow_id["F1006"]["clear_amount"] == "45.00"
 
-    ledger_response = client.get(f"/api/v1/ledger?task_id={task_id}")
+    ledger_response = client.get(f"/api/v1/ledger?task_id={task_id}", headers=DEMO_HEADERS)
     assert ledger_response.status_code == 200
     ledger_body = ledger_response.json()["data"]
     assert ledger_body["total"] == 3
@@ -104,11 +109,14 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert "unionpay_reconciliation_faq_001" in ledger_by_flow_id["F1004"]["rag_source"]
     assert status_body["ai_processed_rows"] == exceptions_body["total"] == ledger_body["total"]
 
-    start_response = client.post(f"/api/v1/reconcile/{task_id}/start")
+    start_response = client.post(f"/api/v1/reconcile/{task_id}/start", headers=DEMO_HEADERS)
     assert start_response.status_code == 200
     assert start_response.json()["data"]["status"] == "AI_RUNNING"
 
-    running_status_response = client.get(f"/api/v1/reconcile/{task_id}/status")
+    running_status_response = client.get(
+        f"/api/v1/reconcile/{task_id}/status",
+        headers=DEMO_HEADERS,
+    )
     assert running_status_response.status_code == 200
     assert running_status_response.json()["data"]["status"] == "AI_RUNNING"
 
@@ -171,6 +179,7 @@ def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
     with clear_path.open("rb") as clear_file:
         response = client.post(
             "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
             files={
                 "bank_file": (
                     "bank_transactions.xlsx",
@@ -203,6 +212,7 @@ def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
     with clear_path.open("rb") as clear_file:
         response = client.post(
             "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
             files={
                 "bank_file": (
                     "bank_transactions.xlsx",
@@ -234,6 +244,7 @@ def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
     with bank_path.open("rb") as bank_file:
         response = client.post(
             "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
             files={
                 "bank_file": (
                     "bank_transactions.xlsx",

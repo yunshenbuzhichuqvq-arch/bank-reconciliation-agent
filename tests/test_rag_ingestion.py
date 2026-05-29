@@ -104,6 +104,7 @@ def test_rag_search_api_returns_traceable_rule_chunks() -> None:
 
     response = client.post(
         "/api/v1/rag/search",
+        headers={"X-User-ID": "demo_user"},
         json={"query": "单边缺失 查询查复", "top_k": 3},
     )
 
