@@ -18,6 +18,7 @@ async def list_error_ledger(
     page: int = 1,
     page_size: int = 20,
 ) -> ApiResponse[Page[LedgerRow]]:
+    """按条件分页查询差错台账；MVP-0 阶段先保留接口契约。"""
     query = LedgerQuery(
         task_id=task_id,
         error_type=error_type,
@@ -28,4 +29,3 @@ async def list_error_ledger(
         page_size=page_size,
     )
     return ApiResponse(data=ledger_service.list(query))
-

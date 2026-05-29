@@ -746,7 +746,7 @@ CREATE TABLE t_reconciliation_task (
 
 ### 6.3 银行端流水表 `t_bank_transaction`
 
-阶段：MVP-0。MVP 阶段新增 `user_id`，按 `task_id` 做 HASH 分区。
+阶段：MVP-0。字段与 `mock_data/bank_transactions.xlsx` 保持一致，同时保留 `amount`、`trade_time`、`account_no_masked`、`customer_name_masked` 等标准化字段，便于后续基础匹配、差错台账和 Agent 上下文复用。MVP 阶段按 `task_id` 做 HASH 分区。
 
 ```sql
 CREATE TABLE t_bank_transaction (
@@ -754,18 +754,42 @@ CREATE TABLE t_bank_transaction (
   user_id VARCHAR(64) NOT NULL,
   task_id VARCHAR(64) NOT NULL,
   flow_id VARCHAR(64),
+  bank_serial_no VARCHAR(64),
+  accounting_date DATE,
+  accounting_time TIME,
+  value_date DATE,
+  self_account_no_masked VARCHAR(64),
+  self_account_name_masked VARCHAR(128),
+  self_bank_name VARCHAR(128),
   account_no_masked VARCHAR(64),
-  customer_name_masked VARCHAR(64),
+  customer_name_masked VARCHAR(128),
+  counterparty_account_no_masked VARCHAR(64),
+  counterparty_name_masked VARCHAR(128),
+  counterparty_bank_name VARCHAR(128),
   currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+  transaction_type VARCHAR(32),
+  transaction_direction VARCHAR(16),
   amount DECIMAL(18,2) NOT NULL,
+  debit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  credit_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   fee_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  balance_after DECIMAL(18,2),
   trade_time DATETIME NOT NULL,
+  channel VARCHAR(32),
   summary VARCHAR(255),
+  purpose VARCHAR(128),
+  posting_status VARCHAR(32),
+  branch_no VARCHAR(32),
+  teller_id VARCHAR(64),
+  transaction_code VARCHAR(32),
+  source_system VARCHAR(64),
+  remark VARCHAR(255),
   match_status VARCHAR(32) DEFAULT NULL,
   matched_clear_id BIGINT DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_user_task_flow (user_id, task_id, flow_id),
   INDEX idx_user_task_time (user_id, task_id, trade_time),
+  INDEX idx_user_serial (user_id, bank_serial_no),
   INDEX idx_match_status (task_id, match_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 PARTITION BY HASH (CRC32(task_id)) PARTITIONS 8;
@@ -773,7 +797,7 @@ PARTITION BY HASH (CRC32(task_id)) PARTITIONS 8;
 
 ### 6.4 清算端流水表 `t_clear_transaction`
 
-阶段：MVP-0。MVP 阶段新增 `user_id`、按 `task_id` 做 HASH 分区。
+阶段：MVP-0。字段与 `mock_data/clear_transactions.xlsx` 保持一致，同时保留标准化 `amount`、`trade_time`、`summary` 字段。MVP 阶段按 `task_id` 做 HASH 分区。
 
 ```sql
 CREATE TABLE t_clear_transaction (
@@ -781,17 +805,40 @@ CREATE TABLE t_clear_transaction (
   user_id VARCHAR(64) NOT NULL,
   task_id VARCHAR(64) NOT NULL,
   flow_id VARCHAR(64),
+  clearing_serial_no VARCHAR(64),
+  merchant_id VARCHAR(64),
+  merchant_name VARCHAR(128),
+  store_name VARCHAR(128),
+  terminal_id VARCHAR(64),
   channel VARCHAR(32),
+  transaction_type VARCHAR(32),
+  trade_date DATE,
+  settlement_date DATE,
   currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
   amount DECIMAL(18,2) NOT NULL,
+  transaction_amount DECIMAL(18,2) NOT NULL,
   fee_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  net_amount DECIMAL(18,2) NOT NULL,
   trade_time DATETIME NOT NULL,
+  status VARCHAR(32),
   summary VARCHAR(255),
+  batch_no VARCHAR(64),
+  voucher_no VARCHAR(64),
+  reference_no VARCHAR(64),
+  merchant_order_no VARCHAR(64),
+  payer_account_no_masked VARCHAR(64),
+  payer_name_masked VARCHAR(128),
+  payee_account_no_masked VARCHAR(64),
+  payee_name_masked VARCHAR(128),
+  order_description VARCHAR(255),
+  remark VARCHAR(255),
   match_status VARCHAR(32) DEFAULT NULL,
   matched_bank_id BIGINT DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_user_task_flow (user_id, task_id, flow_id),
   INDEX idx_user_task_time (user_id, task_id, trade_time),
+  INDEX idx_user_clearing_serial (user_id, clearing_serial_no),
+  INDEX idx_user_merchant_order (user_id, merchant_order_no),
   INDEX idx_match_status (task_id, match_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 PARTITION BY HASH (CRC32(task_id)) PARTITIONS 8;
