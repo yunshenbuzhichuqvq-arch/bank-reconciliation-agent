@@ -74,19 +74,12 @@ class ReconciliationService:
 
     async def upload(
         self,
-        source_a_file: UploadFile | None = None,
-        source_b_file: UploadFile | None = None,
+        source_a_file: UploadFile,
+        source_b_file: UploadFile,
         *,
-        bank_file: UploadFile | None = None,
-        clear_file: UploadFile | None = None,
-        user_id: str = "demo_user",
-        scenario_type: str = "BANK_ENTERPRISE",
+        user_id: str,
+        scenario_type: str,
     ) -> ReconciliationUploadResponse:
-        source_a_file = source_a_file or bank_file
-        source_b_file = source_b_file or clear_file
-        if source_a_file is None or source_b_file is None:
-            raise HTTPException(status_code=400, detail="source_a_file and source_b_file are required")
-
         source_a_content = await source_a_file.read()
         source_b_content = await source_b_file.read()
         self._validate_file_size(source_a_file, len(source_a_content))
@@ -124,8 +117,9 @@ class ReconciliationService:
 
         return ReconciliationUploadResponse(
             task_id=task_id,
-            total_bank_rows=len(source_a_df),
-            total_clear_rows=len(source_b_df),
+            scenario_type=scenario_type,
+            total_source_a_rows=len(source_a_df),
+            total_source_b_rows=len(source_b_df),
             auto_fixed_rows=match_summary.auto_fixed_rows,
             pending_ai_rows=match_summary.pending_ai_rows,
             pending_human_rows=match_summary.pending_human_rows,
@@ -266,20 +260,27 @@ class ReconciliationService:
             pending_human_rows=sum(r.status == "PENDING_HUMAN" for r in results),
         )
 
-    def start(self, task_id: str, user_id: str = "demo_user") -> ReconciliationStartResponse:
+    def start(self, task_id: str, user_id: str) -> ReconciliationStartResponse:
         if not task_service.update_status(task_id, "AI_RUNNING", user_id=user_id):
             raise HTTPException(status_code=404, detail="reconciliation task not found")
         return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
 
-    def get_status(self, task_id: str, user_id: str = "demo_user") -> ReconciliationStatusResponse:
+    def get_status(self, task_id: str, user_id: str) -> ReconciliationStatusResponse:
         task = task_service.get(task_id, user_id=user_id)
         if task is None:
             raise HTTPException(status_code=404, detail="reconciliation task not found")
         ai_processed_rows = ledger_service.list(
-            LedgerQuery(task_id=task_id, user_id=user_id, page=1, page_size=1)
+            LedgerQuery(
+                task_id=task_id,
+                user_id=user_id,
+                scenario_type=task.scenario_type,
+                page=1,
+                page_size=1,
+            )
         ).total
         return ReconciliationStatusResponse(
             task_id=task_id, status=task.status,
+            scenario_type=task.scenario_type,
             auto_fixed_rows=task.auto_fixed_rows,
             pending_ai_rows=task.pending_ai_rows,
             ai_processed_rows=ai_processed_rows,
@@ -288,14 +289,20 @@ class ReconciliationService:
         )
 
     def get_exceptions(
-        self, task_id: str, user_id: str = "demo_user",
+        self, task_id: str, user_id: str,
     ) -> ReconciliationExceptionListResponse:
         task = task_service.get(task_id, user_id=user_id)
         if task is None:
             raise HTTPException(status_code=404, detail="reconciliation task not found")
 
         page = ledger_service.list(
-            LedgerQuery(task_id=task_id, user_id=user_id, page=1, page_size=10_000)
+            LedgerQuery(
+                task_id=task_id,
+                user_id=user_id,
+                scenario_type=task.scenario_type,
+                page=1,
+                page_size=10_000,
+            )
         )
         items: list[ReconciliationExceptionItem] = []
         for row in page.items:
@@ -307,8 +314,8 @@ class ReconciliationService:
                 flow_id=row.flow_id,
                 status=match_status,  # match status derived from error_type
                 error_type=row.error_type,
-                bank_amount=source_amounts.get("source_a_amount"),
-                clear_amount=source_amounts.get("source_b_amount"),
+                source_a_amount=source_amounts.get("source_a_amount"),
+                source_b_amount=source_amounts.get("source_b_amount"),
                 amount_diff=amount_diff,
                 rag_evidence=evidence,
                 audit_decision=ReconciliationAuditDecision(
