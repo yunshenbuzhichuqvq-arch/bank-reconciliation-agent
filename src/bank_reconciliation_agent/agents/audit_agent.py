@@ -17,8 +17,8 @@ class AuditAgent:
         self,
         flow_id: str,
         error_type: str,
-        bank_amount: str | None,
-        clear_amount: str | None,
+        source_a_amount: str | None,
+        source_b_amount: str | None,
         amount_diff: str | None,
         evidence: list[RagSearchItem],
     ) -> AuditDecision:
@@ -36,12 +36,22 @@ class AuditAgent:
         confidence = self._confidence_from_evidence(evidence)
         if error_type == "AMOUNT_MISMATCH":
             reason = (
-                f"银行端与清算端金额不一致：银行端金额 {bank_amount}，清算端金额 {clear_amount}，"
+                f"企业账簿与银行流水金额不一致：企业账簿金额 {source_a_amount}，"
+                f"银行流水金额 {source_b_amount}，"
                 f"差异金额 {amount_diff}，已检索到金额差异处理依据，建议人工复核确认。"
             )
             risk_level = "MEDIUM"
-        elif error_type == "SINGLE_SIDE_MISSING":
-            reason = "该流水仅单侧存在，已检索到单边缺失和查询查复依据，建议人工复核或追溯。"
+        elif error_type == "BANK_UNARRIVED":
+            reason = (
+                f"银行未到账：企业账簿存在该笔记录，企业账簿金额 {source_a_amount}，"
+                "但银行流水未匹配到对应入账，建议追踪银行入账状态并人工复核。"
+            )
+            risk_level = "MEDIUM"
+        elif error_type == "BOOK_UNRECORDED":
+            reason = (
+                f"企业未入账：银行流水存在该笔记录，银行流水金额 {source_b_amount}，"
+                "但企业账簿未匹配到对应记账，建议补记或人工复核。"
+            )
             risk_level = "MEDIUM"
         else:
             reason = f"已检索到 {error_type} 的规则依据，建议人工复核。"

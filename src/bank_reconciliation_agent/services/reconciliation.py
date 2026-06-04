@@ -29,8 +29,8 @@ from bank_reconciliation_agent.services.task import task_service
 from bank_reconciliation_agent.services.transactions import transaction_service
 
 
-BANK_REQUIRED_COLUMNS = [
-    "flow_id", "bank_serial_no", "accounting_date", "accounting_time",
+SOURCE_A_REQUIRED_COLUMNS = [
+    "flow_id", "voucher_no", "accounting_period", "accounting_date", "accounting_time",
     "value_date", "self_account_no_masked", "self_account_name_masked",
     "self_bank_name", "currency", "transaction_type", "transaction_direction",
     "amount", "debit_amount", "credit_amount", "fee_amount", "balance_after",
@@ -41,14 +41,12 @@ BANK_REQUIRED_COLUMNS = [
     "source_system", "remark",
 ]
 
-CLEAR_REQUIRED_COLUMNS = [
-    "flow_id", "clearing_serial_no", "merchant_id", "merchant_name",
-    "store_name", "terminal_id", "channel", "transaction_type",
-    "trade_date", "trade_time", "settlement_date", "amount",
+SOURCE_B_REQUIRED_COLUMNS = [
+    "flow_id", "bank_serial_no", "trade_date", "trade_time", "settlement_date", "amount",
     "transaction_amount", "fee_amount", "net_amount", "currency",
-    "status", "summary", "batch_no", "voucher_no", "reference_no",
-    "merchant_order_no", "payer_account_no_masked", "payer_name_masked",
-    "payee_account_no_masked", "payee_name_masked", "order_description", "remark",
+    "status", "summary", "balance_after", "account_no_masked", "customer_name_masked",
+    "counterparty_account_no_masked", "counterparty_name_masked",
+    "counterparty_bank_name", "channel", "remark",
 ]
 
 NUMERIC_COLUMNS = [
@@ -67,51 +65,67 @@ class ReconciliationMatchResult(NamedTuple):
     flow_id: str
     status: str
     error_type: str | None
-    bank_amount: Decimal | None
-    clear_amount: Decimal | None
+    source_a_amount: Decimal | None
+    source_b_amount: Decimal | None
     amount_diff: Decimal | None
 
 
 class ReconciliationService:
 
     async def upload(
-        self, bank_file: UploadFile, clear_file: UploadFile,
+        self,
+        source_a_file: UploadFile | None = None,
+        source_b_file: UploadFile | None = None,
+        *,
+        bank_file: UploadFile | None = None,
+        clear_file: UploadFile | None = None,
+        user_id: str = "demo_user",
+        scenario_type: str = "BANK_ENTERPRISE",
     ) -> ReconciliationUploadResponse:
-        bank_content = await bank_file.read()
-        clear_content = await clear_file.read()
-        self._validate_file_size(bank_file, len(bank_content))
-        self._validate_file_size(clear_file, len(clear_content))
+        source_a_file = source_a_file or bank_file
+        source_b_file = source_b_file or clear_file
+        if source_a_file is None or source_b_file is None:
+            raise HTTPException(status_code=400, detail="source_a_file and source_b_file are required")
 
-        bank_df = self._read_dataframe(bank_content, "bank_file")
-        clear_df = self._read_dataframe(clear_content, "clear_file")
-        self._validate_columns(bank_df, BANK_REQUIRED_COLUMNS, "bank_file")
-        self._validate_columns(clear_df, CLEAR_REQUIRED_COLUMNS, "clear_file")
-        self._validate_data_types(bank_df, "bank_file")
-        self._validate_data_types(clear_df, "clear_file")
-        self._validate_unique_flow_ids(bank_df, "bank_file")
-        self._validate_unique_flow_ids(clear_df, "clear_file")
+        source_a_content = await source_a_file.read()
+        source_b_content = await source_b_file.read()
+        self._validate_file_size(source_a_file, len(source_a_content))
+        self._validate_file_size(source_b_file, len(source_b_content))
 
-        match_results = self._build_match_results(bank_df, clear_df)
+        source_a_df = self._read_dataframe(source_a_content, "source_a_file")
+        source_b_df = self._read_dataframe(source_b_content, "source_b_file")
+        self._validate_columns(source_a_df, SOURCE_A_REQUIRED_COLUMNS, "source_a_file")
+        self._validate_columns(source_b_df, SOURCE_B_REQUIRED_COLUMNS, "source_b_file")
+        self._validate_data_types(source_a_df, "source_a_file")
+        self._validate_data_types(source_b_df, "source_b_file")
+        self._validate_unique_flow_ids(source_a_df, "source_a_file")
+        self._validate_unique_flow_ids(source_b_df, "source_b_file")
+
+        match_results = self._build_match_results(source_a_df, source_b_df)
         match_summary = self._summarize_match_results(match_results)
-        task_id = self._generate_task_id(bank_content + clear_content)
+        task_id = self._generate_task_id(source_a_content + source_b_content)
 
         task_service.replace_task(
             task_id=task_id,
-            total_bank_rows=len(bank_df),
-            total_clear_rows=len(clear_df),
+            total_source_a_rows=len(source_a_df),
+            total_source_b_rows=len(source_b_df),
             auto_fixed_rows=match_summary.auto_fixed_rows,
             pending_ai_rows=match_summary.pending_ai_rows,
             pending_human_rows=match_summary.pending_human_rows,
+            user_id=user_id,
+            scenario_type=scenario_type,
         )
-        transaction_service.replace_task_rows(task_id, bank_df, clear_df)
+        transaction_service.replace_task_rows(
+            task_id, source_a_df, source_b_df, user_id=user_id, scenario_type=scenario_type,
+        )
 
-        self._write_queue_entries(task_id, match_results)
-        self._write_ledger_entries(task_id, match_results)
+        self._write_queue_entries(task_id, match_results, user_id, scenario_type)
+        self._write_ledger_entries(task_id, match_results, user_id, scenario_type)
 
         return ReconciliationUploadResponse(
             task_id=task_id,
-            total_bank_rows=len(bank_df),
-            total_clear_rows=len(clear_df),
+            total_bank_rows=len(source_a_df),
+            total_clear_rows=len(source_b_df),
             auto_fixed_rows=match_summary.auto_fixed_rows,
             pending_ai_rows=match_summary.pending_ai_rows,
             pending_human_rows=match_summary.pending_human_rows,
@@ -199,34 +213,40 @@ class ReconciliationService:
         )
 
     def _build_match_results(
-        self, bank_df: pd.DataFrame, clear_df: pd.DataFrame,
+        self, source_a_df: pd.DataFrame, source_b_df: pd.DataFrame,
     ) -> list[ReconciliationMatchResult]:
-        bank_by_flow_id = self._amounts_by_flow_id(bank_df)
-        clear_by_flow_id = self._amounts_by_flow_id(clear_df)
+        source_a_by_flow_id = self._amounts_by_flow_id(source_a_df)
+        source_b_by_flow_id = self._amounts_by_flow_id(source_b_df)
         results: list[ReconciliationMatchResult] = []
 
-        for flow_id in sorted(bank_by_flow_id.keys() | clear_by_flow_id.keys()):
-            bank_amount = bank_by_flow_id.get(flow_id)
-            clear_amount = clear_by_flow_id.get(flow_id)
+        for flow_id in sorted(source_a_by_flow_id.keys() | source_b_by_flow_id.keys()):
+            source_a_amount = source_a_by_flow_id.get(flow_id)
+            source_b_amount = source_b_by_flow_id.get(flow_id)
 
-            if bank_amount is None or clear_amount is None:
+            if source_b_amount is None:
                 results.append(ReconciliationMatchResult(
                     flow_id=flow_id, status="PENDING_HUMAN",
-                    error_type="SINGLE_SIDE_MISSING",
-                    bank_amount=bank_amount, clear_amount=clear_amount, amount_diff=None,
+                    error_type="BANK_UNARRIVED",
+                    source_a_amount=source_a_amount, source_b_amount=None, amount_diff=None,
                 ))
-            elif bank_amount == clear_amount:
+            elif source_a_amount is None:
+                results.append(ReconciliationMatchResult(
+                    flow_id=flow_id, status="PENDING_HUMAN",
+                    error_type="BOOK_UNRECORDED",
+                    source_a_amount=None, source_b_amount=source_b_amount, amount_diff=None,
+                ))
+            elif source_a_amount == source_b_amount:
                 results.append(ReconciliationMatchResult(
                     flow_id=flow_id, status="AUTO_FIXED", error_type=None,
-                    bank_amount=bank_amount, clear_amount=clear_amount,
+                    source_a_amount=source_a_amount, source_b_amount=source_b_amount,
                     amount_diff=Decimal("0.00"),
                 ))
             else:
                 results.append(ReconciliationMatchResult(
                     flow_id=flow_id, status="PENDING_AI",
                     error_type="AMOUNT_MISMATCH",
-                    bank_amount=bank_amount, clear_amount=clear_amount,
-                    amount_diff=bank_amount - clear_amount,
+                    source_a_amount=source_a_amount, source_b_amount=source_b_amount,
+                    amount_diff=source_a_amount - source_b_amount,
                 ))
 
         return results
@@ -246,41 +266,49 @@ class ReconciliationService:
             pending_human_rows=sum(r.status == "PENDING_HUMAN" for r in results),
         )
 
-    def start(self, task_id: str) -> ReconciliationStartResponse:
-        if not task_service.update_status(task_id, "AI_RUNNING"):
+    def start(self, task_id: str, user_id: str = "demo_user") -> ReconciliationStartResponse:
+        if not task_service.update_status(task_id, "AI_RUNNING", user_id=user_id):
             raise HTTPException(status_code=404, detail="reconciliation task not found")
         return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
 
-    def get_status(self, task_id: str) -> ReconciliationStatusResponse:
-        task = task_service.get(task_id)
+    def get_status(self, task_id: str, user_id: str = "demo_user") -> ReconciliationStatusResponse:
+        task = task_service.get(task_id, user_id=user_id)
         if task is None:
             raise HTTPException(status_code=404, detail="reconciliation task not found")
+        ai_processed_rows = ledger_service.list(
+            LedgerQuery(task_id=task_id, user_id=user_id, page=1, page_size=1)
+        ).total
         return ReconciliationStatusResponse(
             task_id=task_id, status=task.status,
             auto_fixed_rows=task.auto_fixed_rows,
             pending_ai_rows=task.pending_ai_rows,
-            ai_processed_rows=task.unresolved_rows,
+            ai_processed_rows=ai_processed_rows,
             pending_human_rows=task.pending_human_rows,
             unresolved_rows=task.unresolved_rows,
         )
 
-    def get_exceptions(self, task_id: str) -> ReconciliationExceptionListResponse:
-        task = task_service.get(task_id)
+    def get_exceptions(
+        self, task_id: str, user_id: str = "demo_user",
+    ) -> ReconciliationExceptionListResponse:
+        task = task_service.get(task_id, user_id=user_id)
         if task is None:
             raise HTTPException(status_code=404, detail="reconciliation task not found")
 
-        page = ledger_service.list(LedgerQuery(task_id=task_id, page=1, page_size=10_000))
+        page = ledger_service.list(
+            LedgerQuery(task_id=task_id, user_id=user_id, page=1, page_size=10_000)
+        )
         items: list[ReconciliationExceptionItem] = []
         for row in page.items:
             amount_diff = self._format_optional_decimal(row.discrepancy_amount)
             match_status = "PENDING_AI" if row.error_type == "AMOUNT_MISMATCH" else "PENDING_HUMAN"
             evidence = self._evidence_from_rag_source(row.rag_source)
+            source_amounts = row.ai_cleaned_json or {}
             items.append(ReconciliationExceptionItem(
                 flow_id=row.flow_id,
                 status=match_status,  # match status derived from error_type
                 error_type=row.error_type,
-                bank_amount=self._format_optional_decimal(row.bank_amount),
-                clear_amount=self._format_optional_decimal(row.clear_amount),
+                bank_amount=source_amounts.get("source_a_amount"),
+                clear_amount=source_amounts.get("source_b_amount"),
                 amount_diff=amount_diff,
                 rag_evidence=evidence,
                 audit_decision=ReconciliationAuditDecision(
@@ -318,18 +346,20 @@ class ReconciliationService:
     def _build_rag_query(self, result: ReconciliationMatchResult) -> str:
         if result.error_type == "AMOUNT_MISMATCH":
             return (
-                "AMOUNT_MISMATCH amount_mismatch 金额差异 对账不平 "
-                f"bank_amount={self._format_optional_decimal(result.bank_amount)} "
-                f"clear_amount={self._format_optional_decimal(result.clear_amount)} "
+                "AMOUNT_MISMATCH amount_mismatch 金额差异 银企对账不平 企业账簿 银行流水 "
+                f"source_a_amount={self._format_optional_decimal(result.source_a_amount)} "
+                f"source_b_amount={self._format_optional_decimal(result.source_b_amount)} "
                 f"amount_diff={self._format_optional_decimal(result.amount_diff)}"
             )
-        if result.error_type == "SINGLE_SIDE_MISSING":
-            missing_side = "clear" if result.clear_amount is None else "bank"
+        if result.error_type == "BANK_UNARRIVED":
             return (
-                "SINGLE_SIDE_MISSING single_side_missing 单边缺失 查询查复 "
-                f"missing_side={missing_side} "
-                f"bank_amount={self._format_optional_decimal(result.bank_amount)} "
-                f"clear_amount={self._format_optional_decimal(result.clear_amount)}"
+                "BANK_UNARRIVED bank_unarrived 银行未到账 企业账簿已记账 银行流水缺失 "
+                f"source_a_amount={self._format_optional_decimal(result.source_a_amount)}"
+            )
+        if result.error_type == "BOOK_UNRECORDED":
+            return (
+                "BOOK_UNRECORDED book_unrecorded 企业未入账 银行流水已到账 企业账簿缺失 "
+                f"source_b_amount={self._format_optional_decimal(result.source_b_amount)}"
             )
         return f"{result.error_type or ''} reconciliation exception"
 
@@ -353,22 +383,30 @@ class ReconciliationService:
         )
 
     def _write_queue_entries(
-        self, task_id: str, results: list[ReconciliationMatchResult],
+        self,
+        task_id: str,
+        results: list[ReconciliationMatchResult],
+        user_id: str,
+        scenario_type: str,
     ) -> None:
         queue_rows: list[dict[str, object]] = []
         for result in results:
             if result.status == "AUTO_FIXED":
                 continue
             queue_rows.append({
-                "task_id": task_id, "flow_id": result.flow_id,
-                "bank_transaction_id": None, "clear_transaction_id": None,
+                "user_id": user_id, "task_id": task_id, "scenario_type": scenario_type,
+                "source_a_transaction_id": None, "source_b_transaction_id": None,
                 "error_type": result.error_type or "", "status": result.status,
                 "risk_level": "MEDIUM", "retry_count": 0,
             })
-        queue_service.replace_task_rows(task_id, queue_rows)
+        queue_service.replace_task_rows(task_id, queue_rows, user_id=user_id)
 
     def _write_ledger_entries(
-        self, task_id: str, results: list[ReconciliationMatchResult],
+        self,
+        task_id: str,
+        results: list[ReconciliationMatchResult],
+        user_id: str,
+        scenario_type: str,
     ) -> None:
         rows: list[LedgerRow] = []
         rag_log_rows: list[dict[str, object]] = []
@@ -380,36 +418,39 @@ class ReconciliationService:
             rag_items = self._retrieve_rag_items_by_query(rag_query)
             rag_log_rows.append(rag_log_service.build_row(
                 task_id=task_id, query_text=rag_query, top_k=2, items=rag_items,
+                user_id=user_id, scenario_type=scenario_type,
             ))
             audit_decision = audit_agent.decide(
                 flow_id=result.flow_id, error_type=result.error_type or "",
-                bank_amount=self._format_optional_decimal(result.bank_amount),
-                clear_amount=self._format_optional_decimal(result.clear_amount),
+                source_a_amount=self._format_optional_decimal(result.source_a_amount),
+                source_b_amount=self._format_optional_decimal(result.source_b_amount),
                 amount_diff=self._format_optional_decimal(result.amount_diff),
                 evidence=rag_items,
             )
             rows.append(LedgerRow(
-                id=0, task_id=task_id, flow_id=result.flow_id,
+                id=0, task_id=task_id, scenario_type=scenario_type, flow_id=result.flow_id,
                 error_type=result.error_type or "",
-                bank_amount=result.bank_amount,
-                clear_amount=result.clear_amount,
                 discrepancy_amount=self._ledger_discrepancy_amount(result),
+                ai_cleaned_json={
+                    "source_a_amount": self._format_optional_decimal(result.source_a_amount),
+                    "source_b_amount": self._format_optional_decimal(result.source_b_amount),
+                },
                 ai_audit_opinion=audit_decision.reason,
                 ai_confidence=Decimal(str(audit_decision.confidence)).quantize(Decimal("0.0001")),
                 rag_source=", ".join(item.chunk_id for item in rag_items) or None,
                 handle_status=audit_decision.decision,
             ))
 
-        ledger_service.replace_task_rows(task_id, rows)
-        rag_log_service.replace_task_rows(task_id, rag_log_rows)
+        ledger_service.replace_task_rows(task_id, rows, user_id=user_id)
+        rag_log_service.replace_task_rows(task_id, rag_log_rows, user_id=user_id)
 
     def _ledger_discrepancy_amount(self, result: ReconciliationMatchResult) -> Decimal:
         if result.amount_diff is not None:
             return abs(result.amount_diff)
-        if result.bank_amount is not None:
-            return result.bank_amount
-        if result.clear_amount is not None:
-            return result.clear_amount
+        if result.source_a_amount is not None:
+            return result.source_a_amount
+        if result.source_b_amount is not None:
+            return result.source_b_amount
         return Decimal("0.00")
 
 

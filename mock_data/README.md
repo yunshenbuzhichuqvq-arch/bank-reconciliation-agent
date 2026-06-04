@@ -8,10 +8,10 @@ Current sample coverage:
 
 - Normal matched rows.
 - Amount mismatch rows.
-- Bank-side-only rows.
-- Clearing-side-only rows.
+- Source A only rows: enterprise book has posted, bank statement has not arrived (`BANK_UNARRIVED`).
+- Source B only rows: bank statement has arrived, enterprise book has not recorded (`BOOK_UNRECORDED`).
 
-The files intentionally look closer to raw bank and clearing exports than to database tables.
+The files intentionally look closer to raw enterprise book and bank statement exports than to database tables.
 Parser code normalizes them into the PRD model.
 
 Shared normalized columns:
@@ -21,18 +21,16 @@ Shared normalized columns:
 - `trade_time`
 - `summary`
 
-Bank-side realistic fields:
+Source A enterprise book fields:
 
-- Bank serial number, accounting date/time, value date.
+- Voucher number, accounting period, accounting date/time, value date.
 - Own masked account, own masked customer name, bank name.
 - Transaction direction, debit amount, credit amount, fee amount, balance after posting.
 - Counterparty masked account/name/bank.
 - Channel, purpose, posting status, branch number, teller id, transaction code, source system.
 
-Clearing-side realistic fields:
+Source B bank statement fields:
 
-- Clearing serial number, merchant/store/terminal identifiers.
-- Channel, transaction type, trade time, settlement date.
+- Bank serial number, channel, trade time, settlement date.
 - Transaction amount, fee amount, net amount, currency, status.
-- Batch, voucher, reference and merchant order numbers.
-- Payer/payee masked accounts and names.
+- Own and counterparty masked accounts and names.
