@@ -1,0 +1,36 @@
+{
+  "flow_id": "F1004",
+  "scenario_type": "BANK_ENTERPRISE",
+  "error_type": "AMOUNT_MISMATCH",
+  "input": {
+    "source_a_amount": "300.00",
+    "source_b_amount": "295.00",
+    "amount_diff": "5.00"
+  },
+  "rag": {
+    "query": "AMOUNT_MISMATCH amount_mismatch 金额差异 银企对账不平 企业账簿 银行流水 source_a_amount=300.00 source_b_amount=295.00 amount_diff=5.00",
+    "top_k": 2,
+    "hits": [
+      {
+        "chunk_id": "unionpay_reconciliation_faq_001",
+        "score": 0.0,
+        "source": "data/rag/raw_sources/unionpay_reconciliation_faq.md#清算文件流水与资金核对不平"
+      },
+      {
+        "chunk_id": "unionpay_reconciliation_faq_002",
+        "score": 0.0,
+        "source": "data/rag/raw_sources/unionpay_reconciliation_faq.md#对账文件或流水缺失"
+      }
+    ]
+  },
+  "agent_output": {
+    "decision": "PENDING_HUMAN",
+    "risk_level": "MEDIUM",
+    "reason": "企业账簿与银行流水金额不一致：企业账簿金额 300.00，银行流水金额 295.00，差异金额 5.00，已检索到金额差异处理依据，建议人工复核确认。",
+    "confidence": 0.7
+  },
+  "persisted": {
+    "handle_status": "PENDING_HUMAN",
+    "discrepancy_amount": "5.00"
+  }
+}

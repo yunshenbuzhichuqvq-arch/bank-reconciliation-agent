@@ -1,0 +1,14 @@
+[
+  {
+    "query": "AMOUNT_MISMATCH 金额不一致 对账不平 差异 source_a_amount source_b_amount",
+    "expect_chunk_id_prefix": "unionpay_reconciliation_faq"
+  },
+  {
+    "query": "pbc_small_payment_query_reply single_side_missing query_reply 单笔业务 查询 查复 疑问 差错",
+    "expect_chunk_id_prefix": "pbc_small_payment_query_reply"
+  },
+  {
+    "query": "pbc_small_payment_query_reply 原始凭证 业务要素 单边缺失 漏记账 查询查复",
+    "expect_chunk_id_prefix": "pbc_small_payment_query_reply"
+  }
+]

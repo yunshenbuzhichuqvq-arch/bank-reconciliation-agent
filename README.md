@@ -4,7 +4,7 @@ MVP-0 backend skeleton for a multi-agent bank reconciliation and audit system.
 
 The first development phase focuses on a backend-only loop:
 
-1. Upload simulated bank-side and clearing-side Excel files.
+1. Upload simulated Source A enterprise-book and Source B bank-statement Excel files.
 2. Validate and clean rows with deterministic Python code.
 3. Run basic reconciliation rules.
 4. Send abnormal items through a simplified AuditAgent with RAG evidence.
@@ -20,7 +20,7 @@ This repository uses only simulated or desensitized data. It must not contain re
 - `src/bank_reconciliation_agent/agents`: simplified audit agent boundary.
 - `src/bank_reconciliation_agent/rag`: rule retrieval boundary.
 - `src/bank_reconciliation_agent/db/schema.sql`: MVP-0 MySQL schema.
-- `mock_data`: simulated Excel data notes and future sample files.
+- `mock_data`: simulated Source A/B Excel data.
 - `rules`: Markdown rule documents for RAG indexing.
 
 ## Local Setup
@@ -61,8 +61,8 @@ The fixed MVP-0 sample covers:
 
 - normal matched transactions: 8 rows
 - amount mismatch: `F1004`
-- bank-only missing clear-side row: `F1005`
-- clear-only missing bank-side row: `F1006`
+- `BANK_UNARRIVED`: `F1005`
+- `BOOK_UNRECORDED`: `F1006`
 
 4. Start the API.
 
@@ -75,14 +75,16 @@ uv run uvicorn bank_reconciliation_agent.main:app --reload
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/reconcile/upload \
   -H 'X-User-ID: demo_user' \
-  -F bank_file=@mock_data/bank_transactions.xlsx \
-  -F clear_file=@mock_data/clear_transactions.xlsx
+  -F scenario_type=BANK_ENTERPRISE \
+  -F source_a_file=@mock_data/source_a_enterprise_book.xlsx \
+  -F source_b_file=@mock_data/source_b_bank_statement.xlsx
 ```
 
 Expected MVP-0 statistics for the bundled sample:
 
-- `total_bank_rows`: 10
-- `total_clear_rows`: 10
+- `scenario_type`: `BANK_ENTERPRISE`
+- `total_source_a_rows`: 10
+- `total_source_b_rows`: 10
 - `auto_fixed_rows`: 8
 - `pending_ai_rows`: 1
 - `pending_human_rows`: 2
@@ -93,17 +95,17 @@ Expected MVP-0 statistics for the bundled sample:
 curl http://127.0.0.1:8000/api/v1/reconcile/<task_id>/status \
   -H 'X-User-ID: demo_user'
 
-curl 'http://127.0.0.1:8000/api/v1/ledger?task_id=<task_id>' \
+curl 'http://127.0.0.1:8000/api/v1/ledger?task_id=<task_id>&scenario_type=BANK_ENTERPRISE' \
   -H 'X-User-ID: demo_user'
 ```
 
-The ledger response should include `AMOUNT_MISMATCH` and `SINGLE_SIDE_MISSING`
-items with AI audit opinions and RAG sources.
+The ledger response should include `AMOUNT_MISMATCH`, `BANK_UNARRIVED`, and
+`BOOK_UNRECORDED` items with AI audit opinions and RAG sources.
 
 7. Verify MySQL persistence.
 
 ```sql
-SELECT task_id, total_bank_rows, total_clear_rows, auto_fixed_rows,
+SELECT task_id, scenario_type, total_source_a_rows, total_source_b_rows, auto_fixed_rows,
        pending_ai_rows, pending_human_rows, unresolved_rows, status
 FROM t_reconciliation_task
 ORDER BY created_at DESC
@@ -114,18 +116,30 @@ FROM t_reconciliation_queue
 WHERE task_id = '<task_id>'
 ORDER BY flow_id;
 
-SELECT flow_id, error_type, discrepancy_amount, handle_status, rag_source
+SELECT flow_id, scenario_type, error_type, discrepancy_amount, handle_status, rag_source
 FROM t_error_ledger
 WHERE task_id = '<task_id>'
 ORDER BY flow_id;
 
-SELECT task_id, top_k, best_score, selected_chunk_id
+SELECT task_id, scenario_type, top_k, best_score, sources
 FROM t_rag_retrieval_log
 WHERE task_id = '<task_id>';
 ```
 
-MVP-0 writes the task, bank transactions, clear transactions, exception queue,
+MVP-0 writes the task, Source A transactions, Source B transactions, exception queue,
 error ledger, and RAG retrieval logs to MySQL.
+
+8. Generate the local trace sample and run the RAG smoke evaluation.
+
+```bash
+uv run python -m scripts.dump_trace
+uv run python -m scripts.eval_rag_smoke
+```
+
+`scripts.dump_trace` writes `local_traces/F1004.json` with the input exception,
+RAG query and hits, AuditAgent output, and persisted ledger result. The smoke
+eval uses `data/rag/smoke_eval.json` and exits non-zero if any query misses its
+expected chunk prefix.
 
 ## Automated Checks
 
