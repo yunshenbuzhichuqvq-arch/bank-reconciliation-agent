@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     mysql_dsn: str = "mysql+pymysql://root:password@127.0.0.1:3306/AI_agent"
     chroma_path: str = "./chroma_data"
     upload_dir: str = "./uploads"
+    trace_dir: str = "./data/traces"
     max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
     max_upload_rows: int = 10_000
 

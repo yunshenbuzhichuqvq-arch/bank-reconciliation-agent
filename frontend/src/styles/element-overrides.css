@@ -1,0 +1,28 @@
+:root{
+  --el-color-primary:var(--color-accent);
+  --el-border-radius-base:12px; --el-border-radius-small:10px;
+  --el-bg-color:var(--color-surface); --el-fill-color-blank:var(--color-surface);
+  --el-text-color-primary:var(--color-text); --el-text-color-regular:var(--color-text-muted);
+  --el-border-color:var(--color-border); --el-border-color-light:var(--color-border-soft);
+  --el-font-family:var(--font-sans);
+}
+/* 金额/编号列用等宽 + tabular-nums，表格右对齐数字列由页面指定 */
+.cell-mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
+
+.el-table {
+  --el-table-header-bg-color: var(--color-bg-soft);
+  --el-table-row-hover-bg-color: var(--color-surface-muted);
+  border-radius: var(--radius-md);
+}
+
+.el-dialog,
+.el-message-box {
+  --el-dialog-bg-color: var(--color-surface);
+  border: 1px solid var(--color-border-soft);
+}
+
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  box-shadow: 0 0 0 1px var(--color-border-soft) inset;
+}

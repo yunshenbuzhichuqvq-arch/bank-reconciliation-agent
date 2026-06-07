@@ -3,10 +3,9 @@ from pydantic import BaseModel
 
 class ReconciliationUploadResponse(BaseModel):
     task_id: str
-    scenario_type: str = "BANK_ENTERPRISE"
     status: str = "UPLOADED"
-    total_source_a_rows: int
-    total_source_b_rows: int
+    total_bank_rows: int
+    total_clear_rows: int
     auto_fixed_rows: int
     pending_ai_rows: int
     pending_human_rows: int
@@ -20,7 +19,6 @@ class ReconciliationStartResponse(BaseModel):
 class ReconciliationStatusResponse(BaseModel):
     task_id: str
     status: str
-    scenario_type: str
     auto_fixed_rows: int
     pending_ai_rows: int
     ai_processed_rows: int
@@ -54,8 +52,9 @@ class ReconciliationExceptionItem(BaseModel):
     flow_id: str
     status: str
     error_type: str
-    source_a_amount: str | None
-    source_b_amount: str | None
+    exception_branch: str | None = None
+    bank_amount: str | None
+    clear_amount: str | None
     amount_diff: str | None
     rag_evidence: list[ReconciliationRagEvidence]
     audit_decision: ReconciliationAuditDecision

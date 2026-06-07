@@ -32,16 +32,16 @@ rag_retrieval_log_table = Table(
     "t_rag_retrieval_log",
     metadata,
     Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
-    Column("user_id", String(64), nullable=False),
     Column("task_id", String(64), nullable=False),
-    Column("scenario_type", String(32), nullable=False, default="BANK_ENTERPRISE"),
+    Column("user_id", String(64), nullable=False, server_default="demo_user"),
+    Column("scenario_type", String(32), nullable=False, server_default="BANK_ENTERPRISE"),
     Column("queue_id", BigInteger, nullable=True),
     Column("query_text", Text, nullable=False),
     Column("top_k", Integer, nullable=False),
     Column("best_score", Numeric(8, 4), nullable=True),
     Column("sources", JSON, nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
-    Index("idx_user_task_queue", "user_id", "task_id", "queue_id"),
+    Index("idx_rag_task_queue", "task_id", "queue_id"),
 )
 
 
@@ -52,11 +52,12 @@ class RagLogService:
 
     def replace_task_rows(
         self,
+        *,
+        user_id: str,
         task_id: str,
         rows: list[dict[str, object]],
-        user_id: str = "demo_user",
     ) -> None:
-        """覆盖写入同一用户/任务上传处理期间产生的 RAG 检索记录。"""
+        """覆盖写入同一任务上传处理期间产生的 RAG 检索记录。"""
         self._ensure_initialized()
         with self._engine.begin() as connection:
             connection.execute(
@@ -66,23 +67,24 @@ class RagLogService:
                 )
             )
             if rows:
-                connection.execute(insert(rag_retrieval_log_table), rows)
+                connection.execute(
+                    insert(rag_retrieval_log_table),
+                    [dict(row, user_id=user_id) for row in rows],
+                )
 
     def build_row(
         self,
         *,
+        user_id: str,
         task_id: str,
         query_text: str,
         top_k: int,
         items: list[RagSearchItem],
-        user_id: str = "demo_user",
-        scenario_type: str = "BANK_ENTERPRISE",
     ) -> dict[str, object]:
         best_score = max((Decimal(str(item.score)) for item in items), default=None)
         return {
             "user_id": user_id,
             "task_id": task_id,
-            "scenario_type": scenario_type,
             "queue_id": None,
             "query_text": query_text,
             "top_k": top_k,
@@ -90,7 +92,7 @@ class RagLogService:
             "sources": [item.chunk_id for item in items],
         }
 
-    def count_rows(self, task_id: str, user_id: str = "demo_user") -> int:
+    def count_rows(self, *, user_id: str, task_id: str) -> int:
         self._ensure_initialized()
         statement = (
             select(func.count())
@@ -105,9 +107,10 @@ class RagLogService:
 
     def get_latest_row(
         self,
+        *,
+        user_id: str,
         task_id: str,
         query_marker: str,
-        user_id: str = "demo_user",
     ) -> dict[str, object] | None:
         self._ensure_initialized()
         statement = (

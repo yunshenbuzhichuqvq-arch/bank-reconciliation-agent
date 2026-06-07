@@ -18,7 +18,9 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Engine
+
+from sqlalchemy.engine import Connection
 
 from bank_reconciliation_agent.db.session import get_engine
 
@@ -29,31 +31,30 @@ reconciliation_task_table = Table(
     "t_reconciliation_task",
     metadata,
     Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
-    Column("user_id", String(64), nullable=False),
     Column("task_id", String(64), nullable=False),
+    Column("user_id", String(64), nullable=False, server_default="demo_user"),
+    Column("scenario_type", String(32), nullable=False, server_default="BANK_ENTERPRISE"),
+    Column("batch_id", String(64), nullable=True),
     Column("task_name", String(128), nullable=False),
-    Column("scenario_type", String(32), nullable=False, default="BANK_ENTERPRISE"),
     Column("status", String(32), nullable=False),
-    Column("total_source_a_rows", Integer, nullable=False, default=0),
-    Column("total_source_b_rows", Integer, nullable=False, default=0),
+    Column("total_bank_rows", Integer, nullable=False, default=0),
+    Column("total_clear_rows", Integer, nullable=False, default=0),
     Column("auto_fixed_rows", Integer, nullable=False, default=0),
     Column("pending_ai_rows", Integer, nullable=False, default=0),
     Column("pending_human_rows", Integer, nullable=False, default=0),
     Column("unresolved_rows", Integer, nullable=False, default=0),
     Column("created_at", DateTime, server_default=func.now()),
     Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
-    UniqueConstraint("user_id", "task_id", name="uk_user_task"),
-    Index("idx_user_scenario", "user_id", "scenario_type"),
-    Index("idx_user_status", "user_id", "status"),
+    UniqueConstraint("user_id", "task_id", name="uk_task_user_task"),
+    Index("idx_status_created", "status", "created_at"),
 )
 
 
 class ReconciliationTaskRow(NamedTuple):
     task_id: str
     status: str
-    scenario_type: str
-    total_source_a_rows: int
-    total_source_b_rows: int
+    total_bank_rows: int
+    total_clear_rows: int
     auto_fixed_rows: int
     pending_ai_rows: int
     pending_human_rows: int
@@ -68,17 +69,16 @@ class TaskService:
     def replace_task(
         self,
         *,
+        user_id: str,
         task_id: str,
-        total_source_a_rows: int,
-        total_source_b_rows: int,
+        total_bank_rows: int,
+        total_clear_rows: int,
         auto_fixed_rows: int,
         pending_ai_rows: int,
         pending_human_rows: int,
-        user_id: str = "demo_user",
-        scenario_type: str = "BANK_ENTERPRISE",
         connection: Connection | None = None,
     ) -> None:
-        """写入上传后的任务状态；同 user/task 重试时覆盖旧任务统计。"""
+        """写入上传后的任务状态；同 task_id 重试时覆盖旧任务统计。"""
         self._ensure_initialized()
         unresolved_rows = pending_ai_rows + pending_human_rows
 
@@ -86,7 +86,7 @@ class TaskService:
             conn.execute(
                 delete(reconciliation_task_table).where(
                     reconciliation_task_table.c.user_id == user_id,
-                    reconciliation_task_table.c.task_id == task_id,
+                    reconciliation_task_table.c.task_id == task_id
                 )
             )
             conn.execute(
@@ -94,10 +94,9 @@ class TaskService:
                     user_id=user_id,
                     task_id=task_id,
                     task_name=f"{task_id} reconciliation",
-                    scenario_type=scenario_type,
                     status="UPLOADED",
-                    total_source_a_rows=total_source_a_rows,
-                    total_source_b_rows=total_source_b_rows,
+                    total_bank_rows=total_bank_rows,
+                    total_clear_rows=total_clear_rows,
                     auto_fixed_rows=auto_fixed_rows,
                     pending_ai_rows=pending_ai_rows,
                     pending_human_rows=pending_human_rows,
@@ -111,7 +110,7 @@ class TaskService:
             with self._engine.begin() as conn:
                 _execute(conn)
 
-    def update_status(self, task_id: str, status: str, user_id: str = "demo_user") -> bool:
+    def update_status(self, *, user_id: str, task_id: str, status: str) -> bool:
         self._ensure_initialized()
         with self._engine.begin() as connection:
             result = connection.execute(
@@ -124,11 +123,11 @@ class TaskService:
             )
         return result.rowcount > 0
 
-    def get(self, task_id: str, user_id: str = "demo_user") -> ReconciliationTaskRow | None:
+    def get(self, *, user_id: str, task_id: str) -> ReconciliationTaskRow | None:
         self._ensure_initialized()
         statement = select(reconciliation_task_table).where(
             reconciliation_task_table.c.user_id == user_id,
-            reconciliation_task_table.c.task_id == task_id,
+            reconciliation_task_table.c.task_id == task_id
         )
         with self._engine.connect() as connection:
             row = connection.execute(statement).mappings().first()
@@ -138,9 +137,8 @@ class TaskService:
         return ReconciliationTaskRow(
             task_id=row["task_id"],
             status=row["status"],
-            scenario_type=row["scenario_type"],
-            total_source_a_rows=row["total_source_a_rows"],
-            total_source_b_rows=row["total_source_b_rows"],
+            total_bank_rows=row["total_bank_rows"],
+            total_clear_rows=row["total_clear_rows"],
             auto_fixed_rows=row["auto_fixed_rows"],
             pending_ai_rows=row["pending_ai_rows"],
             pending_human_rows=row["pending_human_rows"],

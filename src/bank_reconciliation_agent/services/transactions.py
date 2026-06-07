@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Table,
     Time,
+    UniqueConstraint,
     delete,
     func,
     insert,
@@ -29,30 +30,20 @@ from bank_reconciliation_agent.db.session import get_engine
 
 metadata = MetaData()
 
-source_a_transaction_table = Table(
-    "t_source_a_transaction",
+bank_transaction_table = Table(
+    "t_bank_transaction",
     metadata,
     Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
-    Column("user_id", String(64), nullable=False),
     Column("task_id", String(64), nullable=False),
-    Column("scenario_type", String(32), nullable=False, default="BANK_ENTERPRISE"),
-    Column("source_side", String(1), nullable=False, default="A"),
-    Column("source_type", String(32), nullable=False, default="ENTERPRISE_BOOK"),
+    Column("user_id", String(64), nullable=False, server_default="demo_user"),
     Column("flow_id", String(64), nullable=True),
     Column("bank_serial_no", String(64), nullable=True),
-    Column("voucher_no", String(64), nullable=True),
-    Column("accounting_period", String(16), nullable=True),
     Column("accounting_date", Date, nullable=True),
     Column("accounting_time", Time, nullable=True),
     Column("value_date", Date, nullable=True),
     Column("self_account_no_masked", String(64), nullable=True),
     Column("self_account_name_masked", String(128), nullable=True),
     Column("self_bank_name", String(128), nullable=True),
-    Column("account_no_masked", String(64), nullable=True),
-    Column("customer_name_masked", String(128), nullable=True),
-    Column("counterparty_account_no_masked", String(64), nullable=True),
-    Column("counterparty_name_masked", String(128), nullable=True),
-    Column("counterparty_bank_name", String(128), nullable=True),
     Column("currency", String(8), nullable=False, default="CNY"),
     Column("transaction_type", String(32), nullable=True),
     Column("transaction_direction", String(16), nullable=True),
@@ -62,6 +53,11 @@ source_a_transaction_table = Table(
     Column("fee_amount", Numeric(18, 2), nullable=False, default=Decimal("0.00")),
     Column("balance_after", Numeric(18, 2), nullable=True),
     Column("trade_time", DateTime, nullable=False),
+    Column("account_no_masked", String(64), nullable=True),
+    Column("customer_name_masked", String(128), nullable=True),
+    Column("counterparty_account_no_masked", String(64), nullable=True),
+    Column("counterparty_name_masked", String(128), nullable=True),
+    Column("counterparty_bank_name", String(128), nullable=True),
     Column("channel", String(32), nullable=True),
     Column("summary", String(255), nullable=True),
     Column("purpose", String(128), nullable=True),
@@ -71,48 +67,53 @@ source_a_transaction_table = Table(
     Column("transaction_code", String(32), nullable=True),
     Column("source_system", String(64), nullable=True),
     Column("remark", String(255), nullable=True),
-    Column("match_status", String(32), nullable=True),
-    Column("matched_source_b_id", BigInteger, nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
-    Index("idx_user_task_flow", "user_id", "task_id", "flow_id"),
-    Index("idx_source_a_user_task_time", "user_id", "task_id", "trade_time"),
+    UniqueConstraint("user_id", "task_id", "flow_id", name="uk_bank_user_task_flow"),
+    Index("idx_bank_task_flow", "task_id", "flow_id"),
+    Index("idx_bank_task_time", "task_id", "trade_time"),
+    Index("idx_bank_serial", "bank_serial_no"),
 )
 
-source_b_transaction_table = Table(
-    "t_source_b_transaction",
+clear_transaction_table = Table(
+    "t_clear_transaction",
     metadata,
     Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
-    Column("user_id", String(64), nullable=False),
     Column("task_id", String(64), nullable=False),
-    Column("scenario_type", String(32), nullable=False, default="BANK_ENTERPRISE"),
-    Column("source_side", String(1), nullable=False, default="B"),
-    Column("source_type", String(32), nullable=False, default="BANK_STATEMENT"),
+    Column("user_id", String(64), nullable=False, server_default="demo_user"),
     Column("flow_id", String(64), nullable=True),
     Column("clearing_serial_no", String(64), nullable=True),
-    Column("bank_serial_no", String(64), nullable=True),
+    Column("merchant_id", String(64), nullable=True),
+    Column("merchant_name", String(128), nullable=True),
+    Column("store_name", String(128), nullable=True),
+    Column("terminal_id", String(64), nullable=True),
+    Column("channel", String(32), nullable=True),
+    Column("transaction_type", String(32), nullable=True),
     Column("trade_date", Date, nullable=True),
+    Column("trade_time", DateTime, nullable=False),
     Column("settlement_date", Date, nullable=True),
-    Column("currency", String(8), nullable=False, default="CNY"),
     Column("amount", Numeric(18, 2), nullable=False),
     Column("transaction_amount", Numeric(18, 2), nullable=False),
     Column("fee_amount", Numeric(18, 2), nullable=False, default=Decimal("0.00")),
     Column("net_amount", Numeric(18, 2), nullable=False),
-    Column("trade_time", DateTime, nullable=False),
+    Column("currency", String(8), nullable=False, default="CNY"),
     Column("status", String(32), nullable=True),
     Column("summary", String(255), nullable=True),
-    Column("balance_after", Numeric(18, 2), nullable=True),
-    Column("account_no_masked", String(64), nullable=True),
-    Column("customer_name_masked", String(128), nullable=True),
-    Column("counterparty_account_no_masked", String(64), nullable=True),
-    Column("counterparty_name_masked", String(128), nullable=True),
-    Column("counterparty_bank_name", String(128), nullable=True),
-    Column("channel", String(32), nullable=True),
+    Column("batch_no", String(64), nullable=True),
+    Column("voucher_no", String(64), nullable=True),
+    Column("reference_no", String(64), nullable=True),
+    Column("merchant_order_no", String(64), nullable=True),
+    Column("payer_account_no_masked", String(64), nullable=True),
+    Column("payer_name_masked", String(128), nullable=True),
+    Column("payee_account_no_masked", String(64), nullable=True),
+    Column("payee_name_masked", String(128), nullable=True),
+    Column("order_description", String(255), nullable=True),
     Column("remark", String(255), nullable=True),
-    Column("match_status", String(32), nullable=True),
-    Column("matched_source_a_id", BigInteger, nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
-    Index("idx_user_task_flow_b", "user_id", "task_id", "flow_id"),
-    Index("idx_source_b_user_task_time", "user_id", "task_id", "trade_time"),
+    UniqueConstraint("user_id", "task_id", "flow_id", name="uk_clear_user_task_flow"),
+    Index("idx_clear_task_flow", "task_id", "flow_id"),
+    Index("idx_clear_task_time", "task_id", "trade_time"),
+    Index("idx_clear_serial", "clearing_serial_no"),
+    Index("idx_clear_merchant_order", "merchant_order_no"),
 )
 
 
@@ -123,43 +124,43 @@ class TransactionService:
 
     def replace_task_rows(
         self,
+        *,
+        user_id: str,
         task_id: str,
-        source_a_df: pd.DataFrame,
-        source_b_df: pd.DataFrame,
-        user_id: str = "demo_user",
-        scenario_type: str = "BANK_ENTERPRISE",
+        bank_df: pd.DataFrame,
+        clear_df: pd.DataFrame,
         connection: Connection | None = None,
     ) -> None:
-        """覆盖写入同一用户/任务的 Source A 和 Source B 标准流水。"""
+        """覆盖写入同一对账任务的银行端和清算端标准流水。"""
         self._ensure_initialized()
 
         def _execute(conn: Connection) -> None:
             conn.execute(
-                delete(source_a_transaction_table).where(
-                    source_a_transaction_table.c.user_id == user_id,
-                    source_a_transaction_table.c.task_id == task_id,
+                delete(bank_transaction_table).where(
+                    bank_transaction_table.c.user_id == user_id,
+                    bank_transaction_table.c.task_id == task_id,
                 )
             )
             conn.execute(
-                delete(source_b_transaction_table).where(
-                    source_b_transaction_table.c.user_id == user_id,
-                    source_b_transaction_table.c.task_id == task_id,
+                delete(clear_transaction_table).where(
+                    clear_transaction_table.c.user_id == user_id,
+                    clear_transaction_table.c.task_id == task_id
                 )
             )
-            if not source_a_df.empty:
+            if not bank_df.empty:
                 conn.execute(
-                    insert(source_a_transaction_table),
+                    insert(bank_transaction_table),
                     [
-                        self._to_source_a_insert_values(task_id, row, user_id, scenario_type)
-                        for row in self._records(source_a_df)
+                        self._to_bank_insert_values(user_id, task_id, row)
+                        for row in self._records(bank_df)
                     ],
                 )
-            if not source_b_df.empty:
+            if not clear_df.empty:
                 conn.execute(
-                    insert(source_b_transaction_table),
+                    insert(clear_transaction_table),
                     [
-                        self._to_source_b_insert_values(task_id, row, user_id, scenario_type)
-                        for row in self._records(source_b_df)
+                        self._to_clear_insert_values(user_id, task_id, row)
+                        for row in self._records(clear_df)
                     ],
                 )
 
@@ -169,43 +170,45 @@ class TransactionService:
             with self._engine.begin() as conn:
                 _execute(conn)
 
-    def count_source_a_rows(self, task_id: str, user_id: str = "demo_user") -> int:
-        return self._count_rows(source_a_transaction_table, task_id, user_id)
+    def count_bank_rows(self, *, user_id: str, task_id: str) -> int:
+        return self._count_rows(bank_transaction_table, user_id, task_id)
 
-    def count_source_b_rows(self, task_id: str, user_id: str = "demo_user") -> int:
-        return self._count_rows(source_b_transaction_table, task_id, user_id)
+    def count_clear_rows(self, *, user_id: str, task_id: str) -> int:
+        return self._count_rows(clear_transaction_table, user_id, task_id)
 
-    def get_source_a_row(
-        self, task_id: str, flow_id: str, user_id: str = "demo_user",
+    def get_bank_row(self, *, user_id: str, task_id: str, flow_id: str) -> dict[str, object] | None:
+        return self._get_row(bank_transaction_table, user_id, task_id, flow_id)
+
+    def get_clear_row(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        flow_id: str,
     ) -> dict[str, object] | None:
-        return self._get_row(source_a_transaction_table, task_id, flow_id, user_id)
-
-    def get_source_b_row(
-        self, task_id: str, flow_id: str, user_id: str = "demo_user",
-    ) -> dict[str, object] | None:
-        return self._get_row(source_b_transaction_table, task_id, flow_id, user_id)
+        return self._get_row(clear_transaction_table, user_id, task_id, flow_id)
 
     def _ensure_initialized(self) -> None:
         if self._initialized:
             return
-        metadata.create_all(
-            self._engine,
-            tables=[source_a_transaction_table, source_b_transaction_table],
-        )
+        metadata.create_all(self._engine, tables=[bank_transaction_table, clear_transaction_table])
         self._initialized = True
 
-    def _count_rows(self, table: Table, task_id: str, user_id: str) -> int:
+    def _count_rows(self, table: Table, user_id: str, task_id: str) -> int:
         self._ensure_initialized()
-        statement = (
-            select(func.count())
-            .select_from(table)
-            .where(table.c.user_id == user_id, table.c.task_id == task_id)
+        statement = select(func.count()).select_from(table).where(
+            table.c.user_id == user_id,
+            table.c.task_id == task_id,
         )
         with self._engine.connect() as connection:
             return connection.execute(statement).scalar_one()
 
     def _get_row(
-        self, table: Table, task_id: str, flow_id: str, user_id: str,
+        self,
+        table: Table,
+        user_id: str,
+        task_id: str,
+        flow_id: str,
     ) -> dict[str, object] | None:
         self._ensure_initialized()
         statement = select(table).where(
@@ -218,33 +221,37 @@ class TransactionService:
 
         if row is None:
             return None
-        return {key: self._normalize_value(value) for key, value in row.items()}
+        return {
+            key: self._normalize_value(value)
+            for key, value in row.items()
+        }
 
-    def _to_source_a_insert_values(
+    def _to_bank_insert_values(
         self,
+        user_id: str,
         task_id: str,
         row: dict[str, object],
-        user_id: str,
-        scenario_type: str,
     ) -> dict[str, object]:
-        amount = self._to_decimal(row["amount"])
-        direction = self._to_optional_string(row.get("transaction_direction"))
         return {
             "user_id": user_id,
             "task_id": task_id,
-            "scenario_type": scenario_type,
-            "source_side": "A",
-            "source_type": "ENTERPRISE_BOOK",
             "flow_id": str(row["flow_id"]),
             "bank_serial_no": self._to_optional_string(row.get("bank_serial_no")),
-            "voucher_no": self._to_optional_string(row.get("voucher_no")),
-            "accounting_period": self._to_optional_string(row.get("accounting_period")),
             "accounting_date": self._to_date(row.get("accounting_date")),
             "accounting_time": self._to_time(row.get("accounting_time")),
             "value_date": self._to_date(row.get("value_date")),
             "self_account_no_masked": self._to_optional_string(row.get("self_account_no_masked")),
             "self_account_name_masked": self._to_optional_string(row.get("self_account_name_masked")),
             "self_bank_name": self._to_optional_string(row.get("self_bank_name")),
+            "currency": self._to_optional_string(row.get("currency")) or "CNY",
+            "transaction_type": self._to_optional_string(row.get("transaction_type")),
+            "transaction_direction": self._to_optional_string(row.get("transaction_direction")),
+            "amount": self._to_decimal(row["amount"]),
+            "debit_amount": self._to_decimal(row.get("debit_amount", 0)),
+            "credit_amount": self._to_decimal(row.get("credit_amount", 0)),
+            "fee_amount": self._to_decimal(row.get("fee_amount", 0)),
+            "balance_after": self._to_optional_decimal(row.get("balance_after")),
+            "trade_time": self._to_datetime(row["trade_time"]),
             "account_no_masked": self._to_optional_string(row.get("account_no_masked")),
             "customer_name_masked": self._to_optional_string(row.get("customer_name_masked")),
             "counterparty_account_no_masked": self._to_optional_string(
@@ -252,15 +259,6 @@ class TransactionService:
             ),
             "counterparty_name_masked": self._to_optional_string(row.get("counterparty_name_masked")),
             "counterparty_bank_name": self._to_optional_string(row.get("counterparty_bank_name")),
-            "currency": self._to_optional_string(row.get("currency")) or "CNY",
-            "transaction_type": self._to_optional_string(row.get("transaction_type")),
-            "transaction_direction": direction,
-            "amount": amount,
-            "debit_amount": amount if direction == "DEBIT" else self._to_decimal(row.get("debit_amount", 0)),
-            "credit_amount": amount if direction == "CREDIT" else self._to_decimal(row.get("credit_amount", 0)),
-            "fee_amount": self._to_decimal(row.get("fee_amount", 0)),
-            "balance_after": self._to_optional_decimal(row.get("balance_after")),
-            "trade_time": self._to_datetime(row["trade_time"]),
             "channel": self._to_optional_string(row.get("channel")),
             "summary": self._to_optional_string(row.get("summary")),
             "purpose": self._to_optional_string(row.get("purpose")),
@@ -270,49 +268,45 @@ class TransactionService:
             "transaction_code": self._to_optional_string(row.get("transaction_code")),
             "source_system": self._to_optional_string(row.get("source_system")),
             "remark": self._to_optional_string(row.get("remark")),
-            "match_status": self._to_optional_string(row.get("match_status")),
-            "matched_source_b_id": None,
         }
 
-    def _to_source_b_insert_values(
+    def _to_clear_insert_values(
         self,
+        user_id: str,
         task_id: str,
         row: dict[str, object],
-        user_id: str,
-        scenario_type: str,
     ) -> dict[str, object]:
-        amount = self._to_decimal(row["amount"])
         return {
             "user_id": user_id,
             "task_id": task_id,
-            "scenario_type": scenario_type,
-            "source_side": "B",
-            "source_type": "BANK_STATEMENT",
             "flow_id": str(row["flow_id"]),
             "clearing_serial_no": self._to_optional_string(row.get("clearing_serial_no")),
-            "bank_serial_no": self._to_optional_string(row.get("bank_serial_no")),
+            "merchant_id": self._to_optional_string(row.get("merchant_id")),
+            "merchant_name": self._to_optional_string(row.get("merchant_name")),
+            "store_name": self._to_optional_string(row.get("store_name")),
+            "terminal_id": self._to_optional_string(row.get("terminal_id")),
+            "channel": self._to_optional_string(row.get("channel")),
+            "transaction_type": self._to_optional_string(row.get("transaction_type")),
             "trade_date": self._to_date(row.get("trade_date")),
-            "settlement_date": self._to_date(row.get("settlement_date")),
-            "currency": self._to_optional_string(row.get("currency")) or "CNY",
-            "amount": amount,
-            "transaction_amount": self._to_decimal(row.get("transaction_amount", amount)),
-            "fee_amount": self._to_decimal(row.get("fee_amount", 0)),
-            "net_amount": self._to_decimal(row.get("net_amount", amount)),
             "trade_time": self._to_datetime(row["trade_time"]),
+            "settlement_date": self._to_date(row.get("settlement_date")),
+            "amount": self._to_decimal(row["amount"]),
+            "transaction_amount": self._to_decimal(row["transaction_amount"]),
+            "fee_amount": self._to_decimal(row.get("fee_amount", 0)),
+            "net_amount": self._to_decimal(row["net_amount"]),
+            "currency": self._to_optional_string(row.get("currency")) or "CNY",
             "status": self._to_optional_string(row.get("status")),
             "summary": self._to_optional_string(row.get("summary")),
-            "balance_after": self._to_optional_decimal(row.get("balance_after")),
-            "account_no_masked": self._to_optional_string(row.get("account_no_masked")),
-            "customer_name_masked": self._to_optional_string(row.get("customer_name_masked")),
-            "counterparty_account_no_masked": self._to_optional_string(
-                row.get("counterparty_account_no_masked")
-            ),
-            "counterparty_name_masked": self._to_optional_string(row.get("counterparty_name_masked")),
-            "counterparty_bank_name": self._to_optional_string(row.get("counterparty_bank_name")),
-            "channel": self._to_optional_string(row.get("channel")),
+            "batch_no": self._to_optional_string(row.get("batch_no")),
+            "voucher_no": self._to_optional_string(row.get("voucher_no")),
+            "reference_no": self._to_optional_string(row.get("reference_no")),
+            "merchant_order_no": self._to_optional_string(row.get("merchant_order_no")),
+            "payer_account_no_masked": self._to_optional_string(row.get("payer_account_no_masked")),
+            "payer_name_masked": self._to_optional_string(row.get("payer_name_masked")),
+            "payee_account_no_masked": self._to_optional_string(row.get("payee_account_no_masked")),
+            "payee_name_masked": self._to_optional_string(row.get("payee_name_masked")),
+            "order_description": self._to_optional_string(row.get("order_description")),
             "remark": self._to_optional_string(row.get("remark")),
-            "match_status": self._to_optional_string(row.get("match_status")),
-            "matched_source_a_id": None,
         }
 
     def _to_decimal(self, value: object) -> Decimal:

@@ -1,0 +1,82 @@
+# scenario_type: BANK_ENTERPRISE
+rules:
+  - id: BE-R008
+    name: Duplicate booking suspected
+    priority: 1
+    conditions:
+      - field: duplicate_suspected
+        operator: eq
+        value: true
+    action: EXCEPTION
+    error_type: DUPLICATE_BOOKING
+    exception_branch: BE-R008
+
+  - id: BE-R005
+    name: Bank transaction unarrived
+    priority: 2
+    conditions:
+      - field: present_side
+        operator: eq
+        value: A
+    action: EXCEPTION
+    error_type: BANK_UNARRIVED
+    exception_branch: BE-R005
+
+  - id: BE-R006
+    name: Book transaction unrecorded
+    priority: 3
+    conditions:
+      - field: present_side
+        operator: eq
+        value: B
+    action: EXCEPTION
+    error_type: BOOK_UNRECORDED
+    exception_branch: BE-R006
+
+  - id: BE-R002
+    name: Amount mismatch
+    priority: 4
+    conditions:
+      - field: flow_matched
+        operator: eq
+        value: true
+      - field: amount_equal
+        operator: eq
+        value: false
+    action: EXCEPTION
+    error_type: AMOUNT_MISMATCH
+    exception_branch: BE-R002
+
+  - id: BE-R004
+    name: Narrative or customer name mismatch
+    priority: 5
+    conditions:
+      - field: flow_matched
+        operator: eq
+        value: true
+      - field: amount_equal
+        operator: eq
+        value: true
+      - field: narrative_or_name_mismatch
+        operator: eq
+        value: true
+    action: EXCEPTION
+    error_type: NARRATIVE_NAME_MISMATCH
+    exception_branch: BE-R004
+
+  - id: BE-R001
+    name: Exact match auto fix
+    priority: 6
+    conditions:
+      - field: flow_matched
+        operator: eq
+        value: true
+      - field: amount_equal
+        operator: eq
+        value: true
+      - field: narrative_or_name_mismatch
+        operator: eq
+        value: false
+    action: AUTO_FIX
+    error_type:
+    exception_branch:
