@@ -24,6 +24,8 @@
 5. **不 commit `spec.md` / `tasks.md`**。这两份是临时脚手架,只活在工作区,从不进 git
 6. **不在 main 分支生成三份文件**。开工前先确认当前分支是 stage 分支
 7. **不自动 commit**。你只生成/修改文件,**commit 由用户执行**——你的职责是在合适的时机提示用户"现在该 commit ADR.md 了"
+8. **stage 期间冻结 main**:开着 stage 分支时不往 main 直接提交任何东西(含探索性重构、热修)。main 只通过收尾整合前进。万一必须热修 main,改完**立刻**让在途 stage 分支 merge main 并复跑测试,绝不让两边在同一批文件上分头改过夜——这是 stage-1 收尾爆 17 个文件冲突的根因。
+9. **main 自有文档只在 main 维护**:`CLAUDE.md`、`requirements-analysis.md`、`system-prd.md`、`overall-architecture.md` 不在 stage 分支改,避免收尾整合时与 main 版本互相覆盖。
 
 ## 4. Git 工作流(本项目核心约定)
 
@@ -41,7 +43,7 @@ stage-N-xxx 分支(从 main 拉出)
  │                      → 删分支时一并 rm 掉
  │
  └─ src/ tests/ decisions/ ...  tracked,常规 commit
-     → 选择性 merge 回 main
+     → 收尾时整合回 main(见 §8;因 main 冻结,这是一次干净 merge)
 ```
 
 ### 4.2 `.gitignore` 必须包含
@@ -185,7 +187,6 @@ stage-N-xxx 分支(从 main 拉出)
 \`\`\`bash
 uv run pytest tests/xxx/ -v
 uv run ruff check src/xxx/
-uv run mypy src/xxx/
 \`\`\`
 
 ---
@@ -230,6 +231,11 @@ uv run mypy src/xxx/
 **触发**:用户说"stage N 做完了"、"准备 merge"
 **动作**(按顺序逐步执行):
 
+**步骤 0:整合前体检(pre-flight)**
+- `git fetch`,看 main 与 origin 是否同步
+- `git merge-base --is-ancestor main <stage 分支> && echo OK || echo STOP:main 已分叉`
+- 报 STOP 说明 §3.8 的冻结被破坏:**停下来**,把"main 多出哪些 commit、是否和 stage 改过的文件重叠"报告用户等拍板。**绝不**硬整合、**绝不**手改 `src/` 解冲突——冲突多半是真方向分歧(如 stage-1 的 bank/clear vs source-a/b),那是用户的决定,不是你 merge 能调和的。
+
 **步骤 1:状态校验**
 - 检查 `tasks.md`,确认所有 task 都是 `done`
 - 检查 `ADR.md`,确认所有 `proposed` 已改为 `accepted` 或 `rejected`,且最新状态已 commit
@@ -261,44 +267,28 @@ uv run mypy src/xxx/
 ## 8. Stage 收尾命令(模式 E 步骤 4)
 
 ```bash
-# 前提:模式 E 步骤 2 已经 commit 了 decisions/ 下的新 ADR 文件
+# 前提:步骤 0 pre-flight 已过(main 是 stage 分支的直系祖先);步骤 2 已 commit decisions/
 
-# 1. 切回 main,选择性拉文件(注意不拉 ADR.md,它留在 stage 分支)
-git checkout main
-git checkout stage-N-xxx -- \
-  src/ tests/ scripts/ rules/ \
-  pyproject.toml uv.lock \
-  AGENTS.md CLAUDE.md \
-  decisions/ \
-  overall-architecture.md system-prd.md requirements-analysis.md docs/
-git commit -m "stage-N: <一句话总结>"
-
-# 2.(可选)给 stage 分支打个 tag,防止以后想追溯也能找到 ADR.md 的历史
+# 1. 归档 tag(此刻分支 tip 仍含 ADR.md,完整逐 commit 历史全保住)
 git tag stage-N-archive stage-N-xxx
 
-# 3. 清理:删除 stage 分支 + 删除工作区两份临时脚手架
-rm -f spec.md tasks.md
+# 2. 把 ADR.md 移出工作树(内容已投影进 decisions/,不进 main)
+git rm ADR.md
+git commit -m "docs(adr): drop stage-N scratchpad"
+
+# 3. 整合进 main(main 已冻结=stage 的祖先,无冲突;merge 自动带增/改/删,且不误伤 main 自有文档)
+git checkout main
+git merge --squash stage-N-xxx          # 落成单个 stage commit;要保留逐 commit 历史则改用 git merge --no-ff
+git commit -m "stage-N: <一句话总结>"
+
+# 4. 清理(spec.md/tasks.md 本就 gitignored)
 git branch -D stage-N-xxx
-```
-
-**推荐写成脚本** `scripts/finish-stage.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -e
-BRANCH="${1:?usage: finish-stage <branch-name>}"
-TAG_ARCHIVE="${2:-true}"  # 默认打 tag
-
-if [ "$TAG_ARCHIVE" = "true" ]; then
-  git tag "${BRANCH}-archive" "$BRANCH" 2>/dev/null || true
-fi
-
 rm -f spec.md tasks.md
-git branch -D "$BRANCH"
-echo "✓ stage scaffolding cleared, branch $BRANCH deleted (archived as tag if requested)"
 ```
 
-调用:`./scripts/finish-stage.sh stage-1-ingest-pipeline`
+**为什么不再用 `git checkout stage -- <路径清单>`**:它**不删除** stage 已删的文件(会在 main 留下残文件,如 stage-1 的 9 个 source-a/b 文件),且会用 stage 的旧版**覆盖** main 自有文档(如 main 上更新过的 CLAUDE.md)——stage-1 收尾同时踩了这两个坑。`git merge` 对增/改/删和"谁改过谁"都天然正确。
+
+> 收尾可包成 `scripts/finish-stage.sh`,但脚本**必须含步骤 0 的 pre-flight 与步骤 3 的 merge**,不能只做 `rm` + `git branch -D`——否则等于没整合。
 
 ## 9. 三件套自检清单
 
