@@ -39,6 +39,9 @@ agent_execution_log_table = Table(
     Column("input_payload", JSON().with_variant(Text, "sqlite"), nullable=False),
     Column("output_payload", JSON().with_variant(Text, "sqlite"), nullable=False),
     Column("rag_retrieval_id", BigInteger, nullable=True),
+    Column("prompt_version", String(16), nullable=True),
+    Column("fallback_level", Integer, nullable=False, server_default="0"),
+    Column("llm_tokens", Integer, nullable=False, server_default="0"),
     Column("error_message", Text, nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     Index("idx_user_task_queue", "user_id", "task_id", "queue_id"),
@@ -83,6 +86,9 @@ class AgentLogService:
         input_payload: dict,
         output_payload: dict,
         rag_retrieval_id: int | None = None,
+        prompt_version: str | None = None,
+        fallback_level: int = 0,
+        llm_tokens: int = 0,
         error_message: str | None = None,
     ) -> dict[str, object]:
         return {
@@ -94,6 +100,9 @@ class AgentLogService:
             "input_payload": input_payload,
             "output_payload": output_payload,
             "rag_retrieval_id": rag_retrieval_id,
+            "prompt_version": prompt_version,
+            "fallback_level": fallback_level,
+            "llm_tokens": llm_tokens,
             "error_message": error_message,
         }
 
@@ -126,6 +135,9 @@ class AgentLogService:
             "input_payload": self._payload_for_storage(row["input_payload"]),
             "output_payload": self._payload_for_storage(row["output_payload"]),
             "rag_retrieval_id": row["rag_retrieval_id"],
+            "prompt_version": row["prompt_version"],
+            "fallback_level": row["fallback_level"],
+            "llm_tokens": row["llm_tokens"],
             "error_message": row["error_message"],
         }
 

@@ -1,5 +1,8 @@
-from sqlalchemy import create_engine, inspect
+from pathlib import Path
 
+from sqlalchemy import Numeric, create_engine, inspect
+
+from bank_reconciliation_agent.services.agent_log import agent_execution_log_table
 from bank_reconciliation_agent.services.ledger import error_ledger_table
 from bank_reconciliation_agent.services.queue import reconciliation_queue_table
 from bank_reconciliation_agent.services.rag_log import rag_retrieval_log_table
@@ -19,6 +22,7 @@ def test_task_101_schema_columns_are_present_after_create_all() -> None:
         reconciliation_queue_table,
         error_ledger_table,
         rag_retrieval_log_table,
+        agent_execution_log_table,
     ]
 
     for table in tables:
@@ -44,6 +48,64 @@ def test_task_101_schema_columns_are_present_after_create_all() -> None:
         {"user_id", "scenario_type", "exception_branch"},
     )
     assert_columns(inspector, "t_rag_retrieval_log", {"user_id", "scenario_type"})
+    assert_columns(
+        inspector,
+        "t_agent_execution_log",
+        {"prompt_version", "fallback_level", "llm_tokens"},
+    )
+
+
+def test_task_2a13_schema_columns_are_present_after_create_all() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    tables = [
+        agent_execution_log_table,
+        reconciliation_task_table,
+        error_ledger_table,
+    ]
+
+    for table in tables:
+        table.metadata.create_all(engine, tables=[table])
+
+    inspector = inspect(engine)
+
+    assert_columns(
+        inspector,
+        "t_agent_execution_log",
+        {"prompt_version", "fallback_level", "llm_tokens"},
+    )
+    assert_columns(
+        inspector,
+        "t_reconciliation_task",
+        {
+            "ai_processed_rows",
+            "fallback_l2_rows",
+            "fallback_l3_rows",
+            "total_llm_tokens",
+            "total_llm_cost",
+        },
+    )
+    assert_columns(inspector, "t_error_ledger", {"fallback_path"})
+    assert isinstance(reconciliation_task_table.c.total_llm_cost.type, Numeric)
+    assert reconciliation_task_table.c.total_llm_cost.type.precision == 10
+    assert reconciliation_task_table.c.total_llm_cost.type.scale == 4
+
+
+def test_task_2a13_schema_sql_contains_runtime_columns() -> None:
+    schema_sql = read_schema_sql()
+
+    expected_fragments = [
+        "prompt_version VARCHAR(16) DEFAULT NULL",
+        "fallback_level INT NOT NULL DEFAULT 0",
+        "llm_tokens INT NOT NULL DEFAULT 0",
+        "ai_processed_rows INT NOT NULL DEFAULT 0",
+        "fallback_l2_rows INT NOT NULL DEFAULT 0",
+        "fallback_l3_rows INT NOT NULL DEFAULT 0",
+        "total_llm_tokens INT NOT NULL DEFAULT 0",
+        "total_llm_cost DECIMAL(10,4) NOT NULL DEFAULT 0.0000",
+        "fallback_path VARCHAR(128) DEFAULT NULL",
+    ]
+    for fragment in expected_fragments:
+        assert fragment in schema_sql
 
 
 def test_task_101_branch_indexes_are_present() -> None:
@@ -67,3 +129,7 @@ def assert_columns(inspector, table_name: str, expected_columns: set[str]) -> No
 
 def index_names(inspector, table_name: str) -> set[str]:
     return {index["name"] for index in inspector.get_indexes(table_name)}
+
+
+def read_schema_sql() -> str:
+    return Path("src/bank_reconciliation_agent/db/schema.sql").read_text(encoding="utf-8")

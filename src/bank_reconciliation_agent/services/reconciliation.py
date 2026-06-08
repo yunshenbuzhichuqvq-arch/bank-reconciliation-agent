@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from io import BytesIO
@@ -8,12 +9,18 @@ from typing import NamedTuple
 
 import pandas as pd
 from fastapi import HTTPException, UploadFile
+from pydantic import ValidationError
 
-from bank_reconciliation_agent.agents.audit_agent import AuditDecision, audit_agent
+from bank_reconciliation_agent.agents.audit_agent import AuditDecision
+from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgentError
+from bank_reconciliation_agent.agents.trace_agent import TraceAgentError
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.core.llm.cost import compute_cost
+from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
+from bank_reconciliation_agent.core.logging import log
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery, LedgerRow
-from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
+from bank_reconciliation_agent.schemas.rag import RagSearchItem
 from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationAuditDecision,
     ReconciliationExceptionItem,
@@ -31,6 +38,7 @@ from bank_reconciliation_agent.services.rag_log import rag_log_service
 from bank_reconciliation_agent.services.task import task_service
 from bank_reconciliation_agent.services.trace import trace_writer
 from bank_reconciliation_agent.services.transactions import transaction_service
+from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 
 
 BANK_REQUIRED_COLUMNS = [
@@ -59,6 +67,14 @@ NUMERIC_COLUMNS = [
     "amount", "debit_amount", "credit_amount", "fee_amount",
     "transaction_amount", "net_amount", "balance_after",
 ]
+
+AGENT_PROCESSING_ERRORS = (
+    LLMUnavailable,
+    ExtractionAgentError,
+    TraceAgentError,
+    ValidationError,
+    json.JSONDecodeError,
+)
 
 
 class ReconciliationMatchSummary(NamedTuple):
@@ -254,7 +270,7 @@ class ReconciliationService:
             task_id=task_id, status=task.status,
             auto_fixed_rows=task.auto_fixed_rows,
             pending_ai_rows=task.pending_ai_rows,
-            ai_processed_rows=task.unresolved_rows,
+            ai_processed_rows=task.ai_processed_rows,
             pending_human_rows=task.pending_human_rows,
             unresolved_rows=task.unresolved_rows,
         )
@@ -299,10 +315,6 @@ class ReconciliationService:
         if value is None:
             return None
         return f"{value:.2f}"
-
-    def _retrieve_rag_items_by_query(self, query: str) -> list[RagSearchItem]:
-        response = rule_retriever.search(RagSearchRequest(query=query, top_k=2, min_score=0.0))
-        return response.items
 
     def _evidence_from_rag_source(self, rag_source: str | None) -> list[ReconciliationRagEvidence]:
         if not rag_source:
@@ -349,6 +361,9 @@ class ReconciliationService:
             risk_level=decision.risk_level, reason=decision.reason,
             evidence=[self._to_reconciliation_evidence(item) for item in decision.evidence],
             confidence=decision.confidence,
+            fallback_applied=decision.fallback_applied,
+            fallback_level=decision.fallback_level,
+            next_action=decision.next_action,
         )
 
     def _write_queue_entries(
@@ -380,19 +395,47 @@ class ReconciliationService:
         rows: list[LedgerRow] = []
         rag_log_rows: list[dict[str, object]] = []
         agent_log_rows: list[dict[str, object]] = []
+        ai_processed_rows = 0
+        fallback_l2_rows = 0
+        fallback_l3_rows = 0
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
         for result in results:
             if result.status == "AUTO_FIXED":
                 continue
 
             rag_query = self._build_rag_query(result)
-            rag_items = self._retrieve_rag_items_by_query(rag_query)
-            rag_hit = {
-                "chunk_ids": [item.chunk_id for item in rag_items],
-                "best_score": max((item.score for item in rag_items), default=None),
-            }
             rule_hit = {
                 "error_type": result.error_type or "",
                 "exception_branch": result.exception_branch,
+            }
+            try:
+                workflow_state = self._run_workflow_for_result(
+                    user_id=user_id,
+                    task_id=task_id,
+                    result=result,
+                    rag_query=rag_query,
+                )
+            except AGENT_PROCESSING_ERRORS as exc:
+                log.warning(
+                    "reconciliation_row_agent_fallback",
+                    flow_id=result.flow_id,
+                    task_id=task_id,
+                    error_type=type(exc).__name__,
+                )
+                workflow_state = self._agent_error_workflow_state(
+                    user_id=user_id,
+                    task_id=task_id,
+                    result=result,
+                    error=exc,
+                )
+            rag_items = [
+                RagSearchItem.model_validate(item)
+                for item in workflow_state["rag_context"]
+            ]
+            rag_hit = {
+                "chunk_ids": [item.chunk_id for item in rag_items],
+                "best_score": max((item.score for item in rag_items), default=None),
             }
             rag_log_rows.append(rag_log_service.build_row(
                 user_id=user_id,
@@ -401,20 +444,28 @@ class ReconciliationService:
                 top_k=2,
                 items=rag_items,
             ))
-            audit_decision = audit_agent.decide(
-                flow_id=result.flow_id, error_type=result.error_type or "",
-                exception_branch=result.exception_branch,
-                bank_amount=self._format_optional_decimal(result.bank_amount),
-                clear_amount=self._format_optional_decimal(result.clear_amount),
-                amount_diff=self._format_optional_decimal(result.amount_diff),
-                evidence=rag_items,
+            audit_decision = AuditDecision.model_validate(workflow_state["audit_decision"])
+            fallback_path = workflow_state.get("fallback_path")
+            prompt_tokens = sum(int(row.get("prompt_tokens", 0)) for row in workflow_state["agent_logs"])
+            completion_tokens = sum(
+                int(row.get("completion_tokens", 0)) for row in workflow_state["agent_logs"]
             )
+            llm_tokens = prompt_tokens + completion_tokens
+            ai_processed_rows += 1
+            fallback_l2_rows += int(bool(fallback_path and "L2" in fallback_path))
+            fallback_l3_rows += int(bool(fallback_path and "L3" in fallback_path))
+            total_prompt_tokens += prompt_tokens
+            total_completion_tokens += completion_tokens
             agent_output = {
                 "decision": audit_decision.decision,
                 "risk_level": audit_decision.risk_level,
                 "ai_suggestion": audit_decision.ai_suggestion,
                 "reason": audit_decision.reason,
                 "confidence": audit_decision.confidence,
+                "fallback_applied": audit_decision.fallback_applied,
+                "fallback_level": audit_decision.fallback_level,
+                "next_action": audit_decision.next_action,
+                "fallback_path": fallback_path,
             }
             input_payload = {
                 "flow_id": result.flow_id,
@@ -432,6 +483,9 @@ class ReconciliationService:
                 event_type="AUDIT_DECISION",
                 input_payload=input_payload,
                 output_payload=agent_output,
+                prompt_version=self._prompt_version_from_logs(workflow_state["agent_logs"]),
+                fallback_level=audit_decision.fallback_level,
+                llm_tokens=llm_tokens,
             ))
             trace_writer.write(
                 task_id=task_id,
@@ -456,12 +510,126 @@ class ReconciliationService:
                 ai_audit_opinion=audit_decision.reason,
                 ai_confidence=Decimal(str(audit_decision.confidence)).quantize(Decimal("0.0001")),
                 rag_source=", ".join(item.chunk_id for item in rag_items) or None,
+                fallback_path=fallback_path,
                 handle_status=audit_decision.decision,
             ))
 
         ledger_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=rows)
         rag_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=rag_log_rows)
         agent_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=agent_log_rows)
+        task_service.increment_ai_stats(
+            user_id=user_id,
+            task_id=task_id,
+            ai_processed_rows=ai_processed_rows,
+            fallback_l2_rows=fallback_l2_rows,
+            fallback_l3_rows=fallback_l3_rows,
+            total_llm_tokens=total_prompt_tokens + total_completion_tokens,
+            total_llm_cost=compute_cost(total_prompt_tokens, total_completion_tokens),
+        )
+
+    def _run_workflow_for_result(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        result: ReconciliationMatchResult,
+        rag_query: str,
+    ) -> ReconciliationState:
+        bank_row = transaction_service.get_bank_row(
+            user_id=user_id,
+            task_id=task_id,
+            flow_id=result.flow_id,
+        )
+        clear_row = transaction_service.get_clear_row(
+            user_id=user_id,
+            task_id=task_id,
+            flow_id=result.flow_id,
+        )
+        return run_item({
+            "task_id": task_id,
+            "user_id": user_id,
+            "thread_id": task_id,
+            "scenario_type": "BANK_ENTERPRISE",
+            "current_queue_id": None,
+            "source_a_item": bank_row or {"flow_id": result.flow_id},
+            "source_b_item": clear_row or {"flow_id": result.flow_id},
+            "error_type": result.error_type,
+            "exception_branch": result.exception_branch,
+            "math_result": {
+                "bank_amount": self._format_optional_decimal(result.bank_amount),
+                "clear_amount": self._format_optional_decimal(result.clear_amount),
+                "amount_diff": self._format_optional_decimal(result.amount_diff),
+            },
+            "extraction_result": {},
+            "rag_context": [],
+            "audit_decision": {},
+            "confidence": None,
+            "retry_count": 0,
+            "fallback_level": 0,
+            "next_action": "",
+            "error_message": None,
+            "agent_logs": [],
+            "rag_query": rag_query,
+        })
+
+    def _agent_error_workflow_state(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        result: ReconciliationMatchResult,
+        error: Exception,
+    ) -> ReconciliationState:
+        reason = f"AI 处理异常，自动转人工：{type(error).__name__}"
+        decision = AuditDecision(
+            flow_id=result.flow_id,
+            decision="PENDING_HUMAN",
+            risk_level="HIGH",
+            reason=reason,
+            ai_suggestion="PENDING_HUMAN",
+            evidence=[],
+            confidence=0.0,
+            fallback_applied=True,
+            fallback_level=1,
+            next_action="PENDING_HUMAN",
+        )
+        return {
+            "task_id": task_id,
+            "user_id": user_id,
+            "thread_id": task_id,
+            "scenario_type": "BANK_ENTERPRISE",
+            "current_queue_id": None,
+            "source_a_item": {"flow_id": result.flow_id},
+            "source_b_item": {"flow_id": result.flow_id},
+            "error_type": result.error_type,
+            "exception_branch": result.exception_branch,
+            "math_result": {
+                "bank_amount": self._format_optional_decimal(result.bank_amount),
+                "clear_amount": self._format_optional_decimal(result.clear_amount),
+                "amount_diff": self._format_optional_decimal(result.amount_diff),
+            },
+            "extraction_result": {},
+            "rag_context": [],
+            "audit_decision": decision.model_dump(mode="json"),
+            "confidence": 0.0,
+            "retry_count": 0,
+            "fallback_level": 1,
+            "next_action": "PENDING_HUMAN",
+            "error_message": reason,
+            "agent_logs": [
+                {
+                    "agent_name": "AuditAgent",
+                    "step": "agent_error_fallback",
+                    "flow_id": result.flow_id,
+                    "fallback_level": 1,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "llm_tokens": 0,
+                    "error_message": reason,
+                }
+            ],
+            "fallback_path": "AI_ERROR->HUMAN",
+        }
 
     def _ledger_discrepancy_amount(self, result: ReconciliationMatchResult) -> Decimal:
         if result.amount_diff is not None:
@@ -471,6 +639,13 @@ class ReconciliationService:
         if result.clear_amount is not None:
             return result.clear_amount
         return Decimal("0.00")
+
+    def _prompt_version_from_logs(self, logs: list[dict[str, object]]) -> str | None:
+        for row in reversed(logs):
+            prompt_version = row.get("prompt_version")
+            if prompt_version is not None:
+                return str(prompt_version)
+        return None
 
 
 reconciliation_service = ReconciliationService()

@@ -1,7 +1,9 @@
 import pytest
 
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent
+from bank_reconciliation_agent.core.llm.provider import FakeLLMProvider, LLMResult, LLMUnavailable
 from bank_reconciliation_agent.schemas.rag import RagSearchItem
+from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 
 
 def _evidence() -> list[RagSearchItem]:
@@ -94,3 +96,230 @@ def test_audit_agent_uses_generic_fallback_for_unknown_branch() -> None:
     assert decision.ai_suggestion == "PENDING_HUMAN"
     assert decision.confidence == 0.72
     assert "UNCLASSIFIED" in decision.reason
+
+
+def test_audit_agent_llm_path_returns_extended_decision_with_fake_provider() -> None:
+    decision = AuditAgent(provider=FakeLLMProvider()).decide_with_llm(
+        flow_id="F1007",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.flow_id == "F1007"
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.risk_level == "MEDIUM"
+    assert decision.fallback_applied is False
+    assert decision.fallback_level == 0
+    assert decision.next_action == "PENDING_HUMAN"
+    assert decision.confidence == 0.88
+    assert decision.evidence == _evidence()
+
+
+def test_audit_agent_llm_unavailable_falls_back_to_deterministic_pending_human() -> None:
+    decision = AuditAgent(provider=UnavailableProvider()).decide_with_llm(
+        flow_id="F1008",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.flow_id == "F1008"
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.risk_level == "MEDIUM"
+    assert decision.fallback_applied is True
+    assert decision.fallback_level == 1
+    assert decision.next_action == "PENDING_HUMAN"
+    assert "金额不一致" in decision.reason
+    assert decision.evidence == _evidence()
+
+
+def test_audit_agent_invalid_llm_output_falls_back_without_raising() -> None:
+    providers = [
+        InvalidJsonProvider(),
+        InvalidSchemaProvider(
+            '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"缺字段",'
+            '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"]}'
+        ),
+        InvalidSchemaProvider(
+            '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"置信度越界",'
+            '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"],"confidence":1.5}'
+        ),
+    ]
+
+    for provider in providers:
+        decision = AuditAgent(provider=provider).decide_with_llm(
+            flow_id="F1008-BAD",
+            error_type="AMOUNT_MISMATCH",
+            exception_branch="BE-R002",
+            bank_amount="300.00",
+            clear_amount="295.00",
+            amount_diff="5.00",
+            evidence=_evidence(),
+        )
+
+        assert decision.flow_id == "F1008-BAD"
+        assert decision.decision == "PENDING_HUMAN"
+        assert decision.fallback_applied is True
+        assert decision.fallback_level == 1
+        assert decision.next_action == "PENDING_HUMAN"
+        assert "金额不一致" in decision.reason
+
+
+def test_audit_agent_llm_path_defers_when_rag_evidence_is_missing() -> None:
+    decision = AuditAgent(provider=FakeLLMProvider()).decide_with_llm(
+        flow_id="F1009",
+        error_type="SINGLE_SIDE_MISSING",
+        exception_branch="BE-R005",
+        bank_amount="120.00",
+        clear_amount=None,
+        amount_diff=None,
+        evidence=[],
+    )
+
+    assert decision.flow_id == "F1009"
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.risk_level == "HIGH"
+    assert decision.fallback_applied is False
+    assert decision.fallback_level == 0
+    assert decision.next_action == "PENDING_HUMAN"
+    assert decision.confidence == 0.0
+    assert decision.evidence == []
+
+
+def test_audit_agent_injects_few_shot_and_trace_context_into_llm_messages() -> None:
+    provider = RecordingProvider()
+    few_shot_cases = [
+        {
+            "flow_id": "FLOW-OLD-001",
+            "exception_branch": "BE-R002",
+            "ai_audit_opinion": "人工确认金额差异需复核",
+            "handle_status": "HELD",
+        }
+    ]
+    trace_context = {
+        "trace_found": True,
+        "related_flow_ids": ["FLOW-T1-001"],
+        "trace_summary": "发现 T+1 到账线索",
+        "confidence": 0.91,
+    }
+
+    AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F1011",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+        few_shot_cases=few_shot_cases,
+        trace_context=trace_context,
+    )
+
+    assert provider.messages is not None
+    user_payload = provider.user_payload()
+    assert user_payload["few_shot_cases"] == few_shot_cases
+    assert user_payload["trace_context"] == trace_context
+
+
+def test_reconciliation_audit_decision_schema_includes_fallback_fields() -> None:
+    decision = AuditAgent(provider=FakeLLMProvider()).decide_with_llm(
+        flow_id="F1010",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    response_decision = ReconciliationService()._to_reconciliation_audit_decision(decision)
+
+    assert response_decision.fallback_applied is False
+    assert response_decision.fallback_level == 0
+    assert response_decision.next_action == "PENDING_HUMAN"
+
+
+class UnavailableProvider:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        raise LLMUnavailable("provider unavailable")
+
+
+class InvalidJsonProvider:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        return LLMResult(
+            text="{not-json",
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="invalid-json",
+        )
+
+
+class InvalidSchemaProvider:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        return LLMResult(
+            text=self.text,
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="invalid-schema",
+        )
+
+
+class RecordingProvider:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, str]] | None = None
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del temperature, response_format
+        self.messages = messages
+        return LLMResult(
+            text=(
+                '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"记录测试",'
+                '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"],"confidence":0.86}'
+            ),
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="recording",
+        )
+
+    def user_payload(self) -> dict[str, object]:
+        import json
+
+        assert self.messages is not None
+        return json.loads(self.messages[1]["content"])

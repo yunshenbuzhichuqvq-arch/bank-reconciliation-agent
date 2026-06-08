@@ -16,6 +16,8 @@ dependencies = [
     "pymysql>=1.1.0",
     "chromadb>=0.5.0",
     "pyyaml>=6.0",
+    "structlog>=24.0.0",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +37,9 @@ packages = ["src/bank_reconciliation_agent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "src"]
+markers = [
+    "live: opt-in tests that call external live services",
+]
 
 [tool.ruff]
 line-length = 100

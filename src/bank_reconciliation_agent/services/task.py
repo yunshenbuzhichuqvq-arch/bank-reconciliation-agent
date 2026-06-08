@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import NamedTuple
 
 from sqlalchemy import (
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    Numeric,
     String,
     Table,
     UniqueConstraint,
@@ -43,6 +45,11 @@ reconciliation_task_table = Table(
     Column("pending_ai_rows", Integer, nullable=False, default=0),
     Column("pending_human_rows", Integer, nullable=False, default=0),
     Column("unresolved_rows", Integer, nullable=False, default=0),
+    Column("ai_processed_rows", Integer, nullable=False, server_default="0"),
+    Column("fallback_l2_rows", Integer, nullable=False, server_default="0"),
+    Column("fallback_l3_rows", Integer, nullable=False, server_default="0"),
+    Column("total_llm_tokens", Integer, nullable=False, server_default="0"),
+    Column("total_llm_cost", Numeric(10, 4), nullable=False, server_default="0.0000"),
     Column("created_at", DateTime, server_default=func.now()),
     Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
     UniqueConstraint("user_id", "task_id", name="uk_task_user_task"),
@@ -59,6 +66,11 @@ class ReconciliationTaskRow(NamedTuple):
     pending_ai_rows: int
     pending_human_rows: int
     unresolved_rows: int
+    ai_processed_rows: int
+    fallback_l2_rows: int
+    fallback_l3_rows: int
+    total_llm_tokens: int
+    total_llm_cost: Decimal
 
 
 class TaskService:
@@ -123,6 +135,53 @@ class TaskService:
             )
         return result.rowcount > 0
 
+    def increment_ai_stats(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        ai_processed_rows: int,
+        fallback_l2_rows: int,
+        fallback_l3_rows: int,
+        total_llm_tokens: int,
+        total_llm_cost: Decimal,
+        connection: Connection | None = None,
+    ) -> None:
+        self._ensure_initialized()
+
+        def _execute(conn: Connection) -> None:
+            conn.execute(
+                update(reconciliation_task_table)
+                .where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.task_id == task_id,
+                )
+                .values(
+                    ai_processed_rows=(
+                        reconciliation_task_table.c.ai_processed_rows + ai_processed_rows
+                    ),
+                    fallback_l2_rows=(
+                        reconciliation_task_table.c.fallback_l2_rows + fallback_l2_rows
+                    ),
+                    fallback_l3_rows=(
+                        reconciliation_task_table.c.fallback_l3_rows + fallback_l3_rows
+                    ),
+                    total_llm_tokens=(
+                        reconciliation_task_table.c.total_llm_tokens + total_llm_tokens
+                    ),
+                    total_llm_cost=(
+                        reconciliation_task_table.c.total_llm_cost + total_llm_cost
+                    ),
+                    updated_at=func.now(),
+                )
+            )
+
+        if connection is not None:
+            _execute(connection)
+        else:
+            with self._engine.begin() as conn:
+                _execute(conn)
+
     def get(self, *, user_id: str, task_id: str) -> ReconciliationTaskRow | None:
         self._ensure_initialized()
         statement = select(reconciliation_task_table).where(
@@ -143,6 +202,11 @@ class TaskService:
             pending_ai_rows=row["pending_ai_rows"],
             pending_human_rows=row["pending_human_rows"],
             unresolved_rows=row["unresolved_rows"],
+            ai_processed_rows=row["ai_processed_rows"],
+            fallback_l2_rows=row["fallback_l2_rows"],
+            fallback_l3_rows=row["fallback_l3_rows"],
+            total_llm_tokens=row["total_llm_tokens"],
+            total_llm_cost=Decimal(str(row["total_llm_cost"])),
         )
 
     def _ensure_initialized(self) -> None:

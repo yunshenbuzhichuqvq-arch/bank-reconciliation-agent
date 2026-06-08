@@ -1,0 +1,170 @@
+import json
+from typing import Any, Literal, Protocol
+
+from pydantic import BaseModel
+
+from bank_reconciliation_agent.core.config import settings
+
+
+class LLMResult(BaseModel):
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+    model: str
+
+
+class LLMUnavailable(RuntimeError):
+    """Raised when the configured LLM provider cannot return a usable response."""
+
+
+class LLMProvider(Protocol):
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: Literal["text", "json_object"] = "json_object",
+    ) -> LLMResult: ...
+
+
+class FakeLLMProvider:
+    model = "fake-llm"
+    prompt_tokens = 128
+    completion_tokens = 64
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: Literal["text", "json_object"] = "json_object",
+    ) -> LLMResult:
+        del temperature, response_format
+        content = "\n".join(message.get("content", "") for message in messages).lower()
+        payload = self._payload_for(content)
+        return LLMResult(
+            text=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            model=self.model,
+        )
+
+    def _payload_for(self, content: str) -> dict[str, object]:
+        if '"task": "extraction"' in content or "extraction" in content:
+            return self._extraction_payload()
+        if '"task": "trace"' in content:
+            return self._trace_payload()
+        if '"task": "audit"' in content or "audit" in content:
+            return self._audit_payload(content)
+        if "extract" in content or "提取" in content:
+            return self._extraction_payload()
+        if "trace" in content or "追溯" in content or "跨日" in content or "t+1" in content:
+            return self._trace_payload()
+        return self._audit_payload(content)
+
+    def _extraction_payload(self) -> dict[str, object]:
+        return {
+            "agent": "extraction",
+            "standard_type": "REVERSAL",
+            "original_flow_id": "FLOW-ORIGINAL-001",
+            "cleaned_remark": "识别到冲正线索，待后续规则核验",
+            "confidence": 0.92,
+        }
+
+    def _trace_payload(self) -> dict[str, object]:
+        return {
+            "agent": "trace",
+            "trace_found": True,
+            "related_flow_ids": ["FLOW-T1-001"],
+            "trace_summary": "发现 T+1 追溯线索，建议人工核验关联流水",
+            "confidence": 0.9,
+        }
+
+    def _audit_payload(self, content: str) -> dict[str, object]:
+        reason = "Fake provider 返回固定审计结论，用于离线确定性测试"
+        if "be-r002" in content or "amount_mismatch" in content:
+            reason = "银行端与企业端金额不一致，Fake provider 建议人工复核。"
+        return {
+            "agent": "audit",
+            "decision": "PENDING_HUMAN",
+            "risk_level": "MEDIUM",
+            "reason": reason,
+            "ai_suggestion": "PENDING_HUMAN",
+            "evidence": ["fake-rag-evidence"],
+            "confidence": 0.88,
+        }
+
+
+class DeepSeekProvider:
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        model: str,
+        base_url: str = "https://api.deepseek.com",
+        client: Any | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url
+        self._client = client
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: Literal["text", "json_object"] = "json_object",
+    ) -> LLMResult:
+        if not self.api_key:
+            raise LLMUnavailable("DeepSeek API key is not configured")
+
+        try:
+            request_kwargs: dict[str, object] = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature,
+                "stream": False,
+            }
+            if response_format == "json_object":
+                request_kwargs["response_format"] = {"type": "json_object"}
+            response = self._client_or_create().chat.completions.create(**request_kwargs)
+        except Exception as exc:
+            raise LLMUnavailable("DeepSeek request failed") from exc
+
+        message = response.choices[0].message
+        usage = getattr(response, "usage", None)
+        return LLMResult(
+            text=message.content or "",
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage is not None else 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) if usage is not None else 0,
+            model=self.model,
+        )
+
+    def _client_or_create(self) -> Any:
+        if self._client is not None:
+            return self._client
+
+        try:
+            from openai import OpenAI
+        except Exception as exc:
+            raise LLMUnavailable("OpenAI SDK is not installed") from exc
+
+        self._client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=30.0,
+        )
+        return self._client
+
+
+def get_llm_provider() -> LLMProvider:
+    if settings.llm_provider == "fake":
+        return FakeLLMProvider()
+    if settings.llm_provider == "deepseek":
+        return DeepSeekProvider(
+            api_key=settings.deepseek_api_key,
+            model=settings.deepseek_model,
+            base_url=settings.deepseek_base_url,
+        )
+    raise LLMUnavailable(f"Unsupported LLM provider: {settings.llm_provider}")

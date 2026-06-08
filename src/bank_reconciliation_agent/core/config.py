@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +13,10 @@ class Settings(BaseSettings):
     trace_dir: str = "./data/traces"
     max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
     max_upload_rows: int = 10_000
+    llm_provider: Literal["fake", "deepseek"] = "fake"
+    deepseek_api_key: str | None = None
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -1,7 +1,11 @@
+import json
 from typing import NamedTuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
+from bank_reconciliation_agent.core.llm.provider import LLMProvider, LLMUnavailable, get_llm_provider
+from bank_reconciliation_agent.core.logging import log
+from bank_reconciliation_agent.core.prompts import load_prompt
 from bank_reconciliation_agent.schemas.rag import RagSearchItem
 
 
@@ -47,10 +51,35 @@ class AuditDecision(BaseModel):
     reason: str
     ai_suggestion: str
     evidence: list[RagSearchItem]
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)
+    fallback_applied: bool = False
+    fallback_level: int = 0
+    next_action: str = "PENDING_HUMAN"
+
+
+class LLMAuditDecision(BaseModel):
+    decision: str
+    risk_level: str
+    reason: str
+    ai_suggestion: str
+    evidence: list[str]
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class AuditAgent:
+    def __init__(
+        self,
+        *,
+        provider: LLMProvider | None = None,
+        prompt_text: str | None = None,
+        prompt_version: str | None = None,
+    ) -> None:
+        loaded_prompt_text, loaded_prompt_version = load_prompt("audit")
+        self.provider = provider or get_llm_provider()
+        self.prompt_text = prompt_text or loaded_prompt_text
+        self.prompt_version = prompt_version or loaded_prompt_version
+        self.last_llm_result = None
+
     def decide(
         self,
         flow_id: str,
@@ -96,7 +125,142 @@ class AuditAgent:
             ai_suggestion=ai_suggestion,
             evidence=evidence,
             confidence=confidence,
+            next_action=ai_suggestion,
         )
+
+    def decide_with_llm(
+        self,
+        flow_id: str,
+        error_type: str,
+        exception_branch: str | None,
+        bank_amount: str | None,
+        clear_amount: str | None,
+        amount_diff: str | None,
+        evidence: list[RagSearchItem],
+        few_shot_cases: list[dict[str, object]] | None = None,
+        trace_context: dict[str, object] | None = None,
+    ) -> AuditDecision:
+        """LLM audit path; missing evidence still short-circuits to manual review."""
+        if not evidence:
+            return self.decide(
+                flow_id=flow_id,
+                error_type=error_type,
+                exception_branch=exception_branch,
+                bank_amount=bank_amount,
+                clear_amount=clear_amount,
+                amount_diff=amount_diff,
+                evidence=[],
+            )
+
+        user_payload: dict[str, object] = {
+            "task": "audit",
+            "flow_id": flow_id,
+            "error_type": error_type,
+            "exception_branch": exception_branch,
+            "bank_amount": bank_amount,
+            "clear_amount": clear_amount,
+            "amount_diff": amount_diff,
+            "evidence": [item.model_dump(mode="json") for item in evidence],
+        }
+        if few_shot_cases is not None:
+            user_payload["few_shot_cases"] = few_shot_cases
+        if trace_context is not None:
+            user_payload["trace_context"] = trace_context
+
+        messages = [
+            {"role": "system", "content": self.prompt_text},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    user_payload,
+                    default=str,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            },
+        ]
+
+        log.info(
+            "agent_llm_call",
+            agent_name="AuditAgent",
+            step="decide_with_llm",
+            prompt_version=self.prompt_version,
+        )
+        try:
+            result = self.provider.complete(messages, temperature=0.0, response_format="json_object")
+            self.last_llm_result = result
+            llm_decision = LLMAuditDecision.model_validate(json.loads(result.text))
+        except LLMUnavailable:
+            log.warning(
+                "agent_llm_unavailable",
+                agent_name="AuditAgent",
+                step="decide_with_llm",
+                prompt_version=self.prompt_version,
+            )
+            return self._fallback_decision(
+                flow_id=flow_id,
+                error_type=error_type,
+                exception_branch=exception_branch,
+                bank_amount=bank_amount,
+                clear_amount=clear_amount,
+                amount_diff=amount_diff,
+                evidence=evidence,
+            )
+        except (json.JSONDecodeError, ValidationError) as exc:
+            log.warning(
+                "agent_llm_invalid_output",
+                agent_name="AuditAgent",
+                step="decide_with_llm",
+                prompt_version=self.prompt_version,
+                error_type=type(exc).__name__,
+            )
+            return self._fallback_decision(
+                flow_id=flow_id,
+                error_type=error_type,
+                exception_branch=exception_branch,
+                bank_amount=bank_amount,
+                clear_amount=clear_amount,
+                amount_diff=amount_diff,
+                evidence=evidence,
+            )
+
+        return AuditDecision(
+            flow_id=flow_id,
+            decision=llm_decision.decision,
+            risk_level=llm_decision.risk_level,
+            reason=llm_decision.reason,
+            ai_suggestion=llm_decision.ai_suggestion,
+            evidence=evidence,
+            confidence=llm_decision.confidence,
+            fallback_applied=False,
+            fallback_level=0,
+            next_action=llm_decision.decision,
+        )
+
+    def _fallback_decision(
+        self,
+        *,
+        flow_id: str,
+        error_type: str,
+        exception_branch: str | None,
+        bank_amount: str | None,
+        clear_amount: str | None,
+        amount_diff: str | None,
+        evidence: list[RagSearchItem],
+    ) -> AuditDecision:
+        fallback_decision = self.decide(
+            flow_id=flow_id,
+            error_type=error_type,
+            exception_branch=exception_branch,
+            bank_amount=bank_amount,
+            clear_amount=clear_amount,
+            amount_diff=amount_diff,
+            evidence=evidence,
+        )
+        fallback_decision.fallback_applied = True
+        fallback_decision.fallback_level = 1
+        fallback_decision.next_action = "PENDING_HUMAN"
+        return fallback_decision
 
     def _confidence_from_evidence(self, evidence: list[RagSearchItem]) -> float:
         best_score = max(item.score for item in evidence)

@@ -13,3 +13,5 @@ build/
 chroma_data/
 uploads/
 data/traces/
+/spec.md
+/tasks.md

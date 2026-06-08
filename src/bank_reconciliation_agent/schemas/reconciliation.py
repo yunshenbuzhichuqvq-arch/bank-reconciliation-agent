@@ -46,6 +46,9 @@ class ReconciliationAuditDecision(BaseModel):
     reason: str
     evidence: list[ReconciliationRagEvidence]
     confidence: float
+    fallback_applied: bool = False
+    fallback_level: int = 0
+    next_action: str = "PENDING_HUMAN"
 
 
 class ReconciliationExceptionItem(BaseModel):

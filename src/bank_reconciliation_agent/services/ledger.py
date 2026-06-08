@@ -47,6 +47,7 @@ error_ledger_table = Table(
     Column("ai_audit_opinion", Text, nullable=True),
     Column("ai_confidence", Numeric(5, 4), nullable=True),
     Column("rag_source", String(512), nullable=True),
+    Column("fallback_path", String(128), nullable=True),
     Column("handle_status", String(32), nullable=False),
     Column("handler_username", String(64), nullable=True),
     Column("handle_remark", String(255), nullable=True),
@@ -137,6 +138,7 @@ class LedgerService:
             "ai_audit_opinion": row.ai_audit_opinion,
             "ai_confidence": row.ai_confidence,
             "rag_source": row.rag_source,
+            "fallback_path": row.fallback_path,
             "handle_status": row.handle_status,
         }
 
@@ -153,6 +155,7 @@ class LedgerService:
             ai_audit_opinion=row["ai_audit_opinion"],
             ai_confidence=self._to_decimal_or_none(row["ai_confidence"]),
             rag_source=row["rag_source"],
+            fallback_path=row["fallback_path"],
             handle_status=row["handle_status"],
         )
 

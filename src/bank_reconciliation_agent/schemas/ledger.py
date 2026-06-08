@@ -25,4 +25,5 @@ class LedgerRow(BaseModel):
     ai_audit_opinion: str | None
     ai_confidence: Decimal | None
     rag_source: str | None
+    fallback_path: str | None = None
     handle_status: str
