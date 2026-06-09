@@ -159,7 +159,7 @@ def test_l2_handles_empty_fallback_cases_without_error() -> None:
     assert result["fallback_path"] == "L1->L2"
 
 
-def test_persistence_services_store_fallback_fields_and_task_stats() -> None:
+def test_persistence_services_store_fallback_fields_and_task_stats_with_replace_semantics() -> None:
     engine = create_engine("sqlite:///:memory:")
     ledger_service = LedgerService(engine)
     agent_log_service = AgentLogService(engine)
@@ -202,7 +202,7 @@ def test_persistence_services_store_fallback_fields_and_task_stats() -> None:
             )
         ],
     )
-    task_service.increment_ai_stats(
+    task_service.replace_ai_stats(
         user_id="demo_user",
         task_id="TASK-FB-DB",
         ai_processed_rows=1,
@@ -210,6 +210,15 @@ def test_persistence_services_store_fallback_fields_and_task_stats() -> None:
         fallback_l3_rows=1,
         total_llm_tokens=384,
         total_llm_cost=Decimal("0.0002"),
+    )
+    task_service.replace_ai_stats(
+        user_id="demo_user",
+        task_id="TASK-FB-DB",
+        ai_processed_rows=1,
+        fallback_l2_rows=0,
+        fallback_l3_rows=0,
+        total_llm_tokens=128,
+        total_llm_cost=Decimal("0.0001"),
     )
 
     with engine.connect() as connection:
@@ -222,10 +231,14 @@ def test_persistence_services_store_fallback_fields_and_task_stats() -> None:
     assert agent_log_row["fallback_level"] == 3
     assert agent_log_row["llm_tokens"] == 384
     assert task_row["ai_processed_rows"] == 1
-    assert task_row["fallback_l2_rows"] == 1
-    assert task_row["fallback_l3_rows"] == 1
-    assert task_row["total_llm_tokens"] == 384
-    assert Decimal(str(task_row["total_llm_cost"])) == Decimal("0.0002")
+    assert task_row["fallback_l2_rows"] == 0
+    assert task_row["fallback_l3_rows"] == 0
+    assert task_row["total_llm_tokens"] == 128
+    assert Decimal(str(task_row["total_llm_cost"])) == Decimal("0.0001")
+
+
+def test_task_service_no_longer_exposes_increment_ai_stats() -> None:
+    assert not hasattr(TaskService, "increment_ai_stats")
 
 
 class StaticRetriever:

@@ -204,6 +204,12 @@ CREATE TABLE IF NOT EXISTS t_rag_retrieval_log (
   top_k INT NOT NULL,
   best_score DECIMAL(8,4),
   sources JSON,
+  rewritten_query TEXT DEFAULT NULL,
+  dense_score DECIMAL(8,4) DEFAULT NULL,
+  bm25_score DECIMAL(8,4) DEFAULT NULL,
+  reranker_score DECIMAL(8,4) DEFAULT NULL,
+  fusion_rank INT DEFAULT NULL,
+  selected_chunk_id VARCHAR(128) DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_rag_task_queue (task_id, queue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

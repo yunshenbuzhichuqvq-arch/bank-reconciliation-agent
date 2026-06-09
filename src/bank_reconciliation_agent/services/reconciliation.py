@@ -20,7 +20,7 @@ from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
 from bank_reconciliation_agent.core.logging import log
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery, LedgerRow
-from bank_reconciliation_agent.schemas.rag import RagSearchItem
+from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationAuditDecision,
     ReconciliationExceptionItem,
@@ -433,6 +433,9 @@ class ReconciliationService:
                 RagSearchItem.model_validate(item)
                 for item in workflow_state["rag_context"]
             ]
+            rag_response = RagSearchResponse.model_validate(
+                workflow_state.get("rag_response", {"items": rag_items})
+            )
             rag_hit = {
                 "chunk_ids": [item.chunk_id for item in rag_items],
                 "best_score": max((item.score for item in rag_items), default=None),
@@ -441,8 +444,9 @@ class ReconciliationService:
                 user_id=user_id,
                 task_id=task_id,
                 query_text=rag_query,
-                top_k=2,
+                top_k=settings.rag_rerank_top_k,
                 items=rag_items,
+                response=rag_response,
             ))
             audit_decision = AuditDecision.model_validate(workflow_state["audit_decision"])
             fallback_path = workflow_state.get("fallback_path")
@@ -517,7 +521,7 @@ class ReconciliationService:
         ledger_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=rows)
         rag_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=rag_log_rows)
         agent_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=agent_log_rows)
-        task_service.increment_ai_stats(
+        task_service.replace_ai_stats(
             user_id=user_id,
             task_id=task_id,
             ai_processed_rows=ai_processed_rows,

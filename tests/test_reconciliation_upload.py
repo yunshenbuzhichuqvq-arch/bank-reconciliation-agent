@@ -6,6 +6,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from bank_reconciliation_agent.main import app
+from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService
 from bank_reconciliation_agent.services.queue import QueueService
@@ -193,7 +194,7 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
         query_marker="AMOUNT_MISMATCH",
     )
     assert rag_log_f2003 is not None
-    assert rag_log_f2003["top_k"] == 2
+    assert rag_log_f2003["top_k"] == settings.rag_rerank_top_k
     assert "金额不一致 对账差异 处理规则" in rag_log_f2003["query_text"]
     assert "bank_amount=300.00" in rag_log_f2003["query_text"]
     assert "unionpay_reconciliation_faq_001" in rag_log_f2003["sources"]

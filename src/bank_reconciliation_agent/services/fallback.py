@@ -6,13 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision
+from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
+from bank_reconciliation_agent.rag.scoring import representative_score
 from bank_reconciliation_agent.schemas.rag import RagSearchItem
 from bank_reconciliation_agent.services.ledger import error_ledger_table
 
 
 CONFIDENCE_THRESHOLD = 0.85
-RAG_LOW_SCORE = 0.5
 
 
 class FallbackCaseProvider(Protocol):
@@ -68,13 +69,16 @@ class LedgerFallbackCaseProvider:
 def best_rag_score(rag_items: list[RagSearchItem]) -> float | None:
     if not rag_items:
         return None
-    return max(item.score for item in rag_items)
+    return max(
+        (score for item in rag_items if (score := representative_score(item)) is not None),
+        default=None,
+    )
 
 
 def l1_requires_l2(decision: AuditDecision, rag_items: list[RagSearchItem]) -> bool:
     score = best_rag_score(rag_items)
     return decision.confidence < CONFIDENCE_THRESHOLD or (
-        score is not None and score < RAG_LOW_SCORE
+        score is not None and score < settings.rag_low_score
     )
 
 

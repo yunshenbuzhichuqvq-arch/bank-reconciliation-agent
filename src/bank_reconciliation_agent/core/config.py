@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-v4-pro"
     deepseek_base_url: str = "https://api.deepseek.com"
+    enable_rag_rewrite: bool = False
+    enable_rag_hybrid: bool = False
+    enable_rag_reranker: bool = False
+    rag_dense_top_n: int = 20
+    rag_bm25_top_n: int = 20
+    rag_rerank_top_k: int = 5
+    rag_rrf_k: int = 60
+    rag_dense_min_score: float = 0.5
+    rag_reranker_min_score: float = 0.3
+    rag_low_score: float = 0.5
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

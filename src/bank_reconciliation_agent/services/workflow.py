@@ -5,9 +5,10 @@ from typing import Any, NotRequired, Protocol, TypedDict
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, audit_agent
 from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgent, extraction_agent
 from bank_reconciliation_agent.agents.trace_agent import TraceAgent, trace_agent
+from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.core.logging import bind_trace_context, log
 from bank_reconciliation_agent.rag.retriever import rule_retriever
-from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest, RagSearchResponse
+from bank_reconciliation_agent.schemas.rag import RagSearchRequest, RagSearchResponse
 from bank_reconciliation_agent.services.fallback import (
     FallbackCaseProvider,
     confidence_is_low,
@@ -42,6 +43,7 @@ class ReconciliationState(TypedDict):
     error_message: str | None
     agent_logs: list[dict[str, Any]]
     rag_query: NotRequired[str]
+    rag_response: NotRequired[dict[str, Any]]
     fallback_path: NotRequired[str]
     fallback_cases: NotRequired[list[dict[str, Any]]]
 
@@ -113,8 +115,10 @@ def run_item(
             }
         )
 
-    rag_items = _retrieve_rag_items(state, retriever)
+    rag_response = _retrieve_rag_response(state, retriever)
+    rag_items = rag_response.items
     state["rag_context"] = [item.model_dump(mode="json") for item in rag_items]
+    state["rag_response"] = rag_response.model_dump(mode="json")
 
     audit_decision = audit_agent.decide_with_llm(
         flow_id=flow_id,
@@ -229,10 +233,19 @@ def run_item(
     return state
 
 
-def _retrieve_rag_items(state: ReconciliationState, retriever: Retriever) -> list[RagSearchItem]:
+def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> RagSearchResponse:
     query = state.get("rag_query") or _build_rag_query(state)
-    response = retriever.search(RagSearchRequest(query=query, top_k=2, min_score=0.0))
-    return response.items
+    return retriever.search(
+        RagSearchRequest(
+            query=query,
+            top_k=settings.rag_rerank_top_k,
+            min_score=0.0,
+            scenario_type=state["scenario_type"],
+            enable_rewrite=settings.enable_rag_rewrite,
+            enable_hybrid=settings.enable_rag_hybrid,
+            enable_reranker=settings.enable_rag_reranker,
+        )
+    )
 
 
 def _build_rag_query(state: ReconciliationState) -> str:

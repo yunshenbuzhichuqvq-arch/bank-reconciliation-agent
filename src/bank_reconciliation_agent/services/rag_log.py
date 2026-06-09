@@ -23,7 +23,8 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 
 from bank_reconciliation_agent.db.session import get_engine
-from bank_reconciliation_agent.schemas.rag import RagSearchItem
+from bank_reconciliation_agent.rag.scoring import representative_score
+from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 
 
 metadata = MetaData()
@@ -40,6 +41,12 @@ rag_retrieval_log_table = Table(
     Column("top_k", Integer, nullable=False),
     Column("best_score", Numeric(8, 4), nullable=True),
     Column("sources", JSON, nullable=True),
+    Column("rewritten_query", Text, nullable=True),
+    Column("dense_score", Numeric(8, 4), nullable=True),
+    Column("bm25_score", Numeric(8, 4), nullable=True),
+    Column("reranker_score", Numeric(8, 4), nullable=True),
+    Column("fusion_rank", Integer, nullable=True),
+    Column("selected_chunk_id", String(128), nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     Index("idx_rag_task_queue", "task_id", "queue_id"),
 )
@@ -80,8 +87,17 @@ class RagLogService:
         query_text: str,
         top_k: int,
         items: list[RagSearchItem],
+        response: RagSearchResponse | None = None,
     ) -> dict[str, object]:
-        best_score = max((Decimal(str(item.score)) for item in items), default=None)
+        selected_item = items[0] if items else None
+        best_score = max(
+            (
+                Decimal(str(score))
+                for item in items
+                if (score := representative_score(item)) is not None
+            ),
+            default=None,
+        )
         return {
             "user_id": user_id,
             "task_id": task_id,
@@ -90,6 +106,14 @@ class RagLogService:
             "top_k": top_k,
             "best_score": best_score,
             "sources": [item.chunk_id for item in items],
+            "rewritten_query": response.rewritten_query if response is not None else None,
+            "dense_score": _to_decimal(selected_item.dense_score) if selected_item is not None else None,
+            "bm25_score": _to_decimal(selected_item.bm25_score) if selected_item is not None else None,
+            "reranker_score": (
+                _to_decimal(selected_item.reranker_score) if selected_item is not None else None
+            ),
+            "fusion_rank": selected_item.fusion_rank if selected_item is not None else None,
+            "selected_chunk_id": selected_item.chunk_id if selected_item is not None else None,
         }
 
     def count_rows(self, *, user_id: str, task_id: str) -> int:
@@ -141,3 +165,9 @@ class RagLogService:
 
 
 rag_log_service = RagLogService()
+
+
+def _to_decimal(value: float | None) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value))

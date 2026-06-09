@@ -50,6 +50,8 @@ class FakeLLMProvider:
         )
 
     def _payload_for(self, content: str) -> dict[str, object]:
+        if '"task": "query_rewrite"' in content or "query_rewrite" in content or "改写" in content:
+            return self._query_rewrite_payload(content)
         if '"task": "extraction"' in content or "extraction" in content:
             return self._extraction_payload()
         if '"task": "trace"' in content:
@@ -61,6 +63,18 @@ class FakeLLMProvider:
         if "trace" in content or "追溯" in content or "跨日" in content or "t+1" in content:
             return self._trace_payload()
         return self._audit_payload(content)
+
+    def _query_rewrite_payload(self, content: str) -> dict[str, object]:
+        query = "规则检索"
+        try:
+            for line in reversed(content.splitlines()):
+                payload = json.loads(line)
+                if isinstance(payload, dict) and payload.get("task") == "query_rewrite":
+                    query = str(payload.get("query") or query)
+                    break
+        except json.JSONDecodeError:
+            pass
+        return {"rewritten_query": f"{query} 对账 规则"}
 
     def _extraction_payload(self) -> dict[str, object]:
         return {

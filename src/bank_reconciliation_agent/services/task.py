@@ -135,7 +135,7 @@ class TaskService:
             )
         return result.rowcount > 0
 
-    def increment_ai_stats(
+    def replace_ai_stats(
         self,
         *,
         user_id: str,
@@ -157,21 +157,11 @@ class TaskService:
                     reconciliation_task_table.c.task_id == task_id,
                 )
                 .values(
-                    ai_processed_rows=(
-                        reconciliation_task_table.c.ai_processed_rows + ai_processed_rows
-                    ),
-                    fallback_l2_rows=(
-                        reconciliation_task_table.c.fallback_l2_rows + fallback_l2_rows
-                    ),
-                    fallback_l3_rows=(
-                        reconciliation_task_table.c.fallback_l3_rows + fallback_l3_rows
-                    ),
-                    total_llm_tokens=(
-                        reconciliation_task_table.c.total_llm_tokens + total_llm_tokens
-                    ),
-                    total_llm_cost=(
-                        reconciliation_task_table.c.total_llm_cost + total_llm_cost
-                    ),
+                    ai_processed_rows=ai_processed_rows,
+                    fallback_l2_rows=fallback_l2_rows,
+                    fallback_l3_rows=fallback_l3_rows,
+                    total_llm_tokens=total_llm_tokens,
+                    total_llm_cost=total_llm_cost,
                     updated_at=func.now(),
                 )
             )
