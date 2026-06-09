@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
 import pandas as pd
 
-from bank_reconciliation_agent.services.rule_engine import rule_engine
+from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.services.rule_engine import rule_engine_for
 
 
 REVERSAL_KEYWORDS = {"冲正", "红冲", "退款", "抹账", "撤销"}
@@ -19,20 +21,28 @@ class BranchResult(NamedTuple):
     bank_amount: Decimal | None
     clear_amount: Decimal | None
     amount_diff: Decimal | None
+    t1_candidate: dict[str, str] | None = None
 
 
 class ExceptionRouter:
-    def classify(self, bank_df: pd.DataFrame, clear_df: pd.DataFrame) -> list[BranchResult]:
+    def classify(
+        self,
+        bank_df: pd.DataFrame,
+        clear_df: pd.DataFrame,
+        *,
+        scenario_type: str = "BANK_ENTERPRISE",
+    ) -> list[BranchResult]:
         bank_by_flow_id = self._rows_by_flow_id(bank_df)
         clear_by_flow_id = self._rows_by_flow_id(clear_df)
         bank_duplicates = self._duplicate_flow_ids(
             bank_df,
-            party_column="counterparty_name_masked",
+            party_column=self._bank_party_column(scenario_type),
         )
         clear_duplicates = self._duplicate_flow_ids(
             clear_df,
-            party_column="payee_name_masked",
+            party_column=self._clear_party_column(scenario_type),
         )
+        rule_engine = rule_engine_for(scenario_type)
 
         results: list[BranchResult] = []
         for flow_id in sorted(bank_by_flow_id.keys() | clear_by_flow_id.keys()):
@@ -55,7 +65,16 @@ class ExceptionRouter:
                 ),
                 "duplicate_suspected": flow_id in bank_duplicates or flow_id in clear_duplicates,
             }
+            if scenario_type == "BANK_CLEARING":
+                facts["in_cutoff_window"] = self._in_cutoff_window(clear_row)
             match = rule_engine.evaluate(facts)
+            t1_candidate = None
+            if (
+                scenario_type == "BANK_CLEARING"
+                and match.exception_branch == "BC-R003"
+                and clear_row is not None
+            ):
+                t1_candidate = self._find_t1_candidate(clear_row, bank_df)
             results.append(
                 BranchResult(
                     flow_id=flow_id,
@@ -65,10 +84,21 @@ class ExceptionRouter:
                     bank_amount=bank_amount,
                     clear_amount=clear_amount,
                     amount_diff=self._amount_diff(bank_amount, clear_amount),
+                    t1_candidate=t1_candidate,
                 )
             )
 
         return results
+
+    def _bank_party_column(self, scenario_type: str) -> str:
+        if scenario_type == "BANK_CLEARING":
+            return "customer_name_masked"
+        return "counterparty_name_masked"
+
+    def _clear_party_column(self, scenario_type: str) -> str:
+        if scenario_type == "BANK_CLEARING":
+            return "payer_name_masked"
+        return "payee_name_masked"
 
     def _rows_by_flow_id(self, dataframe: pd.DataFrame) -> dict[str, dict[str, object]]:
         return {
@@ -100,6 +130,8 @@ class ExceptionRouter:
         bank_row: dict[str, object] | None,
         clear_row: dict[str, object] | None,
     ) -> str | None:
+        # ADR-015: this shared fact reports which source is missing. In clearing,
+        # `A` means the core/bank row is absent and the clearing row is present.
         if bank_row is None and clear_row is not None:
             return "A"
         if bank_row is not None and clear_row is None:
@@ -127,6 +159,17 @@ class ExceptionRouter:
     def _contains_reversal_keyword(self, value: str) -> bool:
         return any(keyword in value for keyword in REVERSAL_KEYWORDS)
 
+    def _in_cutoff_window(self, clear_row: dict[str, object] | None) -> bool:
+        if clear_row is None:
+            return False
+        trade_time = self._parse_trade_time(clear_row.get("trade_time"))
+        if trade_time is None:
+            return False
+        start, end = self._parse_cutoff_window(settings.cutoff_window)
+        if start < end:
+            return start <= trade_time < end
+        return trade_time >= start or trade_time < end
+
     def _normalize_summary(self, value: object) -> str:
         return "" if self._is_empty(value) else str(value).strip()
 
@@ -144,6 +187,35 @@ class ExceptionRouter:
             return None
         return bank_amount - clear_amount
 
+    def _find_t1_candidate(
+        self,
+        clear_row: dict[str, object],
+        bank_df: pd.DataFrame,
+    ) -> dict[str, str] | None:
+        clear_amount = self._amount_from_row(clear_row)
+        trade_date = self._parse_date(clear_row.get("trade_date"))
+        if clear_amount is None or trade_date is None:
+            return None
+
+        target_accounting_date = trade_date + timedelta(days=1)
+        clear_references = self._reference_values(clear_row)
+        if not clear_references:
+            return None
+
+        for bank_row in bank_df.to_dict("records"):
+            if self._amount_from_row(bank_row) != clear_amount:
+                continue
+            if self._parse_date(bank_row.get("accounting_date")) != target_accounting_date:
+                continue
+            if not clear_references & self._reference_values(bank_row):
+                continue
+            return {
+                "flow_id": str(bank_row["flow_id"]),
+                "accounting_date": target_accounting_date.isoformat(),
+            }
+
+        return None
+
     def _to_decimal(self, value: object) -> Decimal:
         return Decimal(str(value)).quantize(Decimal("0.01"))
 
@@ -151,6 +223,43 @@ class ExceptionRouter:
         if self._is_empty(value):
             return None
         return str(value)
+
+    def _parse_cutoff_window(self, value: str) -> tuple[time, time]:
+        start_raw, end_raw = [item.strip() for item in value.split("-", maxsplit=1)]
+        return self._parse_clock_time(start_raw), self._parse_clock_time(end_raw)
+
+    def _parse_trade_time(self, value: object) -> time | None:
+        if self._is_empty(value):
+            return None
+        try:
+            return self._parse_clock_time(str(value).strip())
+        except ValueError:
+            return None
+
+    def _parse_date(self, value: object) -> date | None:
+        if self._is_empty(value):
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            return date.fromisoformat(str(value).strip())
+        except ValueError:
+            return None
+
+    def _reference_values(self, row: dict[str, object]) -> set[str]:
+        return {
+            value
+            for key in ("reference_no", "merchant_order_no", "voucher_no")
+            if (value := self._to_optional_string(row.get(key)))
+        }
+
+    def _parse_clock_time(self, value: str) -> time:
+        if value == "24:00":
+            return time(0, 0)
+        hour_text, minute_text = value.split(":", maxsplit=1)
+        return time(hour=int(hour_text), minute=int(minute_text))
 
     def _is_empty(self, value: object) -> bool:
         return value is None or bool(pd.isna(value))

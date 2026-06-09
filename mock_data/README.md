@@ -31,6 +31,24 @@ The authoritative mapping for the MVP-1 files is `EXPECTED_BRANCHES` in
 `scripts/generate_mock_excel.py`. The generated files are `mvp1_bank.xlsx` and
 `mvp1_clear.xlsx`.
 
+MVP-2a3 clearing fixture:
+
+| flow_id | Scenario | Expected error_type | Expected exception_branch | Disposition |
+|---------|----------|---------------------|---------------------------|-------------|
+| BC3001 | Clearing exact match | None | None | AUTO_FIXED |
+| BC3002 | Clearing-side-only in daytime window | CLEARING_SINGLE_SIDE | BC-R001 | PENDING_HUMAN |
+| BC3003 | Cutoff cross-day with T+1 core candidate | CUTOFF_CROSS_DAY | BC-R003 | PENDING_HUMAN |
+| BC3004 | Cutoff cross-day without T+1 candidate | CUTOFF_CROSS_DAY | BC-R003 | PENDING_HUMAN |
+| CORE3003 | Supporting core-side T+1 candidate row | UNCLASSIFIED | None | PENDING_HUMAN |
+
+The authoritative mapping for the MVP-2a3 clearing files is
+`BANK_CLEARING_EXPECTED_BRANCHES` in `scripts/generate_mock_excel.py`. The
+generated files are `mvp2a3_core.xlsx` and `mvp2a3_clearing.xlsx`.
+
+All sample rows in this directory are fully fabricated for testing. They are
+not derived from real customers, real merchants, or real bank/clearing
+transactions.
+
 Shared normalized columns:
 
 - `flow_id`

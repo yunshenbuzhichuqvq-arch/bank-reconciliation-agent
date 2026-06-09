@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     rag_dense_min_score: float = 0.5
     rag_reranker_min_score: float = 0.3
     rag_low_score: float = 0.5
+    cutoff_window: str = "22:00-24:00"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

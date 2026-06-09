@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 from bank_reconciliation_agent.api.dependencies import CurrentUserId
 from bank_reconciliation_agent.schemas.common import ApiResponse
@@ -13,16 +13,25 @@ from bank_reconciliation_agent.services.reconciliation import reconciliation_ser
 
 router = APIRouter()
 
+VALID_SCENARIO_TYPES = {"BANK_ENTERPRISE", "BANK_CLEARING"}
+
 
 @router.post("/upload", response_model=ApiResponse[ReconciliationUploadResponse])
 async def upload_reconciliation_files(
     bank_file: UploadFile,
     clear_file: UploadFile,
     user_id: CurrentUserId,
+    scenario_type: str = Form("BANK_ENTERPRISE"),
 ) -> ApiResponse[ReconciliationUploadResponse]:
     """上传银行端和清算端 Excel，对文件进行解析和字段校验。"""
+    if scenario_type not in VALID_SCENARIO_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="scenario_type must be one of: BANK_ENTERPRISE, BANK_CLEARING",
+        )
     result = await reconciliation_service.upload(
         user_id=user_id,
+        scenario_type=scenario_type,
         bank_file=bank_file,
         clear_file=clear_file,
     )

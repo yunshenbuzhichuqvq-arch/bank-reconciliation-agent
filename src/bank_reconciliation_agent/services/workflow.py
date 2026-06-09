@@ -19,7 +19,7 @@ from bank_reconciliation_agent.services.fallback import (
 
 
 REVERSAL_HINTS = ("冲正", "红冲", "退款", "抹账", "撤销")
-TRACE_BRANCHES = {"BE-R005", "BE-R006"}
+TRACE_BRANCHES = {"BE-R005", "BE-R006", "BC-R003"}
 
 
 class ReconciliationState(TypedDict):
@@ -46,6 +46,7 @@ class ReconciliationState(TypedDict):
     rag_response: NotRequired[dict[str, Any]]
     fallback_path: NotRequired[str]
     fallback_cases: NotRequired[list[dict[str, Any]]]
+    t1_candidate: NotRequired[dict[str, str] | None]
 
 
 class Retriever(Protocol):
@@ -78,6 +79,7 @@ def run_item(
     remark = _combined_text(state, "remark") or None
     exception_branch = state.get("exception_branch")
     math_result = state.get("math_result", {})
+    trace_payload: dict[str, Any] | None = None
 
     if exception_branch == "BE-R004" and _contains_reversal_hint(summary, remark):
         extraction_result = extraction_agent.extract(
@@ -97,19 +99,23 @@ def run_item(
         )
 
     if exception_branch in TRACE_BRANCHES:
-        trace_result = trace_agent.trace(
-            flow_id=flow_id,
-            summary=summary,
-            transaction_date=_transaction_date(state),
-            amount=_optional_string(math_result.get("bank_amount") or math_result.get("clear_amount")),
-            remark=remark,
-        )
+        trace_kwargs = {
+            "flow_id": flow_id,
+            "summary": summary,
+            "transaction_date": _transaction_date(state),
+            "amount": _optional_string(math_result.get("bank_amount") or math_result.get("clear_amount")),
+            "remark": remark,
+        }
+        if exception_branch == "BC-R003":
+            trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
+        trace_result = trace_agent.trace(**trace_kwargs)
+        trace_payload = _model_or_mapping_dump(trace_result)
         state["agent_logs"].append(
             {
                 "agent_name": "TraceAgent",
                 "step": "trace",
                 "flow_id": flow_id,
-                "output": _model_or_mapping_dump(trace_result),
+                "output": trace_payload,
                 "prompt_version": getattr(trace_agent, "prompt_version", None),
                 **_llm_usage(trace_agent),
             }
@@ -120,14 +126,20 @@ def run_item(
     state["rag_context"] = [item.model_dump(mode="json") for item in rag_items]
     state["rag_response"] = rag_response.model_dump(mode="json")
 
+    audit_kwargs = {
+        "flow_id": flow_id,
+        "error_type": state.get("error_type") or "",
+        "exception_branch": exception_branch,
+        "bank_amount": _optional_string(math_result.get("bank_amount")),
+        "clear_amount": _optional_string(math_result.get("clear_amount")),
+        "amount_diff": _optional_string(math_result.get("amount_diff")),
+        "evidence": rag_items,
+    }
+    if exception_branch == "BC-R003":
+        audit_kwargs["trace_context"] = trace_payload
+
     audit_decision = audit_agent.decide_with_llm(
-        flow_id=flow_id,
-        error_type=state.get("error_type") or "",
-        exception_branch=exception_branch,
-        bank_amount=_optional_string(math_result.get("bank_amount")),
-        clear_amount=_optional_string(math_result.get("clear_amount")),
-        amount_diff=_optional_string(math_result.get("amount_diff")),
-        evidence=rag_items,
+        **audit_kwargs,
     )
     state["agent_logs"].append(
         {
@@ -174,15 +186,18 @@ def run_item(
         )
         if confidence_is_low(audit_decision.confidence):
             fallback_path = "L1->L2->L3"
-            trace_result = trace_agent.trace(
-                flow_id=flow_id,
-                summary=summary,
-                transaction_date=_transaction_date(state),
-                amount=_optional_string(
+            trace_kwargs = {
+                "flow_id": flow_id,
+                "summary": summary,
+                "transaction_date": _transaction_date(state),
+                "amount": _optional_string(
                     math_result.get("bank_amount") or math_result.get("clear_amount")
                 ),
-                remark=remark,
-            )
+                "remark": remark,
+            }
+            if exception_branch == "BC-R003":
+                trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
+            trace_result = trace_agent.trace(**trace_kwargs)
             trace_payload = _model_or_mapping_dump(trace_result)
             state["agent_logs"].append(
                 {

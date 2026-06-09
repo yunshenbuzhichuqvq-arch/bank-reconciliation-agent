@@ -55,6 +55,7 @@ class QueueService:
         *,
         user_id: str,
         task_id: str,
+        scenario_type: str,
         rows: list[dict[str, object]],
     ) -> None:
         """覆盖写入同一任务的异常处理队列。"""
@@ -69,7 +70,7 @@ class QueueService:
             if rows:
                 connection.execute(
                     insert(reconciliation_queue_table),
-                    [dict(row, user_id=user_id) for row in rows],
+                    [dict(row, user_id=user_id, scenario_type=scenario_type) for row in rows],
                 )
 
     def count_rows(self, *, user_id: str, task_id: str) -> int:

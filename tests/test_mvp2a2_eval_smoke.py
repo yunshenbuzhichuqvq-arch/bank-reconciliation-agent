@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_hybrid_smoke_hits_are_not_worse_than_dense(tmp_path: Path) -> None:
     chunks_path = tmp_path / "rule_chunks.jsonl"
     build_rule_chunks(
-        sources_path=ROOT / "data/rag/sources.json",
+        sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
         output_path=chunks_path,
     )
 
@@ -33,7 +33,7 @@ def test_hybrid_smoke_hits_are_not_worse_than_dense(tmp_path: Path) -> None:
 def test_eval_script_main_prints_comparison_report(tmp_path: Path, capsys) -> None:
     chunks_path = tmp_path / "rule_chunks.jsonl"
     build_rule_chunks(
-        sources_path=ROOT / "data/rag/sources.json",
+        sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
         output_path=chunks_path,
     )
 

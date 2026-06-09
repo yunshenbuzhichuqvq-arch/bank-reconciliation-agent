@@ -21,7 +21,7 @@ def _load_chunks(path: Path) -> list[dict]:
 def test_bm25_index_returns_ranked_hits_for_chinese_query(tmp_path: Path) -> None:
     chunks_path = tmp_path / "rule_chunks.jsonl"
     build_rule_chunks(
-        sources_path=ROOT / "data/rag/sources.json",
+        sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
         output_path=chunks_path,
     )
     chunks = _load_chunks(chunks_path)
@@ -38,7 +38,7 @@ def test_bm25_index_returns_ranked_hits_for_chinese_query(tmp_path: Path) -> Non
 def test_bm25_index_uses_same_chunk_ids_as_dense_store(tmp_path: Path) -> None:
     chunks_path = tmp_path / "rule_chunks.jsonl"
     build_rule_chunks(
-        sources_path=ROOT / "data/rag/sources.json",
+        sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
         output_path=chunks_path,
     )
     chunks = _load_chunks(chunks_path)

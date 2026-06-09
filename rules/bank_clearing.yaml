@@ -1,0 +1,43 @@
+# scenario_type: BANK_CLEARING
+# ADR-015: clearing keeps the shared A/B fact names. Here `present_side: A` means
+# source A (core/bank row) is missing while source B (clearing row) exists, so the
+# business outcome is clearing-side single-sided rather than "A-side exists".
+rules:
+  - id: BC-R003
+    name: Cutoff cross day
+    priority: 1
+    conditions:
+      - field: present_side
+        operator: eq
+        value: A
+      - field: in_cutoff_window
+        operator: eq
+        value: true
+    action: EXCEPTION
+    error_type: CUTOFF_CROSS_DAY
+    exception_branch: BC-R003
+
+  - id: BC-R001
+    name: Clearing single side
+    priority: 2
+    conditions:
+      - field: present_side
+        operator: eq
+        value: A
+    action: EXCEPTION
+    error_type: CLEARING_SINGLE_SIDE
+    exception_branch: BC-R001
+
+  - id: BC-R000
+    name: Exact match auto fix
+    priority: 3
+    conditions:
+      - field: flow_matched
+        operator: eq
+        value: true
+      - field: amount_equal
+        operator: eq
+        value: true
+    action: AUTO_FIX
+    error_type:
+    exception_branch:

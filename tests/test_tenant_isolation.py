@@ -23,6 +23,7 @@ def test_task_queue_ledger_are_filtered_by_user_id() -> None:
         task_service.replace_task(
             user_id=user_id,
             task_id="TASK_SHARED",
+            scenario_type="BANK_ENTERPRISE",
             total_bank_rows=1,
             total_clear_rows=1,
             auto_fixed_rows=0,
@@ -32,6 +33,7 @@ def test_task_queue_ledger_are_filtered_by_user_id() -> None:
         queue_service.replace_task_rows(
             user_id=user_id,
             task_id="TASK_SHARED",
+            scenario_type="BANK_ENTERPRISE",
             rows=[
                 {
                     "user_id": user_id,
@@ -49,6 +51,7 @@ def test_task_queue_ledger_are_filtered_by_user_id() -> None:
         ledger_service.replace_task_rows(
             user_id=user_id,
             task_id="TASK_SHARED",
+            scenario_type="BANK_ENTERPRISE",
             rows=[
                 LedgerRow(
                     id=0,

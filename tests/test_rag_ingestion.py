@@ -16,7 +16,7 @@ def test_build_rule_chunks_preserves_public_source_metadata(tmp_path: Path) -> N
     output_path = tmp_path / "rule_chunks.jsonl"
 
     chunks = build_rule_chunks(
-        sources_path=ROOT / "data/rag/sources.json",
+        sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
         output_path=output_path,
     )
 
@@ -83,7 +83,7 @@ def test_build_sources_manifest_discovers_markdown_files(tmp_path: Path) -> None
 def test_rule_retriever_searches_generated_chunks(tmp_path: Path) -> None:
     chunks_path = tmp_path / "rule_chunks.jsonl"
     build_rule_chunks(
-        sources_path=ROOT / "data/rag/sources.json",
+        sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
         output_path=chunks_path,
     )
     retriever = RuleRetriever(chunks_path=chunks_path, chroma_path=tmp_path / "chroma")

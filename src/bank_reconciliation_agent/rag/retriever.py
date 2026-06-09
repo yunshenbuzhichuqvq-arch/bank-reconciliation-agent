@@ -18,7 +18,7 @@ from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchReques
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks.jsonl"
+DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
 TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+")
 EMBEDDING_DIMENSIONS = 128
 
@@ -113,9 +113,7 @@ class ChromaRuleStore:
         ]
 
     def _sync_chunks(self, scenario_type: str) -> None:
-        if scenario_type != "BANK_ENTERPRISE":
-            return
-        chunks = self._load_chunks()
+        chunks = self._load_chunks(scenario_type)
         if not chunks:
             return
 
@@ -126,12 +124,13 @@ class ChromaRuleStore:
             metadatas=[self._to_metadata(chunk) for chunk in chunks],
         )
 
-    def _load_chunks(self) -> list[dict[str, Any]]:
-        if not self.chunks_path.exists():
+    def _load_chunks(self, scenario_type: str) -> list[dict[str, Any]]:
+        chunks_path = self._chunks_path_for_scenario(scenario_type)
+        if not chunks_path.exists():
             return []
         return [
             json.loads(line)
-            for line in self.chunks_path.read_text(encoding="utf-8").splitlines()
+            for line in chunks_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
 
@@ -152,6 +151,22 @@ class ChromaRuleStore:
     def _collection_name_for_scenario(scenario_type: str) -> str:
         return f"rule_chunks_{scenario_type.lower()}"
 
+    def _chunks_path_for_scenario(self, scenario_type: str) -> Path:
+        scenario_suffix = f"_{scenario_type.lower()}"
+        stem = self.chunks_path.stem
+        if stem == "rule_chunks":
+            if scenario_type == "BANK_ENTERPRISE":
+                return self.chunks_path
+            return self.chunks_path.with_name(f"{stem}{scenario_suffix}{self.chunks_path.suffix}")
+        for known_scenario in ("bank_enterprise", "bank_clearing"):
+            known_suffix = f"_{known_scenario}"
+            if stem.endswith(known_suffix):
+                if known_scenario == scenario_type.lower():
+                    return self.chunks_path
+                base_stem = stem[: -len(known_suffix)]
+                return self.chunks_path.with_name(f"{base_stem}{scenario_suffix}{self.chunks_path.suffix}")
+        return self.chunks_path.with_name(f"{stem}{scenario_suffix}{self.chunks_path.suffix}")
+
 
 class RuleRetriever:
     def __init__(
@@ -167,6 +182,7 @@ class RuleRetriever:
         self.store = store or ChromaRuleStore(chunks_path=chunks_path, chroma_path=chroma_path)
         self._rewriter = rewriter
         self._sparse_index = sparse_index
+        self._sparse_indexes: dict[str, Any] = {}
         self._reranker = reranker
 
     def search(self, request: RagSearchRequest) -> RagSearchResponse:
@@ -194,7 +210,7 @@ class RuleRetriever:
         hybrid_enabled = request.enable_hybrid
         sparse_index = None
         if hybrid_enabled:
-            sparse_index = self._get_sparse_index()
+            sparse_index = self._get_sparse_index(request.scenario_type)
             if sparse_index is None:
                 hybrid_enabled = False
 
@@ -312,19 +328,22 @@ class RuleRetriever:
         self._rewriter = QueryRewriter()
         return self._rewriter
 
-    def _get_sparse_index(self) -> Any | None:
+    def _get_sparse_index(self, scenario_type: str) -> Any | None:
         if self._sparse_index is not None:
             return self._sparse_index
+        cached = self._sparse_indexes.get(scenario_type)
+        if cached is not None:
+            return cached
         try:
             from bank_reconciliation_agent.rag.sparse import Bm25Index
         except ImportError:
             log.warning("rag_hybrid_dependency_missing")
             return None
-        chunks = self.store._load_chunks()
+        chunks = self.store._load_chunks(scenario_type)
         index = Bm25Index()
         index.build(chunks)
-        self._sparse_index = index
-        return self._sparse_index
+        self._sparse_indexes[scenario_type] = index
+        return index
 
     def _get_reranker(self) -> Any | None:
         if self._reranker is not None:

@@ -10,10 +10,10 @@ def _evidence() -> list[RagSearchItem]:
     return [
         RagSearchItem(
             chunk_id="unionpay_reconciliation_faq_001",
-            source="data/rag/raw_sources/unionpay_reconciliation_faq.md#清算文件流水与资金核对不平",
+            source="data/rag/raw_sources/bank_enterprise/unionpay_reconciliation_faq.md#清算文件流水与资金核对不平",
             source_name="银联一窗办清算对账公开 FAQ 摘录",
             source_url="https://pcs.unionpay.com/example",
-            source_file="data/rag/raw_sources/unionpay_reconciliation_faq.md",
+            source_file="data/rag/raw_sources/bank_enterprise/unionpay_reconciliation_faq.md",
             section_title="清算文件流水与资金核对不平",
             element_type="paragraph",
             business_tags=["amount_mismatch"],

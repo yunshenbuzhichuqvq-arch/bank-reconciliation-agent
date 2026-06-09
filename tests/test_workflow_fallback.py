@@ -168,6 +168,7 @@ def test_persistence_services_store_fallback_fields_and_task_stats_with_replace_
     task_service.replace_task(
         user_id="demo_user",
         task_id="TASK-FB-DB",
+        scenario_type="BANK_ENTERPRISE",
         total_bank_rows=1,
         total_clear_rows=1,
         auto_fixed_rows=0,
@@ -177,6 +178,7 @@ def test_persistence_services_store_fallback_fields_and_task_stats_with_replace_
     ledger_service.replace_task_rows(
         user_id="demo_user",
         task_id="TASK-FB-DB",
+        scenario_type="BANK_ENTERPRISE",
         rows=[
             LedgerRowFactory.build(
                 task_id="TASK-FB-DB",

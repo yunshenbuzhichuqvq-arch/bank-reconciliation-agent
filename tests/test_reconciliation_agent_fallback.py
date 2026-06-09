@@ -20,6 +20,7 @@ def test_write_ledger_entries_falls_back_per_row_and_continues(monkeypatch) -> N
     task_service.replace_task(
         user_id="demo_user",
         task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
         total_bank_rows=2,
         total_clear_rows=2,
         auto_fixed_rows=0,
@@ -27,8 +28,8 @@ def test_write_ledger_entries_falls_back_per_row_and_continues(monkeypatch) -> N
         pending_human_rows=2,
     )
 
-    def fake_run_workflow(*, user_id, task_id, result, rag_query):
-        del user_id, rag_query
+    def fake_run_workflow(*, user_id, task_id, scenario_type, result, rag_query):
+        del user_id, scenario_type, rag_query
         if result.flow_id == "FLOW-BAD":
             raise ExtractionAgentError("invalid LLM JSON for ExtractionAgent")
         return _workflow_state(task_id=task_id, result=result)
@@ -38,6 +39,7 @@ def test_write_ledger_entries_falls_back_per_row_and_continues(monkeypatch) -> N
     service._write_ledger_entries(
         user_id="demo_user",
         task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
         results=[
             _match_result("FLOW-BAD", Decimal("100.00"), Decimal("99.00")),
             _match_result("FLOW-GOOD", Decimal("200.00"), Decimal("198.00")),
@@ -61,8 +63,8 @@ def test_write_ledger_entries_falls_back_per_row_and_continues(monkeypatch) -> N
 def test_write_ledger_entries_does_not_swallow_infrastructure_errors(monkeypatch) -> None:
     service = ReconciliationService()
 
-    def fake_run_workflow(*, user_id, task_id, result, rag_query):
-        del user_id, task_id, result, rag_query
+    def fake_run_workflow(*, user_id, task_id, scenario_type, result, rag_query):
+        del user_id, task_id, scenario_type, result, rag_query
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(service, "_run_workflow_for_result", fake_run_workflow)
@@ -71,6 +73,7 @@ def test_write_ledger_entries_does_not_swallow_infrastructure_errors(monkeypatch
         service._write_ledger_entries(
             user_id="demo_user",
             task_id="TASK-INFRA-ERROR",
+            scenario_type="BANK_ENTERPRISE",
             results=[_match_result("FLOW-INFRA", Decimal("100.00"), Decimal("99.00"))],
         )
 

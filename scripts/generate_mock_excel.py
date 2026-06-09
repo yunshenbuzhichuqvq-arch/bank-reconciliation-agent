@@ -131,6 +131,14 @@ EXPECTED_BRANCHES: dict[str, tuple[str | None, str | None, str]] = {
     "F2008": ("DUPLICATE_BOOKING", "BE-R008", "PENDING_HUMAN"),
 }
 
+BANK_CLEARING_EXPECTED_BRANCHES: dict[str, tuple[str | None, str | None, str]] = {
+    "BC3001": (None, None, "AUTO_FIXED"),
+    "BC3002": ("CLEARING_SINGLE_SIDE", "BC-R001", "PENDING_HUMAN"),
+    "BC3003": ("CUTOFF_CROSS_DAY", "BC-R003", "PENDING_HUMAN"),
+    "BC3004": ("CUTOFF_CROSS_DAY", "BC-R003", "PENDING_HUMAN"),
+    "CORE3003": ("UNCLASSIFIED", None, "PENDING_HUMAN"),
+}
+
 
 def _enrich_bank_dataframe(bank_df: pd.DataFrame) -> pd.DataFrame:
     """补充标准化字段和真实银行流水常见字段，保留原始字段用于审计回溯。"""
@@ -173,14 +181,18 @@ def _enrich_bank_dataframe(bank_df: pd.DataFrame) -> pd.DataFrame:
             "清算平台": "CLEARING_PLATFORM",
         }
     ).fillna("CORE_BANKING")
-    return bank_df[BANK_COLUMNS]
+    extra_columns = [
+        column
+        for column in ("voucher_no", "reference_no", "merchant_order_no")
+        if column in bank_df.columns
+    ]
+    return bank_df[BANK_COLUMNS + extra_columns]
 
 
 def _enrich_clear_dataframe(clear_df: pd.DataFrame) -> pd.DataFrame:
     """补充与 PRD 入库模型一致的标准字段，同时保留清算侧原始业务字段。"""
     clear_df = clear_df.copy()
     clear_df["amount"] = clear_df["transaction_amount"]
-    clear_df["trade_time"] = clear_df["trade_date"].astype(str) + " " + clear_df["trade_time"].astype(str)
     clear_df["summary"] = clear_df["order_description"]
     return clear_df[CLEAR_COLUMNS]
 
@@ -700,6 +712,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
 
     bank_df = _enrich_bank_dataframe(pd.DataFrame(bank_rows, columns=BANK_SOURCE_COLUMNS))
     clear_df = _enrich_clear_dataframe(pd.DataFrame(clear_rows, columns=CLEAR_SOURCE_COLUMNS))
+    clear_df["trade_time"] = clear_df["trade_date"].astype(str) + " " + clear_df["trade_time"].astype(str)
 
     bank_df.to_excel(bank_path, index=False)
     clear_df.to_excel(clear_path, index=False)
@@ -936,10 +949,148 @@ def generate_mvp1_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path
     return bank_path, clear_path
 
 
+def generate_mvp2a3_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Path]:
+    """生成覆盖清算副链路最小闭环的 mock，返回 (core_path, clearing_path)。"""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    bank_rows = [
+        _bank_source_row(
+            flow_id="BC3001",
+            serial="B202606100001",
+            accounting_date="2026-06-10",
+            value_date="2026-06-10",
+            accounting_time="10:00:00",
+            transaction_type="TRANSFER_IN",
+            debit_amount=0.00,
+            credit_amount=88.80,
+            balance_after=20088.80,
+            counterparty_account="6214********3001",
+            counterparty_name="杭州清河商贸有限公司",
+            channel="清算平台",
+            summary="清算正常配平",
+            purpose="门店收款",
+            remark="MVP-2a3 正常配平样例",
+        ),
+        _bank_source_row(
+            flow_id="CORE3003",
+            serial="B202606110003",
+            accounting_date="2026-06-11",
+            value_date="2026-06-11",
+            accounting_time="09:05:00",
+            transaction_type="TRANSFER_IN",
+            debit_amount=0.00,
+            credit_amount=150.00,
+            balance_after=20238.80,
+            counterparty_account="6214********3003",
+            counterparty_name="苏州清源零售有限公司",
+            channel="清算平台",
+            summary="跨日切 T+1 核心补记",
+            purpose="门店收款",
+            remark="MVP-2a3 跨日切命中样例",
+            voucher_no="VCH3003",
+            reference_no="REF3003",
+            merchant_order_no="ORD3003",
+        ),
+    ]
+
+    clear_rows = [
+        _clear_source_row(
+            flow_id="BC3001",
+            serial="C202606100001",
+            trade_date="2026-06-10",
+            settlement_date="2026-06-10",
+            terminal_id="T3001",
+            trade_time="10:00:00",
+            transaction_amount=88.80,
+            batch_no="BAT2026061001",
+            voucher_no="VCH3001",
+            reference_no="REF3001",
+            order_no="ORD3001",
+            payer_account="6214********3001",
+            payer_name="杭州清河商贸有限公司",
+            payee_account="6222********0001",
+            payee_name="上海晨星贸易有限公司",
+            description="清算正常配平",
+            remark="MVP-2a3 正常配平样例",
+        ),
+        _clear_source_row(
+            flow_id="BC3002",
+            serial="C202606100002",
+            trade_date="2026-06-10",
+            settlement_date="2026-06-10",
+            terminal_id="T3002",
+            trade_time="10:00:00",
+            transaction_amount=66.60,
+            batch_no="BAT2026061001",
+            voucher_no="VCH3002",
+            reference_no="REF3002",
+            order_no="ORD3002",
+            payer_account="6214********3002",
+            payer_name="宁波清越服务有限公司",
+            payee_account="6222********0001",
+            payee_name="上海晨星贸易有限公司",
+            description="清算端日间单边",
+            remark="MVP-2a3 BC-R001 样例",
+        ),
+        _clear_source_row(
+            flow_id="BC3003",
+            serial="C202606100003",
+            trade_date="2026-06-10",
+            settlement_date="2026-06-10",
+            terminal_id="T3003",
+            trade_time="23:30",
+            transaction_amount=150.00,
+            batch_no="BAT2026061002",
+            voucher_no="VCH3003",
+            reference_no="REF3003",
+            order_no="ORD3003",
+            payer_account="6214********3003",
+            payer_name="苏州清源零售有限公司",
+            payee_account="6222********0001",
+            payee_name="上海晨星贸易有限公司",
+            description="清算端跨日切可追溯",
+            remark="MVP-2a3 BC-R003 命中样例",
+        ),
+        _clear_source_row(
+            flow_id="BC3004",
+            serial="C202606100004",
+            trade_date="2026-06-10",
+            settlement_date="2026-06-10",
+            terminal_id="T3004",
+            trade_time="23:45",
+            transaction_amount=175.50,
+            batch_no="BAT2026061002",
+            voucher_no="VCH3004",
+            reference_no="REF3004",
+            order_no="ORD3004",
+            payer_account="6214********3004",
+            payer_name="绍兴清禾餐饮有限公司",
+            payee_account="6222********0001",
+            payee_name="上海晨星贸易有限公司",
+            description="清算端跨日切待补齐",
+            remark="MVP-2a3 BC-R003 待补齐样例",
+        ),
+    ]
+
+    bank_path = output_path / "mvp2a3_core.xlsx"
+    clear_path = output_path / "mvp2a3_clearing.xlsx"
+
+    bank_df = _enrich_bank_dataframe(pd.DataFrame(bank_rows))
+    clear_df = _enrich_clear_dataframe(pd.DataFrame(clear_rows))
+
+    bank_df.to_excel(bank_path, index=False)
+    clear_df.to_excel(clear_path, index=False)
+
+    return bank_path, clear_path
+
+
 def _bank_source_row(
     *,
     flow_id: str,
     serial: str,
+    accounting_date: str = "2026-06-01",
+    value_date: str = "2026-06-01",
     accounting_time: str,
     transaction_type: str,
     debit_amount: float,
@@ -951,13 +1102,16 @@ def _bank_source_row(
     summary: str,
     purpose: str,
     remark: str,
+    voucher_no: str | None = None,
+    reference_no: str | None = None,
+    merchant_order_no: str | None = None,
 ) -> dict[str, object]:
-    return {
+    row = {
         "flow_id": flow_id,
         "bank_serial_no": serial,
-        "accounting_date": "2026-06-01",
+        "accounting_date": accounting_date,
         "accounting_time": accounting_time,
-        "value_date": "2026-06-01",
+        "value_date": value_date,
         "self_account_no_masked": "6222********0001",
         "self_account_name_masked": "上海晨星贸易有限公司",
         "self_bank_name": "中国银行上海分行",
@@ -974,12 +1128,21 @@ def _bank_source_row(
         "purpose": purpose,
         "remark": remark,
     }
+    if voucher_no is not None:
+        row["voucher_no"] = voucher_no
+    if reference_no is not None:
+        row["reference_no"] = reference_no
+    if merchant_order_no is not None:
+        row["merchant_order_no"] = merchant_order_no
+    return row
 
 
 def _clear_source_row(
     *,
     flow_id: str,
     serial: str,
+    trade_date: str = "2026-06-01",
+    settlement_date: str = "2026-06-01",
     terminal_id: str,
     trade_time: str,
     transaction_amount: float,
@@ -1003,9 +1166,9 @@ def _clear_source_row(
         "terminal_id": terminal_id,
         "channel": "ONLINE_BANKING",
         "transaction_type": "PAYMENT",
-        "trade_date": "2026-06-01",
+        "trade_date": trade_date,
         "trade_time": trade_time,
-        "settlement_date": "2026-06-01",
+        "settlement_date": settlement_date,
         "transaction_amount": transaction_amount,
         "fee_amount": 0.00,
         "net_amount": transaction_amount,
@@ -1026,5 +1189,11 @@ def _clear_source_row(
 
 if __name__ == "__main__":
     bank_file, clear_file = generate_mock_excel()
+    mvp1_bank_file, mvp1_clear_file = generate_mvp1_mock_excel()
+    mvp2a3_bank_file, mvp2a3_clear_file = generate_mvp2a3_mock_excel()
     print(f"Generated {bank_file}")
     print(f"Generated {clear_file}")
+    print(f"Generated {mvp1_bank_file}")
+    print(f"Generated {mvp1_clear_file}")
+    print(f"Generated {mvp2a3_bank_file}")
+    print(f"Generated {mvp2a3_clear_file}")

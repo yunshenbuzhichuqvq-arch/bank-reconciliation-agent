@@ -7,8 +7,9 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RAW_SOURCES_DIR = PROJECT_ROOT / "data/rag/raw_sources"
-DEFAULT_SOURCES_PATH = PROJECT_ROOT / "data/rag/sources.json"
-DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "data/rag/rule_chunks.jsonl"
+DEFAULT_SOURCES_PATH = PROJECT_ROOT / "data/rag/sources_bank_enterprise.json"
+DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
+DEFAULT_SCENARIOS = ("BANK_ENTERPRISE", "BANK_CLEARING")
 HEADING_PATTERN = re.compile(r"^##\s+(?P<title>.+)$", re.MULTILINE)
 FRONT_MATTER_PATTERN = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
 
@@ -49,7 +50,7 @@ def build_rule_chunks(
 
 
 def build_sources_manifest(
-    raw_sources_dir: Path = DEFAULT_RAW_SOURCES_DIR,
+    raw_sources_dir: Path = DEFAULT_RAW_SOURCES_DIR / "bank_enterprise",
     sources_path: Path = DEFAULT_SOURCES_PATH,
     project_root: Path = PROJECT_ROOT,
 ) -> list[dict[str, Any]]:
@@ -61,6 +62,26 @@ def build_sources_manifest(
         encoding="utf-8",
     )
     return sources
+
+
+def scenario_raw_sources_dir(scenario_type: str) -> Path:
+    return DEFAULT_RAW_SOURCES_DIR / _scenario_slug(scenario_type)
+
+
+def scenario_sources_path(scenario_type: str) -> Path:
+    return PROJECT_ROOT / f"data/rag/sources_{_scenario_slug(scenario_type)}.json"
+
+
+def scenario_output_path(scenario_type: str) -> Path:
+    return PROJECT_ROOT / f"data/rag/rule_chunks_{_scenario_slug(scenario_type)}.jsonl"
+
+
+def build_rule_chunks_for_scenario(scenario_type: str) -> list[dict[str, Any]]:
+    raw_sources_dir = scenario_raw_sources_dir(scenario_type)
+    sources_path = scenario_sources_path(scenario_type)
+    output_path = scenario_output_path(scenario_type)
+    build_sources_manifest(raw_sources_dir=raw_sources_dir, sources_path=sources_path)
+    return build_rule_chunks(sources_path=sources_path, output_path=output_path)
 
 
 def _split_markdown_sections(markdown_text: str) -> list[dict[str, str]]:
@@ -123,16 +144,30 @@ def _parse_business_tags(value: str) -> list[str]:
     return [tag.strip() for tag in value.split(",") if tag.strip()]
 
 
+def _scenario_slug(scenario_type: str) -> str:
+    return scenario_type.lower()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build RAG rule chunks from public sources.")
-    parser.add_argument("--raw-sources", type=Path, default=DEFAULT_RAW_SOURCES_DIR)
-    parser.add_argument("--sources", type=Path, default=DEFAULT_SOURCES_PATH)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument("--raw-sources", type=Path, default=None)
+    parser.add_argument("--sources", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--scenario", choices=DEFAULT_SCENARIOS, default=None)
     args = parser.parse_args()
 
-    build_sources_manifest(raw_sources_dir=args.raw_sources, sources_path=args.sources)
-    chunks = build_rule_chunks(sources_path=args.sources, output_path=args.output)
-    print(f"Built {len(chunks)} rule chunks: {args.output}")
+    if args.scenario is not None:
+        raw_sources_dir = args.raw_sources or scenario_raw_sources_dir(args.scenario)
+        sources_path = args.sources or scenario_sources_path(args.scenario)
+        output_path = args.output or scenario_output_path(args.scenario)
+        build_sources_manifest(raw_sources_dir=raw_sources_dir, sources_path=sources_path)
+        chunks = build_rule_chunks(sources_path=sources_path, output_path=output_path)
+        print(f"Built {len(chunks)} rule chunks: {output_path}")
+        return
+
+    for scenario_type in DEFAULT_SCENARIOS:
+        chunks = build_rule_chunks_for_scenario(scenario_type)
+        print(f"Built {len(chunks)} rule chunks: {scenario_output_path(scenario_type)}")
 
 
 if __name__ == "__main__":

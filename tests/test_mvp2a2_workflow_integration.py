@@ -53,6 +53,7 @@ def test_write_ledger_entries_persists_hybrid_fields_from_rag_response(monkeypat
     task_service.replace_task(
         user_id="demo_user",
         task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
         total_bank_rows=1,
         total_clear_rows=1,
         auto_fixed_rows=0,
@@ -63,8 +64,8 @@ def test_write_ledger_entries_persists_hybrid_fields_from_rag_response(monkeypat
     rag_item = _evidence()
     rag_response = RagSearchResponse(items=[rag_item], rewritten_query="金额差异 对账 规则")
 
-    def fake_run_workflow_for_result(*, user_id, task_id, result, rag_query):
-        del user_id, task_id, result, rag_query
+    def fake_run_workflow_for_result(*, user_id, task_id, scenario_type, result, rag_query):
+        del user_id, task_id, scenario_type, result, rag_query
         return _workflow_state(rag_item, rag_response)
 
     monkeypatch.setattr(service, "_run_workflow_for_result", fake_run_workflow_for_result)
@@ -72,6 +73,7 @@ def test_write_ledger_entries_persists_hybrid_fields_from_rag_response(monkeypat
     service._write_ledger_entries(
         user_id="demo_user",
         task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
         results=[
             ReconciliationMatchResult(
                 flow_id="FLOW-2A28-001",

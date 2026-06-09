@@ -65,7 +65,14 @@ class LedgerService:
         self._engine = engine or get_engine()
         self._initialized = False
 
-    def replace_task_rows(self, *, user_id: str, task_id: str, rows: list[LedgerRow]) -> None:
+    def replace_task_rows(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        scenario_type: str,
+        rows: list[LedgerRow],
+    ) -> None:
         """用同一任务的最新异常结果覆盖旧台账，避免重复上传/查询产生重复行。"""
         self._ensure_initialized()
         with self._engine.begin() as connection:
@@ -78,7 +85,7 @@ class LedgerService:
             if rows:
                 connection.execute(
                     insert(error_ledger_table),
-                    [self._to_insert_values(user_id, row) for row in rows],
+                    [self._to_insert_values(user_id, scenario_type, row) for row in rows],
                 )
 
     def list(self, *, user_id: str, query: LedgerQuery) -> Page[LedgerRow]:
@@ -124,9 +131,15 @@ class LedgerService:
             filters.append(error_ledger_table.c.handle_status == query.handle_status)
         return filters
 
-    def _to_insert_values(self, user_id: str, row: LedgerRow) -> dict[str, object]:
+    def _to_insert_values(
+        self,
+        user_id: str,
+        scenario_type: str,
+        row: LedgerRow,
+    ) -> dict[str, object]:
         return {
             "user_id": user_id,
+            "scenario_type": scenario_type,
             "task_id": row.task_id,
             "queue_id": 0,
             "flow_id": row.flow_id,

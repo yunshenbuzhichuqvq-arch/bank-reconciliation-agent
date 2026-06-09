@@ -42,23 +42,24 @@ class TraceAgent:
         transaction_date: str | None,
         amount: str | None,
         remark: str | None,
+        cutoff_t1_context: dict[str, str] | None = None,
     ) -> TraceResult:
+        payload: dict[str, object] = {
+            "task": "trace",
+            "flow_id": flow_id,
+            "summary": summary,
+            "transaction_date": transaction_date,
+            "amount": amount,
+            "remark": remark,
+        }
+        if cutoff_t1_context is not None:
+            payload["cutoff_t1_context"] = cutoff_t1_context
+
         messages = [
             {"role": "system", "content": self.prompt_text},
             {
                 "role": "user",
-                "content": json.dumps(
-                    {
-                        "task": "trace",
-                        "flow_id": flow_id,
-                        "summary": summary,
-                        "transaction_date": transaction_date,
-                        "amount": amount,
-                        "remark": remark,
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ),
+                "content": json.dumps(payload, ensure_ascii=False, sort_keys=True),
             },
         ]
 

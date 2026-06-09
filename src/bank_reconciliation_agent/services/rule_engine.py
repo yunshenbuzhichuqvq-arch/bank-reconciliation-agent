@@ -64,4 +64,15 @@ class RuleEngine:
         return fact_value != condition.value
 
 
-rule_engine = RuleEngine(Path(__file__).resolve().parents[3] / "rules" / "bank_enterprise.yaml")
+RULES_DIR = Path(__file__).resolve().parents[3] / "rules"
+RULE_ENGINES = {
+    "BANK_ENTERPRISE": RuleEngine(RULES_DIR / "bank_enterprise.yaml"),
+    "BANK_CLEARING": RuleEngine(RULES_DIR / "bank_clearing.yaml"),
+}
+
+
+def rule_engine_for(scenario_type: str) -> RuleEngine:
+    return RULE_ENGINES.get(scenario_type, RULE_ENGINES["BANK_ENTERPRISE"])
+
+
+rule_engine = rule_engine_for("BANK_ENTERPRISE")

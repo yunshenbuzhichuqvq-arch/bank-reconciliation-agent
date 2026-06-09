@@ -59,6 +59,7 @@ reconciliation_task_table = Table(
 
 class ReconciliationTaskRow(NamedTuple):
     task_id: str
+    scenario_type: str
     status: str
     total_bank_rows: int
     total_clear_rows: int
@@ -83,6 +84,7 @@ class TaskService:
         *,
         user_id: str,
         task_id: str,
+        scenario_type: str,
         total_bank_rows: int,
         total_clear_rows: int,
         auto_fixed_rows: int,
@@ -105,6 +107,7 @@ class TaskService:
                 insert(reconciliation_task_table).values(
                     user_id=user_id,
                     task_id=task_id,
+                    scenario_type=scenario_type,
                     task_name=f"{task_id} reconciliation",
                     status="UPLOADED",
                     total_bank_rows=total_bank_rows,
@@ -185,6 +188,7 @@ class TaskService:
             return None
         return ReconciliationTaskRow(
             task_id=row["task_id"],
+            scenario_type=row["scenario_type"],
             status=row["status"],
             total_bank_rows=row["total_bank_rows"],
             total_clear_rows=row["total_clear_rows"],

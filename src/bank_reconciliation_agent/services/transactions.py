@@ -288,7 +288,7 @@ class TransactionService:
             "channel": self._to_optional_string(row.get("channel")),
             "transaction_type": self._to_optional_string(row.get("transaction_type")),
             "trade_date": self._to_date(row.get("trade_date")),
-            "trade_time": self._to_datetime(row["trade_time"]),
+            "trade_time": self._to_datetime(row["trade_time"], date_hint=row.get("trade_date")),
             "settlement_date": self._to_date(row.get("settlement_date")),
             "amount": self._to_decimal(row["amount"]),
             "transaction_amount": self._to_decimal(row["transaction_amount"]),
@@ -331,12 +331,23 @@ class TransactionService:
             return value.to_pydatetime().date()
         return date.fromisoformat(str(value))
 
-    def _to_datetime(self, value: object) -> datetime:
+    def _to_datetime(self, value: object, date_hint: object | None = None) -> datetime:
         if isinstance(value, datetime):
             return value
         if isinstance(value, pd.Timestamp):
             return value.to_pydatetime()
-        return datetime.fromisoformat(str(value))
+        text = str(value)
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            if date_hint is None:
+                raise
+            hinted_date = self._to_date(date_hint)
+            if hinted_date is None:
+                raise
+            # ADR-017/019: clearing fixtures may send bare trade_time text, so combine it with
+            # trade_date before persisting into the shared DateTime column.
+            return datetime.combine(hinted_date, time.fromisoformat(text))
 
     def _to_time(self, value: object) -> time | None:
         if self._is_empty(value):

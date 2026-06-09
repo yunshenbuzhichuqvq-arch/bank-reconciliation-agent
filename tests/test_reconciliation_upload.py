@@ -4,14 +4,17 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
-from bank_reconciliation_agent.services.ledger import LedgerService
+from bank_reconciliation_agent.services.ledger import LedgerService, error_ledger_table
 from bank_reconciliation_agent.services.queue import QueueService
 from bank_reconciliation_agent.services.rag_log import RagLogService
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
+from bank_reconciliation_agent.services.task import TaskService, reconciliation_task_table
 from bank_reconciliation_agent.services.transactions import TransactionService
 from scripts.generate_mock_excel import (
     BANK_COLUMNS,
@@ -136,6 +139,9 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert persisted_status.pending_human_rows == 6
     assert persisted_status.unresolved_rows == 6
 
+    persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
+    assert persisted_task is not None
+
     persisted_ledger_page = LedgerService().list(
         user_id="demo_user",
         query=LedgerQuery(task_id=task_id),
@@ -181,10 +187,29 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
         task_id=task_id,
         flow_id="F2003",
     )
+    queue_f2005 = persisted_queue.get_row(
+        user_id="demo_user",
+        task_id=task_id,
+        flow_id="F2005",
+    )
     assert queue_f2003 is not None
+    assert queue_f2005 is not None
+    assert persisted_task.scenario_type == "BANK_ENTERPRISE"
     assert queue_f2003["error_type"] == "AMOUNT_MISMATCH"
     assert queue_f2003["exception_branch"] == "BE-R002"
+    assert queue_f2003["scenario_type"] == "BANK_ENTERPRISE"
+    assert queue_f2005["scenario_type"] == "BANK_ENTERPRISE"
     assert queue_f2003["status"] == "PENDING_HUMAN"
+    with get_engine().connect() as connection:
+        ledger_rows = connection.execute(
+            select(error_ledger_table.c.flow_id, error_ledger_table.c.scenario_type).where(
+                error_ledger_table.c.user_id == "demo_user",
+                error_ledger_table.c.task_id == task_id,
+            )
+        ).all()
+    ledger_scenarios = {flow_id: scenario_type for flow_id, scenario_type in ledger_rows}
+    assert ledger_scenarios["F2003"] == "BANK_ENTERPRISE"
+    assert ledger_scenarios["F2005"] == "BANK_ENTERPRISE"
 
     persisted_rag_logs = RagLogService()
     assert persisted_rag_logs.count_rows(user_id="demo_user", task_id=task_id) == 6
@@ -325,6 +350,88 @@ def test_upload_reconciliation_files_uses_stable_task_id_for_same_content(
     assert upload_once() == upload_once()
 
 
+def test_upload_reconciliation_files_rejects_invalid_scenario_type(tmp_path: Path) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+
+    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
+            data={"scenario_type": "INVALID_SCENARIO"},
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    bank_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    clear_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "scenario_type must be one of: BANK_ENTERPRISE, BANK_CLEARING"
+
+
+def test_upload_reconciliation_files_persists_bank_clearing_scenario_type(tmp_path: Path) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+
+    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
+            data={"scenario_type": "BANK_CLEARING"},
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    bank_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    clear_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 200
+    task_id = response.json()["data"]["task_id"]
+
+    persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
+    persisted_queue = QueueService()
+    queue_row = persisted_queue.get_row(
+        user_id="demo_user",
+        task_id=task_id,
+        flow_id="F2003",
+    )
+
+    assert persisted_task is not None
+    assert queue_row is not None
+    assert persisted_task.scenario_type == "BANK_CLEARING"
+    assert queue_row["scenario_type"] == "BANK_CLEARING"
+    with get_engine().connect() as connection:
+        task_scenario = connection.execute(
+            select(reconciliation_task_table.c.scenario_type).where(
+                reconciliation_task_table.c.user_id == "demo_user",
+                reconciliation_task_table.c.task_id == task_id,
+            )
+        ).scalar_one()
+        ledger_scenario = connection.execute(
+            select(error_ledger_table.c.scenario_type).where(
+                error_ledger_table.c.user_id == "demo_user",
+                error_ledger_table.c.task_id == task_id,
+                error_ledger_table.c.flow_id == "F2003",
+            )
+        ).scalar_one()
+
+    assert task_scenario == "BANK_CLEARING"
+    assert ledger_scenario == "BANK_CLEARING"
+
+
 def test_upload_reconciliation_files_rejects_empty_bank_flow_id(
     tmp_path: Path,
 ) -> None:
@@ -377,3 +484,22 @@ def test_reconciliation_service_builds_structured_match_results(tmp_path: Path) 
     assert results_by_flow_id["F2005"].clear_amount == Decimal("72.00")
     assert results_by_flow_id["F2006"].bank_amount == Decimal("45.00")
     assert results_by_flow_id["F2006"].clear_amount is None
+
+
+def test_reconciliation_service_build_match_results_passes_scenario_type(monkeypatch) -> None:
+    service = ReconciliationService()
+    captured: list[str] = []
+
+    def fake_classify(bank_df, clear_df, *, scenario_type):
+        del bank_df, clear_df
+        captured.append(scenario_type)
+        return []
+
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.exception_router.classify",
+        fake_classify,
+    )
+
+    service._build_match_results(pd.DataFrame(), pd.DataFrame(), scenario_type="BANK_CLEARING")
+
+    assert captured == ["BANK_CLEARING"]

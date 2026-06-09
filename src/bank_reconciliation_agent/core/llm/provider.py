@@ -55,13 +55,13 @@ class FakeLLMProvider:
         if '"task": "extraction"' in content or "extraction" in content:
             return self._extraction_payload()
         if '"task": "trace"' in content:
-            return self._trace_payload()
+            return self._trace_payload(content)
         if '"task": "audit"' in content or "audit" in content:
             return self._audit_payload(content)
         if "extract" in content or "提取" in content:
             return self._extraction_payload()
         if "trace" in content or "追溯" in content or "跨日" in content or "t+1" in content:
-            return self._trace_payload()
+            return self._trace_payload(content)
         return self._audit_payload(content)
 
     def _query_rewrite_payload(self, content: str) -> dict[str, object]:
@@ -85,7 +85,23 @@ class FakeLLMProvider:
             "confidence": 0.92,
         }
 
-    def _trace_payload(self) -> dict[str, object]:
+    def _trace_payload(self, content: str) -> dict[str, object]:
+        if '"cutoff_t1_context": null' in content:
+            return {
+                "agent": "trace",
+                "trace_found": False,
+                "related_flow_ids": [],
+                "trace_summary": "疑似跨日切，待 T+1 补齐",
+                "confidence": 0.2,
+            }
+        if '"cutoff_t1_context"' in content:
+            return {
+                "agent": "trace",
+                "trace_found": True,
+                "related_flow_ids": ["FLOW-T1-001"],
+                "trace_summary": "发现 T+1 已配对线索，核心次日补记已命中",
+                "confidence": 0.9,
+            }
         return {
             "agent": "trace",
             "trace_found": True,
@@ -96,8 +112,31 @@ class FakeLLMProvider:
 
     def _audit_payload(self, content: str) -> dict[str, object]:
         reason = "Fake provider 返回固定审计结论，用于离线确定性测试"
+        if '"related_flow_ids": []' in content:
+            reason = "疑似跨日切，当前待 T+1 补齐后复核，建议先转人工跟进。"
+        elif '"related_flow_ids": [' in content:
+            reason = "发现 T+1 已配对线索，核心次日补记已命中，建议人工复核后平账。"
         if "be-r002" in content or "amount_mismatch" in content:
             reason = "银行端与企业端金额不一致，Fake provider 建议人工复核。"
+        if (
+            reason == "Fake provider 返回固定审计结论，用于离线确定性测试"
+            and ("bc-r001" in content or "clearing_single_side" in content)
+        ):
+            reason = "清算单边异常，需结合来源流水与规则依据人工复核。"
+        if reason == "Fake provider 返回固定审计结论，用于离线确定性测试" and (
+            "bc-r003" in content
+            or "cutoff_cross_day" in content
+            or "跨日切" in content
+            or "t+1" in content
+        ):
+            if '"related_flow_ids": []' in content or "待 t+1 补齐" in content:
+                reason = "疑似跨日切，当前待 T+1 补齐后复核，建议先转人工跟进。"
+            elif (
+                '"related_flow_ids": [' in content
+                or "t+1 已配对" in content
+                or "flow-core-t1" in content
+            ):
+                reason = "发现 T+1 已配对线索，核心次日补记已命中，建议人工复核后平账。"
         return {
             "agent": "audit",
             "decision": "PENDING_HUMAN",

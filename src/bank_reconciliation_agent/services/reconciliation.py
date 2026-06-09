@@ -91,6 +91,7 @@ class ReconciliationMatchResult(NamedTuple):
     bank_amount: Decimal | None
     clear_amount: Decimal | None
     amount_diff: Decimal | None
+    t1_candidate: dict[str, str] | None = None
 
 
 class ReconciliationService:
@@ -99,6 +100,7 @@ class ReconciliationService:
         self,
         *,
         user_id: str,
+        scenario_type: str = "BANK_ENTERPRISE",
         bank_file: UploadFile,
         clear_file: UploadFile,
     ) -> ReconciliationUploadResponse:
@@ -116,13 +118,18 @@ class ReconciliationService:
         self._validate_unique_flow_ids(bank_df, "bank_file")
         self._validate_unique_flow_ids(clear_df, "clear_file")
 
-        match_results = self._build_match_results(bank_df, clear_df)
+        match_results = self._build_match_results(
+            bank_df,
+            clear_df,
+            scenario_type=scenario_type,
+        )
         match_summary = self._summarize_match_results(match_results)
         task_id = self._generate_task_id(bank_content + clear_content)
 
         task_service.replace_task(
             user_id=user_id,
             task_id=task_id,
+            scenario_type=scenario_type,
             total_bank_rows=len(bank_df),
             total_clear_rows=len(clear_df),
             auto_fixed_rows=match_summary.auto_fixed_rows,
@@ -136,8 +143,8 @@ class ReconciliationService:
             clear_df=clear_df,
         )
 
-        self._write_queue_entries(user_id, task_id, match_results)
-        self._write_ledger_entries(user_id, task_id, match_results)
+        self._write_queue_entries(user_id, task_id, scenario_type, match_results)
+        self._write_ledger_entries(user_id, task_id, scenario_type, match_results)
 
         return ReconciliationUploadResponse(
             task_id=task_id,
@@ -230,11 +237,19 @@ class ReconciliationService:
         )
 
     def _build_match_results(
-        self, bank_df: pd.DataFrame, clear_df: pd.DataFrame,
+        self,
+        bank_df: pd.DataFrame,
+        clear_df: pd.DataFrame,
+        *,
+        scenario_type: str = "BANK_ENTERPRISE",
     ) -> list[ReconciliationMatchResult]:
         return [
             self._to_match_result(result)
-            for result in exception_router.classify(bank_df, clear_df)
+            for result in exception_router.classify(
+                bank_df,
+                clear_df,
+                scenario_type=scenario_type,
+            )
         ]
 
     def _to_match_result(self, result: BranchResult) -> ReconciliationMatchResult:
@@ -246,6 +261,7 @@ class ReconciliationService:
             bank_amount=result.bank_amount,
             clear_amount=result.clear_amount,
             amount_diff=result.amount_diff,
+            t1_candidate=result.t1_candidate,
         )
 
     def _summarize_match_results(
@@ -287,7 +303,10 @@ class ReconciliationService:
         items: list[ReconciliationExceptionItem] = []
         for row in page.items:
             amount_diff = self._format_optional_decimal(row.discrepancy_amount)
-            evidence = self._evidence_from_rag_source(row.rag_source)
+            evidence = self._evidence_from_rag_source(
+                row.rag_source,
+                scenario_type=task.scenario_type,
+            )
             items.append(ReconciliationExceptionItem(
                 flow_id=row.flow_id,
                 status="PENDING_HUMAN",
@@ -316,13 +335,21 @@ class ReconciliationService:
             return None
         return f"{value:.2f}"
 
-    def _evidence_from_rag_source(self, rag_source: str | None) -> list[ReconciliationRagEvidence]:
+    def _evidence_from_rag_source(
+        self,
+        rag_source: str | None,
+        *,
+        scenario_type: str = "BANK_ENTERPRISE",
+    ) -> list[ReconciliationRagEvidence]:
         if not rag_source:
             return []
         chunk_ids = [chunk_id.strip() for chunk_id in rag_source.split(",") if chunk_id.strip()]
         return [
             self._to_reconciliation_evidence(item)
-            for item in rule_retriever.get_by_chunk_ids(chunk_ids)
+            for item in rule_retriever.get_by_chunk_ids(
+                chunk_ids,
+                scenario_type=scenario_type,
+            )
         ]
 
     def _build_rag_query(self, result: ReconciliationMatchResult) -> str:
@@ -370,6 +397,7 @@ class ReconciliationService:
         self,
         user_id: str,
         task_id: str,
+        scenario_type: str,
         results: list[ReconciliationMatchResult],
     ) -> None:
         queue_rows: list[dict[str, object]] = []
@@ -384,12 +412,18 @@ class ReconciliationService:
                 "status": result.status,
                 "risk_level": "MEDIUM", "retry_count": 0,
             })
-        queue_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=queue_rows)
+        queue_service.replace_task_rows(
+            user_id=user_id,
+            task_id=task_id,
+            scenario_type=scenario_type,
+            rows=queue_rows,
+        )
 
     def _write_ledger_entries(
         self,
         user_id: str,
         task_id: str,
+        scenario_type: str,
         results: list[ReconciliationMatchResult],
     ) -> None:
         rows: list[LedgerRow] = []
@@ -413,6 +447,7 @@ class ReconciliationService:
                 workflow_state = self._run_workflow_for_result(
                     user_id=user_id,
                     task_id=task_id,
+                    scenario_type=scenario_type,
                     result=result,
                     rag_query=rag_query,
                 )
@@ -426,6 +461,7 @@ class ReconciliationService:
                 workflow_state = self._agent_error_workflow_state(
                     user_id=user_id,
                     task_id=task_id,
+                    scenario_type=scenario_type,
                     result=result,
                     error=exc,
                 )
@@ -518,7 +554,12 @@ class ReconciliationService:
                 handle_status=audit_decision.decision,
             ))
 
-        ledger_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=rows)
+        ledger_service.replace_task_rows(
+            user_id=user_id,
+            task_id=task_id,
+            scenario_type=scenario_type,
+            rows=rows,
+        )
         rag_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=rag_log_rows)
         agent_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=agent_log_rows)
         task_service.replace_ai_stats(
@@ -536,6 +577,7 @@ class ReconciliationService:
         *,
         user_id: str,
         task_id: str,
+        scenario_type: str,
         result: ReconciliationMatchResult,
         rag_query: str,
     ) -> ReconciliationState:
@@ -553,7 +595,7 @@ class ReconciliationService:
             "task_id": task_id,
             "user_id": user_id,
             "thread_id": task_id,
-            "scenario_type": "BANK_ENTERPRISE",
+            "scenario_type": scenario_type,
             "current_queue_id": None,
             "source_a_item": bank_row or {"flow_id": result.flow_id},
             "source_b_item": clear_row or {"flow_id": result.flow_id},
@@ -574,6 +616,7 @@ class ReconciliationService:
             "error_message": None,
             "agent_logs": [],
             "rag_query": rag_query,
+            "t1_candidate": result.t1_candidate,
         })
 
     def _agent_error_workflow_state(
@@ -581,6 +624,7 @@ class ReconciliationService:
         *,
         user_id: str,
         task_id: str,
+        scenario_type: str,
         result: ReconciliationMatchResult,
         error: Exception,
     ) -> ReconciliationState:
@@ -601,7 +645,7 @@ class ReconciliationService:
             "task_id": task_id,
             "user_id": user_id,
             "thread_id": task_id,
-            "scenario_type": "BANK_ENTERPRISE",
+            "scenario_type": scenario_type,
             "current_queue_id": None,
             "source_a_item": {"flow_id": result.flow_id},
             "source_b_item": {"flow_id": result.flow_id},
@@ -633,6 +677,7 @@ class ReconciliationService:
                 }
             ],
             "fallback_path": "AI_ERROR->HUMAN",
+            "t1_candidate": result.t1_candidate,
         }
 
     def _ledger_discrepancy_amount(self, result: ReconciliationMatchResult) -> Decimal:
