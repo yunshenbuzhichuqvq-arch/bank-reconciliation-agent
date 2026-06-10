@@ -35,15 +35,23 @@ def test_write_ledger_entries_falls_back_per_row_and_continues(monkeypatch) -> N
         return _workflow_state(task_id=task_id, result=result)
 
     monkeypatch.setattr(service, "_run_workflow_for_result", fake_run_workflow)
+    results = [
+        _match_result("FLOW-BAD", Decimal("100.00"), Decimal("99.00")),
+        _match_result("FLOW-GOOD", Decimal("200.00"), Decimal("198.00")),
+    ]
+    queue_rows = service._write_queue_entries(
+        user_id="demo_user",
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        results=results,
+    )
 
     service._write_ledger_entries(
         user_id="demo_user",
         task_id=task_id,
         scenario_type="BANK_ENTERPRISE",
-        results=[
-            _match_result("FLOW-BAD", Decimal("100.00"), Decimal("99.00")),
-            _match_result("FLOW-GOOD", Decimal("200.00"), Decimal("198.00")),
-        ],
+        results=results,
+        queue_rows=queue_rows,
     )
 
     page = LedgerService().list(
@@ -68,13 +76,21 @@ def test_write_ledger_entries_does_not_swallow_infrastructure_errors(monkeypatch
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(service, "_run_workflow_for_result", fake_run_workflow)
+    results = [_match_result("FLOW-INFRA", Decimal("100.00"), Decimal("99.00"))]
+    queue_rows = service._write_queue_entries(
+        user_id="demo_user",
+        task_id="TASK-INFRA-ERROR",
+        scenario_type="BANK_ENTERPRISE",
+        results=results,
+    )
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         service._write_ledger_entries(
             user_id="demo_user",
             task_id="TASK-INFRA-ERROR",
             scenario_type="BANK_ENTERPRISE",
-            results=[_match_result("FLOW-INFRA", Decimal("100.00"), Decimal("99.00"))],
+            results=results,
+            queue_rows=queue_rows,
         )
 
 

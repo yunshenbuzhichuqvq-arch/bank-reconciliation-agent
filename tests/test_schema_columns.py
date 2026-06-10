@@ -51,7 +51,13 @@ def test_task_101_schema_columns_are_present_after_create_all() -> None:
     assert_columns(
         inspector,
         "t_agent_execution_log",
-        {"prompt_version", "fallback_level", "llm_tokens"},
+        {
+            "prompt_version",
+            "fallback_level",
+            "llm_tokens",
+            "pre_hook_results",
+            "post_hook_results",
+        },
     )
 
 
@@ -71,7 +77,13 @@ def test_task_2a13_schema_columns_are_present_after_create_all() -> None:
     assert_columns(
         inspector,
         "t_agent_execution_log",
-        {"prompt_version", "fallback_level", "llm_tokens"},
+        {
+            "prompt_version",
+            "fallback_level",
+            "llm_tokens",
+            "pre_hook_results",
+            "post_hook_results",
+        },
     )
     assert_columns(
         inspector,
@@ -97,6 +109,8 @@ def test_task_2a13_schema_sql_contains_runtime_columns() -> None:
         "prompt_version VARCHAR(16) DEFAULT NULL",
         "fallback_level INT NOT NULL DEFAULT 0",
         "llm_tokens INT NOT NULL DEFAULT 0",
+        "pre_hook_results JSON DEFAULT NULL",
+        "post_hook_results JSON DEFAULT NULL",
         "ai_processed_rows INT NOT NULL DEFAULT 0",
         "fallback_l2_rows INT NOT NULL DEFAULT 0",
         "fallback_l3_rows INT NOT NULL DEFAULT 0",

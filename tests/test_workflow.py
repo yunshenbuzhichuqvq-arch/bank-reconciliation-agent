@@ -1,4 +1,5 @@
-from bank_reconciliation_agent.agents.audit_agent import AuditDecision
+from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
+from bank_reconciliation_agent.core.llm.provider import LLMResult
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 
@@ -15,6 +16,21 @@ def _evidence() -> RagSearchItem:
         business_tags=["bank_enterprise"],
         score=0.9,
         content="规则证据",
+    )
+
+
+def _low_score_evidence() -> RagSearchItem:
+    return RagSearchItem(
+        chunk_id="rule-low",
+        source="rules.md#rule-low",
+        source_name="低分规则",
+        source_url="https://example.com/rule-low",
+        source_file="rules.md",
+        section_title="rule-low",
+        element_type="paragraph",
+        business_tags=["bank_enterprise"],
+        score=0.2,
+        content="低分规则证据",
     )
 
 
@@ -119,10 +135,136 @@ def test_run_item_binds_trace_context(monkeypatch) -> None:
     ]
 
 
+def test_run_item_retries_schema_drift_then_falls_back_to_human() -> None:
+    audit_agent = InvalidSchemaAuditAgent()
+
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=audit_agent,
+        retriever=StaticRetriever(),
+    )
+
+    assert audit_agent.calls == 3
+    assert result["retry_count"] == 3
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert "SchemaHook 校验失败" in result["audit_decision"]["reason"]
+    schema_logs = [row for row in result["agent_logs"] if row["agent_name"] == "SchemaHook"]
+    assert [row["retry_count"] for row in schema_logs] == [1, 2, 3]
+
+
+def test_run_item_memory_hook_is_noop() -> None:
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=SpyAuditAgent(),
+        retriever=StaticRetriever(),
+    )
+
+    assert result["source_a_item"]["flow_id"] == "FLOW-BE-R002"
+
+
+def test_run_item_constraint_c3_turns_low_risk_large_diff_to_human() -> None:
+    state = _state("BE-R002")
+    state["math_result"]["amount_diff"] = "10001.00"
+
+    result = run_item(
+        state,
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.90),
+        retriever=StaticRetriever(),
+    )
+
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert "C3" in result["audit_decision"]["reason"]
+    assert result["next_action"] == "PENDING_HUMAN"
+
+
+def test_run_item_constraint_c4_rejects_placeholder_reason() -> None:
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=PlaceholderReasonAuditAgent(),
+        retriever=StaticRetriever(),
+    )
+
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert "C4" in result["audit_decision"]["reason"]
+
+
+def test_run_item_constraint_c5_rejects_low_confidence_auto_fix() -> None:
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.84),
+        retriever=StaticRetriever(),
+    )
+
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert "C5" in result["audit_decision"]["reason"]
+
+
+def test_run_item_constraint_c6_rejects_auto_fix_on_low_rag_score() -> None:
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.90),
+        retriever=LowScoreRetriever(),
+    )
+
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert "C6" in result["audit_decision"]["reason"]
+
+
+def test_run_item_decision_hook_keeps_compliant_auto_fix_without_extra_calls() -> None:
+    audit_agent = CountingAutoFixedAuditAgent(confidence=0.90)
+
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=audit_agent,
+        retriever=StaticRetriever(),
+    )
+
+    assert audit_agent.calls == 1
+    assert result["audit_decision"]["decision"] == "AUTO_FIXED"
+    assert result["next_action"] == "AUTO_FIXED"
+
+
+def test_run_item_invalid_llm_decision_literal_uses_agent_fallback_instead_of_outer_error() -> None:
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=InvalidDecisionLiteralProvider()),
+        retriever=StaticRetriever(),
+    )
+
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert result["audit_decision"]["fallback_applied"] is True
+    assert result["audit_decision"]["evidence"][0]["chunk_id"] == "rule-001"
+    assert "金额不一致" in result["audit_decision"]["reason"]
+    assert "AI 处理异常" not in result["audit_decision"]["reason"]
+    assert result["error_message"] is None
+
+
 class StaticRetriever:
     def search(self, request):
         del request
         return RagSearchResponse(items=[_evidence()])
+
+
+class LowScoreRetriever:
+    def search(self, request):
+        del request
+        return RagSearchResponse(items=[_low_score_evidence()])
 
 
 class SpyExtractionAgent:
@@ -186,4 +328,108 @@ class SpyAuditAgent:
             fallback_applied=False,
             fallback_level=0,
             next_action="PENDING_HUMAN",
+        )
+
+
+class InvalidSchemaAuditAgent:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def decide_with_llm(
+        self,
+        flow_id: str,
+        error_type: str,
+        exception_branch: str | None,
+        bank_amount: str | None,
+        clear_amount: str | None,
+        amount_diff: str | None,
+        evidence: list[RagSearchItem],
+        few_shot_cases: list[dict[str, object]] | None = None,
+        trace_context: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del (
+            error_type,
+            exception_branch,
+            bank_amount,
+            clear_amount,
+            amount_diff,
+            evidence,
+            few_shot_cases,
+            trace_context,
+        )
+        self.calls += 1
+        return {
+            "flow_id": flow_id,
+            "decision": "FIXED",
+            "risk_level": "LOW",
+            "reason": "invalid schema",
+            "ai_suggestion": "APPROVED_MATCH",
+            "evidence": [],
+            "confidence": 0.9,
+            "next_action": "AUTO_FIXED",
+        }
+
+
+class LowRiskAutoFixedAuditAgent:
+    def __init__(self, *, confidence: float) -> None:
+        self.confidence = confidence
+
+    def decide_with_llm(self, flow_id: str, **kwargs) -> AuditDecision:
+        return AuditDecision(
+            flow_id=flow_id,
+            decision="AUTO_FIXED",
+            risk_level="LOW",
+            reason="auto fixed",
+            ai_suggestion="APPROVED_MATCH",
+            evidence=kwargs["evidence"],
+            confidence=self.confidence,
+            fallback_applied=False,
+            fallback_level=0,
+            next_action="AUTO_FIXED",
+        )
+
+
+class CountingAutoFixedAuditAgent(LowRiskAutoFixedAuditAgent):
+    def __init__(self, *, confidence: float) -> None:
+        super().__init__(confidence=confidence)
+        self.calls = 0
+
+    def decide_with_llm(self, flow_id: str, **kwargs) -> AuditDecision:
+        self.calls += 1
+        return super().decide_with_llm(flow_id=flow_id, **kwargs)
+
+
+class PlaceholderReasonAuditAgent:
+    def decide_with_llm(self, flow_id: str, **kwargs) -> AuditDecision:
+        return AuditDecision(
+            flow_id=flow_id,
+            decision="PENDING_HUMAN",
+            risk_level="MEDIUM",
+            reason="TBD",
+            ai_suggestion="PENDING_HUMAN",
+            evidence=kwargs["evidence"],
+            confidence=0.90,
+            fallback_applied=False,
+            fallback_level=0,
+            next_action="PENDING_HUMAN",
+        )
+
+
+class InvalidDecisionLiteralProvider:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        return LLMResult(
+            text=(
+                '{"decision":"APPROVED_MATCH","risk_level":"LOW","reason":"模型建议自动平账",'
+                '"ai_suggestion":"APPROVED_MATCH","evidence":["rule"],"confidence":0.91}'
+            ),
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="invalid-literal",
         )

@@ -184,6 +184,8 @@ CREATE TABLE IF NOT EXISTS t_agent_execution_log (
   event_type VARCHAR(64) NOT NULL,
   input_payload JSON NOT NULL,
   output_payload JSON NOT NULL,
+  pre_hook_results JSON DEFAULT NULL,
+  post_hook_results JSON DEFAULT NULL,
   rag_retrieval_id BIGINT NULL,
   prompt_version VARCHAR(16) DEFAULT NULL,
   fallback_level INT NOT NULL DEFAULT 0,

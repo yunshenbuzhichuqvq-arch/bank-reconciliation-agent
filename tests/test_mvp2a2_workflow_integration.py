@@ -69,22 +69,30 @@ def test_write_ledger_entries_persists_hybrid_fields_from_rag_response(monkeypat
         return _workflow_state(rag_item, rag_response)
 
     monkeypatch.setattr(service, "_run_workflow_for_result", fake_run_workflow_for_result)
+    results = [
+        ReconciliationMatchResult(
+            flow_id="FLOW-2A28-001",
+            status="PENDING_HUMAN",
+            error_type="AMOUNT_MISMATCH",
+            exception_branch="BE-R002",
+            bank_amount=None,
+            clear_amount=None,
+            amount_diff=None,
+        )
+    ]
+    queue_rows = service._write_queue_entries(
+        user_id="demo_user",
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        results=results,
+    )
 
     service._write_ledger_entries(
         user_id="demo_user",
         task_id=task_id,
         scenario_type="BANK_ENTERPRISE",
-        results=[
-            ReconciliationMatchResult(
-                flow_id="FLOW-2A28-001",
-                status="PENDING_HUMAN",
-                error_type="AMOUNT_MISMATCH",
-                exception_branch="BE-R002",
-                bank_amount=None,
-                clear_amount=None,
-                amount_diff=None,
-            )
-        ],
+        results=results,
+        queue_rows=queue_rows,
     )
 
     row = rag_log_service.get_latest_row(

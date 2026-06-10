@@ -29,6 +29,7 @@ from bank_reconciliation_agent.schemas.review import (
     RagSourceRef,
     ReviewResultResponse,
 )
+from bank_reconciliation_agent.services.hooks import auth_hook
 from bank_reconciliation_agent.services.ledger import error_ledger_table
 from bank_reconciliation_agent.services.queue import reconciliation_queue_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
@@ -124,13 +125,11 @@ class ReviewService:
 
         with self._engine.begin() as connection:
             queue_row = connection.execute(
-                select(reconciliation_queue_table).where(
-                    reconciliation_queue_table.c.id == queue_id,
-                    reconciliation_queue_table.c.user_id == user_id,
-                )
+                select(reconciliation_queue_table).where(reconciliation_queue_table.c.id == queue_id)
             ).mappings().first()
             if queue_row is None:
                 raise HTTPException(status_code=404, detail="review item not found")
+            auth_hook(user_id=user_id, task_id=queue_row["task_id"])
 
             ledger_row = connection.execute(
                 select(error_ledger_table).where(

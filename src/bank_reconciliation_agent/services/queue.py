@@ -14,6 +14,7 @@ from sqlalchemy import (
     insert,
     select,
 )
+from sqlalchemy.engine import Connection
 from sqlalchemy.engine import Engine
 
 from bank_reconciliation_agent.db.session import get_engine
@@ -57,21 +58,28 @@ class QueueService:
         task_id: str,
         scenario_type: str,
         rows: list[dict[str, object]],
+        connection: Connection | None = None,
     ) -> None:
         """覆盖写入同一任务的异常处理队列。"""
         self._ensure_initialized()
-        with self._engine.begin() as connection:
-            connection.execute(
+        def _execute(conn: Connection) -> None:
+            conn.execute(
                 delete(reconciliation_queue_table).where(
                     reconciliation_queue_table.c.user_id == user_id,
                     reconciliation_queue_table.c.task_id == task_id
                 )
             )
             if rows:
-                connection.execute(
+                conn.execute(
                     insert(reconciliation_queue_table),
                     [dict(row, user_id=user_id, scenario_type=scenario_type) for row in rows],
                 )
+
+        if connection is not None:
+            _execute(connection)
+        else:
+            with self._engine.begin() as conn:
+                _execute(conn)
 
     def count_rows(self, *, user_id: str, task_id: str) -> int:
         self._ensure_initialized()

@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
-from bank_reconciliation_agent.agents.audit_agent import AuditAgent, audit_agent
+from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision, audit_agent
 from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgent, extraction_agent
 from bank_reconciliation_agent.agents.trace_agent import TraceAgent, trace_agent
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.core.logging import bind_trace_context, log
 from bank_reconciliation_agent.rag.retriever import rule_retriever
-from bank_reconciliation_agent.schemas.rag import RagSearchRequest, RagSearchResponse
+from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest, RagSearchResponse
 from bank_reconciliation_agent.services.fallback import (
     FallbackCaseProvider,
     confidence_is_low,
     l1_requires_l2,
     ledger_fallback_case_provider,
     mark_fallback,
+)
+from bank_reconciliation_agent.services.hooks import (
+    SchemaValidationError,
+    constraint_hook,
+    decision_hook,
+    memory_hook,
+    schema_hook,
 )
 
 
@@ -73,6 +81,7 @@ def run_item(
         step="run_item",
         exception_branch=state.get("exception_branch"),
     )
+    state = memory_hook(state)
 
     flow_id = _flow_id(state)
     summary = _combined_text(state, "summary")
@@ -138,8 +147,10 @@ def run_item(
     if exception_branch == "BC-R003":
         audit_kwargs["trace_context"] = trace_payload
 
-    audit_decision = audit_agent.decide_with_llm(
-        **audit_kwargs,
+    audit_decision = _audit_with_schema_retry(
+        state=state,
+        audit_agent=audit_agent,
+        audit_kwargs=audit_kwargs,
     )
     state["agent_logs"].append(
         {
@@ -153,7 +164,9 @@ def run_item(
     )
 
     fallback_path = "L1"
-    if not rag_items:
+    if state.get("error_message") == "schema validation failed":
+        fallback_path = "HUMAN"
+    elif not rag_items:
         audit_decision = mark_fallback(audit_decision, fallback_level=0, next_action="PENDING_HUMAN")
         fallback_path = "HUMAN"
     elif l1_requires_l2(audit_decision, rag_items):
@@ -162,16 +175,28 @@ def run_item(
             user_id=state["user_id"],
             exception_branch=exception_branch,
         )
-        audit_decision = audit_agent.decide_with_llm(
-            flow_id=flow_id,
-            error_type=state.get("error_type") or "",
-            exception_branch=exception_branch,
-            bank_amount=_optional_string(math_result.get("bank_amount")),
-            clear_amount=_optional_string(math_result.get("clear_amount")),
-            amount_diff=_optional_string(math_result.get("amount_diff")),
-            evidence=rag_items,
-            few_shot_cases=state["fallback_cases"],
+        audit_decision = _audit_with_schema_retry(
+            state=state,
+            audit_agent=audit_agent,
+            audit_kwargs={
+                "flow_id": flow_id,
+                "error_type": state.get("error_type") or "",
+                "exception_branch": exception_branch,
+                "bank_amount": _optional_string(math_result.get("bank_amount")),
+                "clear_amount": _optional_string(math_result.get("clear_amount")),
+                "amount_diff": _optional_string(math_result.get("amount_diff")),
+                "evidence": rag_items,
+                "few_shot_cases": state["fallback_cases"],
+            },
         )
+        if state.get("error_message") == "schema validation failed":
+            fallback_path = "L1->L2->HUMAN"
+            state["audit_decision"] = audit_decision.model_dump(mode="json")
+            state["confidence"] = audit_decision.confidence
+            state["fallback_level"] = audit_decision.fallback_level
+            state["fallback_path"] = fallback_path
+            state["next_action"] = audit_decision.next_action
+            return state
         audit_decision = mark_fallback(audit_decision, fallback_level=2)
         state["agent_logs"].append(
             {
@@ -210,17 +235,29 @@ def run_item(
                     **_llm_usage(trace_agent),
                 }
             )
-            audit_decision = audit_agent.decide_with_llm(
-                flow_id=flow_id,
-                error_type=state.get("error_type") or "",
-                exception_branch=exception_branch,
-                bank_amount=_optional_string(math_result.get("bank_amount")),
-                clear_amount=_optional_string(math_result.get("clear_amount")),
-                amount_diff=_optional_string(math_result.get("amount_diff")),
-                evidence=rag_items,
-                few_shot_cases=state["fallback_cases"],
-                trace_context=trace_payload,
+            audit_decision = _audit_with_schema_retry(
+                state=state,
+                audit_agent=audit_agent,
+                audit_kwargs={
+                    "flow_id": flow_id,
+                    "error_type": state.get("error_type") or "",
+                    "exception_branch": exception_branch,
+                    "bank_amount": _optional_string(math_result.get("bank_amount")),
+                    "clear_amount": _optional_string(math_result.get("clear_amount")),
+                    "amount_diff": _optional_string(math_result.get("amount_diff")),
+                    "evidence": rag_items,
+                    "few_shot_cases": state["fallback_cases"],
+                    "trace_context": trace_payload,
+                },
             )
+            if state.get("error_message") == "schema validation failed":
+                fallback_path = "L1->L2->L3->HUMAN"
+                state["audit_decision"] = audit_decision.model_dump(mode="json")
+                state["confidence"] = audit_decision.confidence
+                state["fallback_level"] = audit_decision.fallback_level
+                state["fallback_path"] = fallback_path
+                state["next_action"] = audit_decision.next_action
+                return state
             audit_decision = mark_fallback(audit_decision, fallback_level=3)
             state["agent_logs"].append(
                 {
@@ -244,8 +281,55 @@ def run_item(
     state["confidence"] = audit_decision.confidence
     state["fallback_level"] = audit_decision.fallback_level
     state["fallback_path"] = fallback_path
-    state["next_action"] = audit_decision.next_action
+    _apply_post_hooks(state, audit_decision)
     return state
+
+
+def _audit_with_schema_retry(
+    *,
+    state: ReconciliationState,
+    audit_agent: AuditAgent,
+    audit_kwargs: dict[str, Any],
+) -> AuditDecision:
+    max_attempts = 3
+    state["error_message"] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            decision = schema_hook(audit_agent.decide_with_llm(**audit_kwargs))
+            state["retry_count"] = attempt - 1
+            return decision
+        except SchemaValidationError as exc:
+            del exc
+            log.warning(
+                "schema_hook_retry",
+                hook_name="SchemaHook",
+                retry_count=attempt,
+                flow_id=audit_kwargs.get("flow_id"),
+            )
+            state["agent_logs"].append(
+                {
+                    "agent_name": "SchemaHook",
+                    "step": "schema_validate",
+                    "flow_id": audit_kwargs.get("flow_id"),
+                    "retry_count": attempt,
+                    "error_message": "schema validation failed",
+                }
+            )
+
+    state["retry_count"] = max_attempts
+    state["error_message"] = "schema validation failed"
+    return AuditDecision(
+        flow_id=str(audit_kwargs.get("flow_id") or ""),
+        decision="PENDING_HUMAN",
+        risk_level="HIGH",
+        reason="SchemaHook 校验失败，重试 3 次后转人工。",
+        ai_suggestion="PENDING_HUMAN",
+        evidence=[],
+        confidence=0.0,
+        fallback_applied=True,
+        fallback_level=1,
+        next_action="PENDING_HUMAN",
+    )
 
 
 def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> RagSearchResponse:
@@ -261,6 +345,52 @@ def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> 
             enable_reranker=settings.enable_rag_reranker,
         )
     )
+
+
+def _apply_post_hooks(state: ReconciliationState, audit_decision: AuditDecision) -> None:
+    rag_items = [RagSearchItem.model_validate(item) for item in state["rag_context"]]
+    constraint = constraint_hook(
+        audit_decision,
+        amount_diff=_to_decimal(state.get("math_result", {}).get("amount_diff")),
+        rag_best_score=max((item.score for item in rag_items), default=None),
+    )
+    if not constraint.ok:
+        violated_suffix = f"；违反约束: {', '.join(constraint.violated)}"
+        audit_decision.reason = f"{audit_decision.reason}{violated_suffix}" if audit_decision.reason else (
+            f"违反约束: {', '.join(constraint.violated)}"
+        )
+        audit_decision = mark_fallback(
+            audit_decision,
+            fallback_level=max(audit_decision.fallback_level, 1),
+            next_action="PENDING_HUMAN",
+        )
+    route = decision_hook(audit_decision, constraint)
+    audit_decision.next_action = route
+    if not constraint.ok:
+        audit_decision.decision = "PENDING_HUMAN"
+        audit_decision.ai_suggestion = "PENDING_HUMAN"
+    state["audit_decision"] = audit_decision.model_dump(mode="json")
+    state["confidence"] = audit_decision.confidence
+    state["fallback_level"] = audit_decision.fallback_level
+    state["next_action"] = route
+    state["agent_logs"].append(
+        {
+            "agent_name": "DecisionHook",
+            "step": "post_hook_route",
+            "flow_id": audit_decision.flow_id,
+            "violated": constraint.violated,
+            "next_action": route,
+        }
+    )
+
+
+def _to_decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _build_rag_query(state: ReconciliationState) -> str:

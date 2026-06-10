@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from bank_reconciliation_agent.services.reconciliation import (
-    BANK_REQUIRED_COLUMNS,
-    CLEAR_REQUIRED_COLUMNS,
-)
 from bank_reconciliation_agent.services.exception_router import ExceptionRouter
+from bank_reconciliation_agent.services.hooks import (
+    _BANK_REQUIRED_COLUMNS,
+    _CLEAR_REQUIRED_COLUMNS,
+)
 from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
     generate_mvp2a3_mock_excel,
@@ -21,8 +21,8 @@ def test_generate_mvp2a3_mock_excel_writes_bank_clearing_fixture_files(tmp_path:
 
     assert bank_path.name == "mvp2a3_core.xlsx"
     assert clear_path.name == "mvp2a3_clearing.xlsx"
-    assert set(BANK_REQUIRED_COLUMNS).issubset(bank_df.columns)
-    assert set(CLEAR_REQUIRED_COLUMNS).issubset(clear_df.columns)
+    assert set(_BANK_REQUIRED_COLUMNS).issubset(bank_df.columns)
+    assert set(_CLEAR_REQUIRED_COLUMNS).issubset(clear_df.columns)
     assert bank_df["flow_id"].is_unique
     assert clear_df["flow_id"].is_unique
 

@@ -1,6 +1,8 @@
 from io import BytesIO
 from decimal import Decimal
+import inspect
 from pathlib import Path
+import pytest
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -11,10 +13,16 @@ from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService, error_ledger_table
-from bank_reconciliation_agent.services.queue import QueueService
+from bank_reconciliation_agent.services.queue import QueueService, queue_service
 from bank_reconciliation_agent.services.rag_log import RagLogService
-from bank_reconciliation_agent.services.reconciliation import ReconciliationService
-from bank_reconciliation_agent.services.task import TaskService, reconciliation_task_table
+from bank_reconciliation_agent.services.reconciliation import (
+    ReconciliationMatchResult,
+    ReconciliationService,
+    ReconciliationWriteBundle,
+)
+from bank_reconciliation_agent.services.agent_log import agent_log_service
+from bank_reconciliation_agent.services.ledger import ledger_service
+from bank_reconciliation_agent.services.task import TaskService, reconciliation_task_table, task_service
 from bank_reconciliation_agent.services.transactions import TransactionService
 from scripts.generate_mock_excel import (
     BANK_COLUMNS,
@@ -503,3 +511,162 @@ def test_reconciliation_service_build_match_results_passes_scenario_type(monkeyp
     service._build_match_results(pd.DataFrame(), pd.DataFrame(), scenario_type="BANK_CLEARING")
 
     assert captured == ["BANK_CLEARING"]
+
+
+def test_upload_rolls_back_core_writes_when_ai_stats_update_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+    task_id = "TASK_ROLLBACK_TEST"
+    original_replace_ai_stats = task_service.replace_ai_stats
+
+    def failing_replace_ai_stats(**kwargs):
+        original_replace_ai_stats(**kwargs)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(task_service, "replace_ai_stats", failing_replace_ai_stats)
+    monkeypatch.setattr(ReconciliationService, "_generate_task_id", lambda self, content: task_id)
+
+    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
+        with pytest.raises(RuntimeError, match="boom"):
+            client.post(
+                "/api/v1/reconcile/upload",
+                headers=DEMO_HEADERS,
+                files={
+                    "bank_file": (
+                        "bank_transactions.xlsx",
+                        bank_file,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                    "clear_file": (
+                        "clear_transactions.xlsx",
+                        clear_file,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                },
+            )
+
+    persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
+    persisted_ledger_page = LedgerService().list(
+        user_id="demo_user",
+        query=LedgerQuery(task_id=task_id),
+    )
+
+    assert persisted_task is not None
+    assert persisted_task.ai_processed_rows == 0
+    assert persisted_task.total_llm_tokens == 0
+    assert persisted_ledger_page.total == 0
+    assert QueueService().count_rows(user_id="demo_user", task_id=task_id) == 0
+
+
+def test_upload_ignores_agent_log_side_effect_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+    task_id = "TASK_SIDE_EFFECT_TEST"
+
+    def failing_replace_task_rows(**kwargs):
+        del kwargs
+        raise RuntimeError("agent log unavailable")
+
+    monkeypatch.setattr(agent_log_service, "replace_task_rows", failing_replace_task_rows)
+    monkeypatch.setattr(ReconciliationService, "_generate_task_id", lambda self, content: task_id)
+
+    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    bank_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    clear_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 200
+    task_id = response.json()["data"]["task_id"]
+    assert QueueService().count_rows(user_id="demo_user", task_id=task_id) == 6
+    assert LedgerService().list(user_id="demo_user", query=LedgerQuery(task_id=task_id)).total == 6
+    persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
+    assert persisted_task is not None
+    assert persisted_task.ai_processed_rows == 6
+
+
+def test_write_ledger_entries_does_not_directly_touch_other_service_privates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ReconciliationService()
+    task_id = "TASK_ENGINE_DECOUPLE"
+    task_service.replace_task(
+        user_id="demo_user",
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=1,
+        total_clear_rows=1,
+        auto_fixed_rows=0,
+        pending_ai_rows=0,
+        pending_human_rows=1,
+    )
+    original_ledger_init = ledger_service._ensure_initialized
+    original_queue_init = queue_service._ensure_initialized
+    original_task_init = task_service._ensure_initialized
+
+    def forbid_direct_private_init(original_method):
+        def wrapped():
+            caller = inspect.stack()[1].function
+            if caller == "_write_ledger_entries":
+                raise AssertionError(f"direct private init from {caller} is forbidden")
+            return original_method()
+
+        return wrapped
+
+    class BrokenEngine:
+        def begin(self):
+            raise AssertionError("should not use task_service._engine directly")
+
+    monkeypatch.setattr(ledger_service, "_ensure_initialized", forbid_direct_private_init(original_ledger_init))
+    monkeypatch.setattr(queue_service, "_ensure_initialized", forbid_direct_private_init(original_queue_init))
+    monkeypatch.setattr(task_service, "_ensure_initialized", forbid_direct_private_init(original_task_init))
+    monkeypatch.setattr(task_service, "_engine", BrokenEngine())
+    monkeypatch.setattr(
+        service,
+        "_build_write_bundle",
+        lambda **kwargs: ReconciliationWriteBundle(
+            ledger_rows=[],
+            rag_log_rows=[],
+            agent_log_rows=[],
+            trace_payloads=[],
+            ai_processed_rows=0,
+            fallback_l2_rows=0,
+            fallback_l3_rows=0,
+            total_prompt_tokens=0,
+            total_completion_tokens=0,
+        ),
+    )
+
+    service._write_ledger_entries(
+        user_id="demo_user",
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        results=[
+            ReconciliationMatchResult(
+                flow_id="FLOW-DECOUPLE-001",
+                status="PENDING_HUMAN",
+                error_type="AMOUNT_MISMATCH",
+                exception_branch="BE-R002",
+                bank_amount=Decimal("100.00"),
+                clear_amount=Decimal("99.00"),
+                amount_diff=Decimal("1.00"),
+            )
+        ],
+        queue_rows=[],
+    )

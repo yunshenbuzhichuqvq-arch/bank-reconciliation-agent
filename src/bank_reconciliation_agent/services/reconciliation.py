@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from io import BytesIO
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 import pandas as pd
 from fastapi import HTTPException, UploadFile
@@ -15,6 +15,7 @@ from bank_reconciliation_agent.agents.audit_agent import AuditDecision
 from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgentError
 from bank_reconciliation_agent.agents.trace_agent import TraceAgentError
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
 from bank_reconciliation_agent.core.logging import log
@@ -32,41 +33,15 @@ from bank_reconciliation_agent.schemas.reconciliation import (
 )
 from bank_reconciliation_agent.services.agent_log import agent_log_service
 from bank_reconciliation_agent.services.exception_router import BranchResult, exception_router
-from bank_reconciliation_agent.services.ledger import ledger_service
-from bank_reconciliation_agent.services.queue import queue_service
+from bank_reconciliation_agent.services.hooks import auth_hook, validation_hook
+from bank_reconciliation_agent.services.ledger import error_ledger_table, ledger_service
+from bank_reconciliation_agent.services.queue import queue_service, reconciliation_queue_table
 from bank_reconciliation_agent.services.rag_log import rag_log_service
-from bank_reconciliation_agent.services.task import task_service
+from bank_reconciliation_agent.services.task import reconciliation_task_table, task_service
 from bank_reconciliation_agent.services.trace import trace_writer
 from bank_reconciliation_agent.services.transactions import transaction_service
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 
-
-BANK_REQUIRED_COLUMNS = [
-    "flow_id", "bank_serial_no", "accounting_date", "accounting_time",
-    "value_date", "self_account_no_masked", "self_account_name_masked",
-    "self_bank_name", "currency", "transaction_type", "transaction_direction",
-    "amount", "debit_amount", "credit_amount", "fee_amount", "balance_after",
-    "trade_time", "account_no_masked", "customer_name_masked",
-    "counterparty_account_no_masked", "counterparty_name_masked",
-    "counterparty_bank_name", "channel", "summary", "purpose",
-    "posting_status", "branch_no", "teller_id", "transaction_code",
-    "source_system", "remark",
-]
-
-CLEAR_REQUIRED_COLUMNS = [
-    "flow_id", "clearing_serial_no", "merchant_id", "merchant_name",
-    "store_name", "terminal_id", "channel", "transaction_type",
-    "trade_date", "trade_time", "settlement_date", "amount",
-    "transaction_amount", "fee_amount", "net_amount", "currency",
-    "status", "summary", "batch_no", "voucher_no", "reference_no",
-    "merchant_order_no", "payer_account_no_masked", "payer_name_masked",
-    "payee_account_no_masked", "payee_name_masked", "order_description", "remark",
-]
-
-NUMERIC_COLUMNS = [
-    "amount", "debit_amount", "credit_amount", "fee_amount",
-    "transaction_amount", "net_amount", "balance_after",
-]
 
 AGENT_PROCESSING_ERRORS = (
     LLMUnavailable,
@@ -94,7 +69,32 @@ class ReconciliationMatchResult(NamedTuple):
     t1_candidate: dict[str, str] | None = None
 
 
+class ReconciliationWriteBundle(NamedTuple):
+    ledger_rows: list[LedgerRow]
+    rag_log_rows: list[dict[str, object]]
+    agent_log_rows: list[dict[str, object]]
+    trace_payloads: list[tuple[str, dict[str, object]]]
+    ai_processed_rows: int
+    fallback_l2_rows: int
+    fallback_l3_rows: int
+    total_prompt_tokens: int
+    total_completion_tokens: int
+
+
 class ReconciliationService:
+    def __init__(self) -> None:
+        self._engine = get_engine()
+
+    def _ensure_core_transaction_tables(self) -> None:
+        error_ledger_table.metadata.create_all(self._engine, tables=[error_ledger_table])
+        reconciliation_queue_table.metadata.create_all(
+            self._engine,
+            tables=[reconciliation_queue_table],
+        )
+        reconciliation_task_table.metadata.create_all(
+            self._engine,
+            tables=[reconciliation_task_table],
+        )
 
     async def upload(
         self,
@@ -111,12 +111,7 @@ class ReconciliationService:
 
         bank_df = self._read_dataframe(bank_content, "bank_file")
         clear_df = self._read_dataframe(clear_content, "clear_file")
-        self._validate_columns(bank_df, BANK_REQUIRED_COLUMNS, "bank_file")
-        self._validate_columns(clear_df, CLEAR_REQUIRED_COLUMNS, "clear_file")
-        self._validate_data_types(bank_df, "bank_file")
-        self._validate_data_types(clear_df, "clear_file")
-        self._validate_unique_flow_ids(bank_df, "bank_file")
-        self._validate_unique_flow_ids(clear_df, "clear_file")
+        validation_hook(bank_df, clear_df, scenario_type=scenario_type)
 
         match_results = self._build_match_results(
             bank_df,
@@ -143,8 +138,14 @@ class ReconciliationService:
             clear_df=clear_df,
         )
 
-        self._write_queue_entries(user_id, task_id, scenario_type, match_results)
-        self._write_ledger_entries(user_id, task_id, scenario_type, match_results)
+        queue_rows = self._write_queue_entries(user_id, task_id, scenario_type, match_results)
+        self._write_ledger_entries(
+            user_id,
+            task_id,
+            scenario_type,
+            match_results,
+            queue_rows=queue_rows,
+        )
 
         return ReconciliationUploadResponse(
             task_id=task_id,
@@ -180,61 +181,6 @@ class ReconciliationService:
                 detail=f"{file_label} exceeds maximum of {settings.max_upload_rows} rows",
             )
         return df
-
-    def _validate_columns(
-        self, dataframe: pd.DataFrame, required_columns: list[str], file_label: str,
-    ) -> None:
-        missing = [col for col in required_columns if col not in dataframe.columns]
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{file_label} missing required columns: {', '.join(missing)}",
-            )
-
-    def _validate_data_types(
-        self, dataframe: pd.DataFrame, file_label: str,
-    ) -> None:
-        for col in NUMERIC_COLUMNS:
-            if col not in dataframe.columns:
-                continue
-            non_numeric = dataframe[col].apply(
-                lambda x: not (pd.isna(x) or isinstance(x, (int, float)))
-            )
-            if non_numeric.any():
-                bad_values = dataframe.loc[non_numeric, col].head(3).tolist()
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"{file_label} column '{col}' contains non-numeric values: "
-                        f"{bad_values}"
-                    ),
-                )
-
-        if dataframe["flow_id"].isna().any():
-            raise HTTPException(
-                status_code=400,
-                detail=f"{file_label} contains empty flow_id values",
-            )
-
-        flow_id_series = dataframe["flow_id"].astype(str)
-        empty_flow_ids = flow_id_series.str.strip().eq("")
-        invalid_flow_ids = flow_id_series.str.strip().str.lower().isin({"nan", "none", "null"})
-        if empty_flow_ids.any() or invalid_flow_ids.any():
-            raise HTTPException(
-                status_code=400,
-                detail=f"{file_label} contains empty flow_id values",
-            )
-
-    def _validate_unique_flow_ids(
-        self, dataframe: pd.DataFrame, file_label: str,
-    ) -> None:
-        duplicated = dataframe.loc[dataframe["flow_id"].duplicated(), "flow_id"]
-        if duplicated.empty:
-            return
-        raise HTTPException(
-            status_code=400,
-            detail=f"{file_label} contains duplicate flow_id: {duplicated.iloc[0]}",
-        )
 
     def _build_match_results(
         self,
@@ -274,6 +220,7 @@ class ReconciliationService:
         )
 
     def start(self, *, user_id: str, task_id: str) -> ReconciliationStartResponse:
+        auth_hook(user_id=user_id, task_id=task_id)
         if not task_service.update_status(user_id=user_id, task_id=task_id, status="AI_RUNNING"):
             raise HTTPException(status_code=404, detail="reconciliation task not found")
         return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
@@ -399,7 +346,8 @@ class ReconciliationService:
         task_id: str,
         scenario_type: str,
         results: list[ReconciliationMatchResult],
-    ) -> None:
+    ) -> list[dict[str, object]]:
+        del user_id, scenario_type
         queue_rows: list[dict[str, object]] = []
         for result in results:
             if result.status == "AUTO_FIXED":
@@ -412,12 +360,7 @@ class ReconciliationService:
                 "status": result.status,
                 "risk_level": "MEDIUM", "retry_count": 0,
             })
-        queue_service.replace_task_rows(
-            user_id=user_id,
-            task_id=task_id,
-            scenario_type=scenario_type,
-            rows=queue_rows,
-        )
+        return queue_rows
 
     def _write_ledger_entries(
         self,
@@ -425,10 +368,89 @@ class ReconciliationService:
         task_id: str,
         scenario_type: str,
         results: list[ReconciliationMatchResult],
+        *,
+        queue_rows: list[dict[str, object]],
     ) -> None:
+        self._ensure_core_transaction_tables()
+        write_bundle = self._build_write_bundle(
+            user_id=user_id,
+            task_id=task_id,
+            scenario_type=scenario_type,
+            results=results,
+        )
+        with self._engine.begin() as connection:
+            ledger_service.replace_task_rows(
+                user_id=user_id,
+                task_id=task_id,
+                scenario_type=scenario_type,
+                rows=write_bundle.ledger_rows,
+                connection=connection,
+            )
+            queue_service.replace_task_rows(
+                user_id=user_id,
+                task_id=task_id,
+                scenario_type=scenario_type,
+                rows=queue_rows,
+                connection=connection,
+            )
+            task_service.replace_ai_stats(
+                user_id=user_id,
+                task_id=task_id,
+                ai_processed_rows=write_bundle.ai_processed_rows,
+                fallback_l2_rows=write_bundle.fallback_l2_rows,
+                fallback_l3_rows=write_bundle.fallback_l3_rows,
+                total_llm_tokens=(
+                    write_bundle.total_prompt_tokens + write_bundle.total_completion_tokens
+                ),
+                total_llm_cost=compute_cost(
+                    write_bundle.total_prompt_tokens,
+                    write_bundle.total_completion_tokens,
+                ),
+                connection=connection,
+            )
+
+        self._run_side_effect(
+            side_effect_name="rag_log",
+            operation=lambda: rag_log_service.replace_task_rows(
+                user_id=user_id,
+                task_id=task_id,
+                rows=write_bundle.rag_log_rows,
+            ),
+            task_id=task_id,
+        )
+        self._run_side_effect(
+            side_effect_name="agent_log",
+            operation=lambda: agent_log_service.replace_task_rows(
+                user_id=user_id,
+                task_id=task_id,
+                rows=write_bundle.agent_log_rows,
+            ),
+            task_id=task_id,
+        )
+        for flow_id, payload in write_bundle.trace_payloads:
+            self._run_side_effect(
+                side_effect_name="trace",
+                operation=lambda flow_id=flow_id, payload=payload: trace_writer.write(
+                    task_id=task_id,
+                    flow_id=flow_id,
+                    payload=payload,
+                ),
+                task_id=task_id,
+                flow_id=flow_id,
+            )
+
+    def _build_write_bundle(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        scenario_type: str,
+        results: list[ReconciliationMatchResult],
+    ) -> ReconciliationWriteBundle:
         rows: list[LedgerRow] = []
         rag_log_rows: list[dict[str, object]] = []
         agent_log_rows: list[dict[str, object]] = []
+        trace_payloads: list[tuple[str, dict[str, object]]] = []
         ai_processed_rows = 0
         fallback_l2_rows = 0
         fallback_l3_rows = 0
@@ -523,14 +545,14 @@ class ReconciliationService:
                 event_type="AUDIT_DECISION",
                 input_payload=input_payload,
                 output_payload=agent_output,
+                post_hook_results=self._post_hook_results(workflow_state),
                 prompt_version=self._prompt_version_from_logs(workflow_state["agent_logs"]),
                 fallback_level=audit_decision.fallback_level,
                 llm_tokens=llm_tokens,
             ))
-            trace_writer.write(
-                task_id=task_id,
-                flow_id=result.flow_id,
-                payload={
+            trace_payloads.append((
+                result.flow_id,
+                {
                     "task_id": task_id,
                     "flow_id": result.flow_id,
                     "user_id": user_id,
@@ -539,7 +561,7 @@ class ReconciliationService:
                     "agent_output": agent_output,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 },
-            )
+            ))
             rows.append(LedgerRow(
                 id=0, task_id=task_id, flow_id=result.flow_id,
                 error_type=result.error_type or "",
@@ -553,24 +575,36 @@ class ReconciliationService:
                 fallback_path=fallback_path,
                 handle_status=audit_decision.decision,
             ))
-
-        ledger_service.replace_task_rows(
-            user_id=user_id,
-            task_id=task_id,
-            scenario_type=scenario_type,
-            rows=rows,
-        )
-        rag_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=rag_log_rows)
-        agent_log_service.replace_task_rows(user_id=user_id, task_id=task_id, rows=agent_log_rows)
-        task_service.replace_ai_stats(
-            user_id=user_id,
-            task_id=task_id,
+        return ReconciliationWriteBundle(
+            ledger_rows=rows,
+            rag_log_rows=rag_log_rows,
+            agent_log_rows=agent_log_rows,
+            trace_payloads=trace_payloads,
             ai_processed_rows=ai_processed_rows,
             fallback_l2_rows=fallback_l2_rows,
             fallback_l3_rows=fallback_l3_rows,
-            total_llm_tokens=total_prompt_tokens + total_completion_tokens,
-            total_llm_cost=compute_cost(total_prompt_tokens, total_completion_tokens),
+            total_prompt_tokens=total_prompt_tokens,
+            total_completion_tokens=total_completion_tokens,
         )
+
+    def _run_side_effect(
+        self,
+        *,
+        side_effect_name: str,
+        operation: Callable[[], object],
+        task_id: str,
+        flow_id: str | None = None,
+    ) -> None:
+        try:
+            operation()
+        except Exception as exc:
+            log.warning(
+                "reconciliation_side_effect_failed",
+                task_id=task_id,
+                flow_id=flow_id,
+                side_effect_failed=side_effect_name,
+                error_type=type(exc).__name__,
+            )
 
     def _run_workflow_for_result(
         self,
@@ -695,6 +729,20 @@ class ReconciliationService:
             if prompt_version is not None:
                 return str(prompt_version)
         return None
+
+    def _post_hook_results(self, workflow_state: ReconciliationState) -> dict[str, object]:
+        decision_log = next(
+            (
+                row for row in reversed(workflow_state["agent_logs"])
+                if row.get("agent_name") == "DecisionHook"
+            ),
+            {},
+        )
+        return {
+            "schema_retries": int(workflow_state.get("retry_count", 0)),
+            "constraint_violated": list(decision_log.get("violated", [])),
+            "decision_route": str(decision_log.get("next_action", workflow_state.get("next_action", ""))),
+        }
 
 
 reconciliation_service = ReconciliationService()

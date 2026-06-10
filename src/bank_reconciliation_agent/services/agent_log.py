@@ -38,6 +38,8 @@ agent_execution_log_table = Table(
     Column("event_type", String(64), nullable=False),
     Column("input_payload", JSON().with_variant(Text, "sqlite"), nullable=False),
     Column("output_payload", JSON().with_variant(Text, "sqlite"), nullable=False),
+    Column("pre_hook_results", JSON().with_variant(Text, "sqlite"), nullable=True),
+    Column("post_hook_results", JSON().with_variant(Text, "sqlite"), nullable=True),
     Column("rag_retrieval_id", BigInteger, nullable=True),
     Column("prompt_version", String(16), nullable=True),
     Column("fallback_level", Integer, nullable=False, server_default="0"),
@@ -85,6 +87,8 @@ class AgentLogService:
         event_type: str,
         input_payload: dict,
         output_payload: dict,
+        pre_hook_results: dict[str, object] | None = None,
+        post_hook_results: dict[str, object] | None = None,
         rag_retrieval_id: int | None = None,
         prompt_version: str | None = None,
         fallback_level: int = 0,
@@ -99,6 +103,8 @@ class AgentLogService:
             "event_type": event_type,
             "input_payload": input_payload,
             "output_payload": output_payload,
+            "pre_hook_results": pre_hook_results,
+            "post_hook_results": post_hook_results,
             "rag_retrieval_id": rag_retrieval_id,
             "prompt_version": prompt_version,
             "fallback_level": fallback_level,
@@ -134,6 +140,8 @@ class AgentLogService:
             "event_type": row["event_type"],
             "input_payload": self._payload_for_storage(row["input_payload"]),
             "output_payload": self._payload_for_storage(row["output_payload"]),
+            "pre_hook_results": self._payload_for_storage(row["pre_hook_results"]),
+            "post_hook_results": self._payload_for_storage(row["post_hook_results"]),
             "rag_retrieval_id": row["rag_retrieval_id"],
             "prompt_version": row["prompt_version"],
             "fallback_level": row["fallback_level"],
@@ -142,6 +150,8 @@ class AgentLogService:
         }
 
     def _payload_for_storage(self, value: object) -> object:
+        if value is None:
+            return None
         if self._engine.dialect.name == "sqlite":
             return self._json_dumps(value)
         return value

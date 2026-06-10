@@ -1,7 +1,7 @@
 import json
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from bank_reconciliation_agent.core.llm.provider import LLMProvider, LLMUnavailable, get_llm_provider
 from bank_reconciliation_agent.core.logging import log
@@ -46,7 +46,7 @@ BRANCH_PROFILE: dict[str, BranchProfile] = {
 
 class AuditDecision(BaseModel):
     flow_id: str
-    decision: str
+    decision: Literal["AUTO_FIXED", "PENDING_HUMAN", "UNRESOLVED"]
     risk_level: str
     reason: str
     ai_suggestion: str
@@ -55,6 +55,12 @@ class AuditDecision(BaseModel):
     fallback_applied: bool = False
     fallback_level: int = 0
     next_action: str = "PENDING_HUMAN"
+
+    @model_validator(mode="after")
+    def _c2_evidence_required_unless_human(self) -> "AuditDecision":
+        if self.decision != "PENDING_HUMAN" and not self.evidence:
+            raise ValueError("C2: 非转人工决策 evidence 不能为空")
+        return self
 
 
 class LLMAuditDecision(BaseModel):
@@ -190,6 +196,18 @@ class AuditAgent:
             result = self.provider.complete(messages, temperature=0.0, response_format="json_object")
             self.last_llm_result = result
             llm_decision = LLMAuditDecision.model_validate(json.loads(result.text))
+            return AuditDecision(
+                flow_id=flow_id,
+                decision=llm_decision.decision,
+                risk_level=llm_decision.risk_level,
+                reason=llm_decision.reason,
+                ai_suggestion=llm_decision.ai_suggestion,
+                evidence=evidence,
+                confidence=llm_decision.confidence,
+                fallback_applied=False,
+                fallback_level=0,
+                next_action=llm_decision.decision,
+            )
         except LLMUnavailable:
             log.warning(
                 "agent_llm_unavailable",
@@ -223,19 +241,6 @@ class AuditAgent:
                 amount_diff=amount_diff,
                 evidence=evidence,
             )
-
-        return AuditDecision(
-            flow_id=flow_id,
-            decision=llm_decision.decision,
-            risk_level=llm_decision.risk_level,
-            reason=llm_decision.reason,
-            ai_suggestion=llm_decision.ai_suggestion,
-            evidence=evidence,
-            confidence=llm_decision.confidence,
-            fallback_applied=False,
-            fallback_level=0,
-            next_action=llm_decision.decision,
-        )
 
     def _fallback_decision(
         self,

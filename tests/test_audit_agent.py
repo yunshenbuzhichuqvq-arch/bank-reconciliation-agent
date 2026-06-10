@@ -1,6 +1,7 @@
 import pytest
+from pydantic import ValidationError
 
-from bank_reconciliation_agent.agents.audit_agent import AuditAgent
+from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
 from bank_reconciliation_agent.core.llm.provider import FakeLLMProvider, LLMResult, LLMUnavailable
 from bank_reconciliation_agent.schemas.rag import RagSearchItem
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
@@ -172,6 +173,27 @@ def test_audit_agent_invalid_llm_output_falls_back_without_raising() -> None:
         assert "金额不一致" in decision.reason
 
 
+def test_audit_agent_invalid_decision_literal_from_llm_falls_back_without_raising() -> None:
+    decision = AuditAgent(provider=InvalidDecisionLiteralProvider()).decide_with_llm(
+        flow_id="F1010-BAD-LITERAL",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.flow_id == "F1010-BAD-LITERAL"
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.fallback_applied is True
+    assert decision.fallback_level == 1
+    assert decision.next_action == "PENDING_HUMAN"
+    assert decision.evidence == _evidence()
+    assert "金额不一致" in decision.reason
+    assert "AI 处理异常" not in decision.reason
+
+
 def test_audit_agent_llm_path_defers_when_rag_evidence_is_missing() -> None:
     decision = AuditAgent(provider=FakeLLMProvider()).decide_with_llm(
         flow_id="F1009",
@@ -246,6 +268,54 @@ def test_reconciliation_audit_decision_schema_includes_fallback_fields() -> None
     assert response_decision.next_action == "PENDING_HUMAN"
 
 
+def test_audit_decision_rejects_invalid_decision_literal() -> None:
+    with pytest.raises(ValidationError):
+        AuditDecision(
+            flow_id="F-INVALID",
+            decision="FIXED",
+            risk_level="MEDIUM",
+            reason="invalid",
+            ai_suggestion="PENDING_HUMAN",
+            evidence=_evidence(),
+            confidence=0.8,
+        )
+
+
+def test_audit_decision_requires_evidence_unless_pending_human() -> None:
+    with pytest.raises(ValidationError):
+        AuditDecision(
+            flow_id="F-AUTO",
+            decision="AUTO_FIXED",
+            risk_level="LOW",
+            reason="auto",
+            ai_suggestion="APPROVED_MATCH",
+            evidence=[],
+            confidence=0.9,
+        )
+
+    unresolved = AuditDecision(
+        flow_id="F-UNRESOLVED",
+        decision="UNRESOLVED",
+        risk_level="HIGH",
+        reason="need follow-up",
+        ai_suggestion="FORCE_HOLD",
+        evidence=_evidence(),
+        confidence=0.9,
+    )
+    pending_human = AuditDecision(
+        flow_id="F-HUMAN",
+        decision="PENDING_HUMAN",
+        risk_level="HIGH",
+        reason="no evidence",
+        ai_suggestion="PENDING_HUMAN",
+        evidence=[],
+        confidence=0.0,
+    )
+
+    assert unresolved.decision == "UNRESOLVED"
+    assert pending_human.evidence == []
+
+
 class UnavailableProvider:
     def complete(
         self,
@@ -292,6 +362,26 @@ class InvalidSchemaProvider:
             prompt_tokens=10,
             completion_tokens=8,
             model="invalid-schema",
+        )
+
+
+class InvalidDecisionLiteralProvider:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        return LLMResult(
+            text=(
+                '{"decision":"APPROVED_MATCH","risk_level":"LOW","reason":"模型建议自动平账",'
+                '"ai_suggestion":"APPROVED_MATCH","evidence":["rule"],"confidence":0.91}'
+            ),
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="invalid-literal",
         )
 
 

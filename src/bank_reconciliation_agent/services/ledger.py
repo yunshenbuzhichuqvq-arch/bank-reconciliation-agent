@@ -20,6 +20,7 @@ from sqlalchemy import (
     insert,
     select,
 )
+from sqlalchemy.engine import Connection
 from sqlalchemy.engine import Engine
 
 from bank_reconciliation_agent.db.session import get_engine
@@ -72,21 +73,28 @@ class LedgerService:
         task_id: str,
         scenario_type: str,
         rows: list[LedgerRow],
+        connection: Connection | None = None,
     ) -> None:
         """用同一任务的最新异常结果覆盖旧台账，避免重复上传/查询产生重复行。"""
         self._ensure_initialized()
-        with self._engine.begin() as connection:
-            connection.execute(
+        def _execute(conn: Connection) -> None:
+            conn.execute(
                 delete(error_ledger_table).where(
                     error_ledger_table.c.user_id == user_id,
                     error_ledger_table.c.task_id == task_id,
                 )
             )
             if rows:
-                connection.execute(
+                conn.execute(
                     insert(error_ledger_table),
                     [self._to_insert_values(user_id, scenario_type, row) for row in rows],
                 )
+
+        if connection is not None:
+            _execute(connection)
+        else:
+            with self._engine.begin() as conn:
+                _execute(conn)
 
     def list(self, *, user_id: str, query: LedgerQuery) -> Page[LedgerRow]:
         """根据查询条件返回差错台账分页结果。"""

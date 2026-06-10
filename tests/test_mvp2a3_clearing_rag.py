@@ -36,6 +36,21 @@ def test_workflow_falls_back_to_human_when_bank_clearing_rag_has_no_hits() -> No
     assert result["fallback_level"] == 0
 
 
+def test_workflow_memory_hook_keeps_bank_clearing_state_intact() -> None:
+    state = _state()
+
+    result = run_item(
+        state,
+        extraction_agent=NoopExtractionAgent(),
+        trace_agent=NoopTraceAgent(),
+        audit_agent=StaticAuditAgent(),
+        retriever=EmptyRetriever(),
+    )
+
+    assert result["scenario_type"] == "BANK_CLEARING"
+    assert result["source_a_item"]["flow_id"] == "FLOW-2A37-001"
+
+
 def _state() -> ReconciliationState:
     return {
         "task_id": "TASK-2A37-001",

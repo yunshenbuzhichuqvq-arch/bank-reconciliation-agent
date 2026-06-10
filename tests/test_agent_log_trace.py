@@ -69,12 +69,18 @@ def test_upload_writes_agent_logs_and_trace_files(tmp_path: Path) -> None:
     assert {row["event_type"] for row in rows} == {"AUDIT_DECISION"}
     first_input = json.loads(rows[0]["input_payload"])
     first_output = json.loads(rows[0]["output_payload"])
+    first_post_hooks = json.loads(rows[0]["post_hook_results"])
     assert first_input["rule_hit"]["exception_branch"] in {
         expected[1] for expected in expected_exceptions.values()
     }
     assert first_input["rag_hit"]["chunk_ids"]
     assert first_output["decision"] == "PENDING_HUMAN"
     assert first_output["ai_suggestion"] in {"PENDING_HUMAN", "APPROVED_MATCH", "FORCE_HOLD"}
+    assert rows[0]["pre_hook_results"] is None
+    assert set(first_post_hooks) == {"schema_retries", "constraint_violated", "decision_route"}
+    assert isinstance(first_post_hooks["schema_retries"], int)
+    assert isinstance(first_post_hooks["constraint_violated"], list)
+    assert first_post_hooks["decision_route"] == "PENDING_HUMAN"
 
     trace_dir = Path(settings.trace_dir) / task_id
     trace_files = sorted(path.name for path in trace_dir.glob("*.json"))

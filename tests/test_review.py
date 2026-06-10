@@ -170,18 +170,24 @@ def test_approve_force_hold_sets_held(tmp_path: Path) -> None:
     assert queue_status == "HELD"
 
 
-def test_approve_rejects_other_user_queue() -> None:
+def test_approve_rejects_other_user_queue(tmp_path: Path) -> None:
+    task_id = _upload_task(tmp_path)
+    pending = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=1",
+        headers=DEMO_HEADERS,
+    ).json()["data"]["items"][0]
+
     with pytest.raises(HTTPException) as exc_info:
         review_service.approve(
             user_id="other_user",
-            queue_id=1,
+            queue_id=pending["queue_id"],
             action="APPROVED_MATCH",
             handler_username="reviewer_c",
             remark=None,
         )
 
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "review item not found"
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "forbidden task access"
 
 
 def test_approve_rejects_invalid_action(tmp_path: Path) -> None:
