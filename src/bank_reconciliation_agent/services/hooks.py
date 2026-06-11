@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision
 from bank_reconciliation_agent.core.logging import log
+from bank_reconciliation_agent.services.memory.manager import MemoryManager, memory_manager
 from bank_reconciliation_agent.services.task import task_service
 
 
@@ -72,13 +73,57 @@ def schema_hook(payload: AuditDecision | dict[str, object]) -> AuditDecision:
     return decision
 
 
-def memory_hook(state: dict[str, object]) -> dict[str, object]:
-    log.info(
-        "memory_hook_skipped",
-        hook_name="MemoryHook",
-        memory_skipped=True,
+def memory_hook(
+    state: dict[str, object],
+    *,
+    memory_manager: MemoryManager = memory_manager,
+) -> dict[str, object]:
+    try:
+        state["memory_context"] = memory_manager.build_context(
+            user_id=str(state["user_id"]),
+            thread_id=str(state["thread_id"]),
+            error_type=str(state.get("error_type") or ""),
+            current_item=_memory_current_item(state),
+        )
+        log.info(
+            "memory_hook_passed",
+            hook_name="MemoryHook",
+            memory_skipped=False,
+        )
+    except Exception as exc:
+        state["memory_context"] = None
+        log.warning(
+            "memory_hook_degraded",
+            hook_name="MemoryHook",
+            memory_skipped=True,
+            error_type=type(exc).__name__,
     )
     return state
+
+
+def _memory_current_item(state: dict[str, object]) -> dict[str, object]:
+    source_a_item = state.get("source_a_item")
+    source_b_item = state.get("source_b_item")
+    math_result = state.get("math_result")
+
+    current_item: dict[str, object] = {}
+    if isinstance(math_result, dict):
+        current_item["amount_diff"] = math_result.get("amount_diff")
+
+    for field_name in ("summary", "description", "remark", "memo"):
+        values: list[str] = []
+        for item in (source_a_item, source_b_item):
+            if not isinstance(item, dict):
+                continue
+            value = item.get(field_name)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                values.append(text)
+        if values:
+            current_item[field_name] = " ".join(values)
+    return current_item
 
 
 @dataclass

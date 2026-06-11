@@ -326,6 +326,7 @@ class SequenceAuditAgent:
         evidence: list[RagSearchItem],
         few_shot_cases: list[dict[str, object]] | None = None,
         trace_context: dict[str, object] | None = None,
+        memory_context: str | None = None,
     ) -> AuditDecision:
         del error_type, exception_branch, bank_amount, clear_amount, amount_diff
         self.calls.append(len(self.calls) + 1)
@@ -335,6 +336,7 @@ class SequenceAuditAgent:
                 "evidence": evidence,
                 "few_shot_cases": few_shot_cases,
                 "trace_context": trace_context,
+                "memory_context": memory_context,
             }
         )
         confidence = self.confidences[min(len(self.calls) - 1, len(self.confidences) - 1)]

@@ -239,6 +239,7 @@ class StaticAuditAgent:
         evidence: list[RagSearchItem],
         few_shot_cases: list[dict[str, object]] | None = None,
         trace_context: dict[str, object] | None = None,
+        memory_context: str | None = None,
     ):
         del few_shot_cases
         return AuditAgent(provider=FakeLLMProvider()).decide_with_llm(
@@ -250,4 +251,5 @@ class StaticAuditAgent:
             amount_diff=amount_diff,
             evidence=evidence,
             trace_context=trace_context,
+            memory_context=memory_context,
         )

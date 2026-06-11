@@ -13,8 +13,10 @@ from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService, error_ledger_table
+from bank_reconciliation_agent.services.memory.short_term import ShortTermMemoryService
 from bank_reconciliation_agent.services.queue import QueueService, queue_service
 from bank_reconciliation_agent.services.rag_log import RagLogService
+from bank_reconciliation_agent.services import reconciliation as reconciliation_module
 from bank_reconciliation_agent.services.reconciliation import (
     ReconciliationMatchResult,
     ReconciliationService,
@@ -599,6 +601,74 @@ def test_upload_ignores_agent_log_side_effect_failures(
     persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
     assert persisted_task is not None
     assert persisted_task.ai_processed_rows == 6
+
+
+def test_upload_appends_short_term_memory_after_each_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+    task_id = "TASK_MEMORY_SHORT_TERM_TEST"
+    monkeypatch.setattr(ReconciliationService, "_generate_task_id", lambda self, content: task_id)
+
+    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    bank_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    clear_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 200
+    task_id = response.json()["data"]["task_id"]
+    short_rows = ShortTermMemoryService().recent(thread_id=task_id)
+
+    assert len(short_rows) == 6
+    assert {row["error_type"] for row in short_rows} >= {"AMOUNT_MISMATCH", "BANK_UNARRIVED"}
+    assert all(row["decision"] == "PENDING_HUMAN" for row in short_rows)
+
+
+def test_upload_ignores_memory_side_effect_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+
+    def failing_memory_update(**kwargs):
+        del kwargs
+        raise RuntimeError("memory unavailable")
+
+    monkeypatch.setattr(reconciliation_module.memory_manager, "update_after_decision", failing_memory_update)
+
+    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
+        response = client.post(
+            "/api/v1/reconcile/upload",
+            headers=DEMO_HEADERS,
+            files={
+                "bank_file": (
+                    "bank_transactions.xlsx",
+                    bank_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+                "clear_file": (
+                    "clear_transactions.xlsx",
+                    clear_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+
+    assert response.status_code == 200
 
 
 def test_write_ledger_entries_does_not_directly_touch_other_service_privates(

@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
@@ -52,6 +53,8 @@ class FakeLLMProvider:
     def _payload_for(self, content: str) -> dict[str, object]:
         if '"task": "query_rewrite"' in content or "query_rewrite" in content or "改写" in content:
             return self._query_rewrite_payload(content)
+        if '"task": "memory_summary"' in content or "memory_summary" in content:
+            return self._memory_summary_payload(content)
         if '"task": "extraction"' in content or "extraction" in content:
             return self._extraction_payload()
         if '"task": "trace"' in content:
@@ -83,6 +86,13 @@ class FakeLLMProvider:
             "original_flow_id": "FLOW-ORIGINAL-001",
             "cleaned_remark": "识别到冲正线索，待后续规则核验",
             "confidence": 0.92,
+        }
+
+    def _memory_summary_payload(self, content: str) -> dict[str, object]:
+        flow_ids = sorted(set(re.findall(r"flow_id[=\": ]+([A-Z0-9\-]+)", content)))
+        kept = " ".join(f"flow_id={flow_id}" for flow_id in flow_ids[:16])
+        return {
+            "summary_text": f"HIGH retained PENDING_HUMAN retained {kept}".strip()
         }
 
     def _trace_payload(self, content: str) -> dict[str, object]:

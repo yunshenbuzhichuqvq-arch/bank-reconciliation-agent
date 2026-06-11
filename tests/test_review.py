@@ -8,7 +8,9 @@ from sqlalchemy import select
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.ledger import error_ledger_table
+from bank_reconciliation_agent.services.memory.long_term import LongTermMemoryService
 from bank_reconciliation_agent.services.queue import reconciliation_queue_table
+from bank_reconciliation_agent.services import review as review_module
 from bank_reconciliation_agent.services.review import human_review_table, review_service
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 from scripts.generate_mock_excel import generate_mvp1_mock_excel
@@ -96,7 +98,7 @@ def test_approve_match_writes_review_and_updates_ledger_queue_task(tmp_path: Pat
     body = response.json()["data"]
     assert body["queue_id"] == pending["queue_id"]
     assert body["current_status"] == "FIXED"
-    assert body["memory_updated"] == {"short_term": False, "long_term": False}
+    assert body["memory_updated"] == {"short_term": False, "long_term": True}
 
     engine = get_engine()
     with engine.connect() as connection:
@@ -135,6 +137,16 @@ def test_approve_match_writes_review_and_updates_ledger_queue_task(tmp_path: Pat
     assert task["pending_human_rows"] == 5
     assert task["unresolved_rows"] == 5
 
+    long_rows = LongTermMemoryService().recall(
+        user_id="demo_user",
+        error_type="AMOUNT_MISMATCH",
+        keywords=["amount", "confirmed"],
+    )
+    assert any(
+        row["flow_id"] == "F2003" and row["human_decision"] == "APPROVED_MATCH"
+        for row in long_rows
+    )
+
 
 def test_approve_force_hold_sets_held(tmp_path: Path) -> None:
     task_id = _upload_task(tmp_path)
@@ -168,6 +180,36 @@ def test_approve_force_hold_sets_held(tmp_path: Path) -> None:
 
     assert ledger_status == "HELD"
     assert queue_status == "HELD"
+
+
+def test_approve_ignores_memory_side_effect_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_id = _upload_task(tmp_path)
+    pending = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=1",
+        headers=DEMO_HEADERS,
+    ).json()["data"]["items"][0]
+
+    def failing_memory_update(**kwargs):
+        del kwargs
+        raise RuntimeError("memory unavailable")
+
+    monkeypatch.setattr(review_module.memory_manager, "update_after_decision", failing_memory_update)
+
+    response = client.post(
+        f"/api/v1/review/{pending['queue_id']}/approve",
+        headers=DEMO_HEADERS,
+        json={
+            "action": "APPROVED_MATCH",
+            "handler_username": "reviewer_a",
+            "remark": "确认平账",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["memory_updated"] == {"short_term": False, "long_term": False}
 
 
 def test_approve_rejects_other_user_queue(tmp_path: Path) -> None:

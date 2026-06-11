@@ -21,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
+from bank_reconciliation_agent.core.logging import log
 from bank_reconciliation_agent.agents.audit_agent import BRANCH_PROFILE
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.review import (
@@ -31,6 +32,7 @@ from bank_reconciliation_agent.schemas.review import (
 )
 from bank_reconciliation_agent.services.hooks import auth_hook
 from bank_reconciliation_agent.services.ledger import error_ledger_table
+from bank_reconciliation_agent.services.memory.manager import memory_manager
 from bank_reconciliation_agent.services.queue import reconciliation_queue_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 
@@ -122,6 +124,7 @@ class ReviewService:
         self._ensure_initialized()
         current_status = self._status_for_action(action)
         now = func.now()
+        memory_updated = {"short_term": False, "long_term": False}
 
         with self._engine.begin() as connection:
             queue_row = connection.execute(
@@ -190,7 +193,43 @@ class ReviewService:
                 )
             )
 
-        return ReviewResultResponse(queue_id=queue_id, current_status=current_status)
+        try:
+            memory_manager.update_after_decision(
+                user_id=user_id,
+                thread_id=queue_row["task_id"],
+                error_type=str(queue_row["error_type"]),
+                decision={
+                    "queue_id": queue_id,
+                    "flow_id": queue_row["flow_id"],
+                    "risk_level": queue_row["risk_level"],
+                    "decision": current_status,
+                    "confidence": ledger_row["ai_confidence"] if ledger_row else None,
+                    "exception_branch": queue_row["exception_branch"],
+                    "bank_amount": ledger_row["bank_amount"] if ledger_row else None,
+                    "clear_amount": ledger_row["clear_amount"] if ledger_row else None,
+                    "amount_diff": ledger_row["discrepancy_amount"] if ledger_row else None,
+                    "ai_suggestion": ai_suggestion,
+                    "human_decision": action,
+                    "summary": ledger_row["ai_audit_opinion"] if ledger_row else None,
+                    "remark": remark,
+                },
+                is_human_confirmed=True,
+            )
+            memory_updated = {"short_term": False, "long_term": True}
+        except Exception:
+            log.warning(
+                "review_side_effect_failed",
+                queue_id=queue_id,
+                task_id=queue_row["task_id"],
+                side_effect_failed="memory",
+            )
+            memory_updated = {"short_term": False, "long_term": False}
+
+        return ReviewResultResponse(
+            queue_id=queue_id,
+            current_status=current_status,
+            memory_updated=memory_updated,
+        )
 
     def _ensure_initialized(self) -> None:
         if self._initialized:

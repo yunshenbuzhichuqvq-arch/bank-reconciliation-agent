@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
@@ -10,6 +11,7 @@ from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.core.logging import bind_trace_context, log
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest, RagSearchResponse
+from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
 from bank_reconciliation_agent.services.fallback import (
     FallbackCaseProvider,
     confidence_is_low,
@@ -28,6 +30,10 @@ from bank_reconciliation_agent.services.hooks import (
 
 REVERSAL_HINTS = ("冲正", "红冲", "退款", "抹账", "撤销")
 TRACE_BRANCHES = {"BE-R005", "BE-R006", "BC-R003"}
+rag_circuit_breaker = CircuitBreaker(
+    fail_threshold=settings.rag_breaker_fail_threshold,
+    open_seconds=settings.rag_breaker_open_seconds,
+)
 
 
 class ReconciliationState(TypedDict):
@@ -55,6 +61,10 @@ class ReconciliationState(TypedDict):
     fallback_path: NotRequired[str]
     fallback_cases: NotRequired[list[dict[str, Any]]]
     t1_candidate: NotRequired[dict[str, str] | None]
+    long_term_memory: NotRequired[list[dict[str, Any]]]
+    short_term_memory: NotRequired[list[dict[str, Any]]]
+    summary_buffer: NotRequired[dict[str, Any] | None]
+    memory_context: NotRequired[str | None]
 
 
 class Retriever(Protocol):
@@ -293,6 +303,8 @@ def _audit_with_schema_retry(
 ) -> AuditDecision:
     max_attempts = 3
     state["error_message"] = None
+    audit_kwargs = dict(audit_kwargs)
+    audit_kwargs["memory_context"] = state.get("memory_context")
     for attempt in range(1, max_attempts + 1):
         try:
             decision = schema_hook(audit_agent.decide_with_llm(**audit_kwargs))
@@ -334,16 +346,84 @@ def _audit_with_schema_retry(
 
 def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> RagSearchResponse:
     query = state.get("rag_query") or _build_rag_query(state)
-    return retriever.search(
-        RagSearchRequest(
+    previous_state = rag_circuit_breaker.state
+    if not rag_circuit_breaker.allow_request():
+        _append_rag_breaker_log(
+            state,
+            breaker_state=rag_circuit_breaker.state,
+            reason="breaker open, skip rag retrieval",
             query=query,
-            top_k=settings.rag_rerank_top_k,
-            min_score=0.0,
-            scenario_type=state["scenario_type"],
-            enable_rewrite=settings.enable_rag_rewrite,
-            enable_hybrid=settings.enable_rag_hybrid,
-            enable_reranker=settings.enable_rag_reranker,
         )
+        log.warning(
+            "rag_circuit_breaker_open",
+            breaker_state=rag_circuit_breaker.state,
+            scenario_type=state["scenario_type"],
+            query=query,
+        )
+        return RagSearchResponse(items=[], rewritten_query=None)
+
+    request = RagSearchRequest(
+        query=query,
+        top_k=settings.rag_rerank_top_k,
+        min_score=0.0,
+        scenario_type=state["scenario_type"],
+        enable_rewrite=settings.enable_rag_rewrite,
+        enable_hybrid=settings.enable_rag_hybrid,
+        enable_reranker=settings.enable_rag_reranker,
+    )
+    try:
+        response = retriever.search(request)
+    except Exception as exc:
+        breaker_state = rag_circuit_breaker.record_failure()
+        _append_rag_breaker_log(
+            state,
+            breaker_state=breaker_state,
+            reason=str(exc),
+            query=query,
+        )
+        log.warning(
+            "rag_circuit_breaker_failure",
+            breaker_state=breaker_state,
+            scenario_type=state["scenario_type"],
+            query=query,
+            error=str(exc),
+        )
+        return RagSearchResponse(items=[], rewritten_query=None)
+
+    breaker_state = rag_circuit_breaker.record_success()
+    if previous_state == "HALF_OPEN":
+        _append_rag_breaker_log(
+            state,
+            breaker_state=breaker_state,
+            reason="half-open probe succeeded",
+            query=query,
+        )
+        log.warning(
+            "rag_circuit_breaker_recovered",
+            breaker_state=breaker_state,
+            scenario_type=state["scenario_type"],
+            query=query,
+        )
+    return response
+
+
+def _append_rag_breaker_log(
+    state: ReconciliationState,
+    *,
+    breaker_state: str,
+    reason: str,
+    query: str,
+) -> None:
+    state["agent_logs"].append(
+        {
+            "agent_name": "RAGCircuitBreaker",
+            "step": "retrieve",
+            "hook_name": "RAGCircuitBreaker",
+            "breaker_state": breaker_state,
+            "reason": reason,
+            "query": query,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
     )
 
 

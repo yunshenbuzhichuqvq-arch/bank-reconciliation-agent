@@ -1,6 +1,7 @@
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
 from bank_reconciliation_agent.core.llm.provider import LLMResult
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
+from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 
 
@@ -154,7 +155,7 @@ def test_run_item_retries_schema_drift_then_falls_back_to_human() -> None:
     assert [row["retry_count"] for row in schema_logs] == [1, 2, 3]
 
 
-def test_run_item_memory_hook_is_noop() -> None:
+def test_run_item_memory_hook_keeps_state_intact() -> None:
     result = run_item(
         _state("BE-R002"),
         extraction_agent=SpyExtractionAgent(),
@@ -164,6 +165,105 @@ def test_run_item_memory_hook_is_noop() -> None:
     )
 
     assert result["source_a_item"]["flow_id"] == "FLOW-BE-R002"
+
+
+def test_run_item_passes_memory_context_to_audit_agent(monkeypatch) -> None:
+    audit_agent = SpyAuditAgent()
+
+    def fake_memory_hook(state: ReconciliationState) -> ReconciliationState:
+        state["memory_context"] = "memory context from hook"
+        return state
+
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.workflow.memory_hook",
+        fake_memory_hook,
+    )
+
+    run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=audit_agent,
+        retriever=StaticRetriever(),
+    )
+
+    assert audit_agent.memory_contexts == ["memory context from hook"]
+
+
+def test_run_item_rag_failure_opens_breaker_and_short_circuits_to_human(monkeypatch) -> None:
+    now = 0.0
+
+    def fake_time() -> float:
+        return now
+
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.workflow.rag_circuit_breaker",
+        CircuitBreaker(fail_threshold=1, open_seconds=30, time_fn=fake_time),
+    )
+
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=SpyAuditAgent(),
+        retriever=FailingRetriever(),
+    )
+
+    assert result["rag_context"] == []
+    assert result["fallback_path"] == "HUMAN"
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert any(
+        row["agent_name"] == "RAGCircuitBreaker" and row["breaker_state"] == "OPEN"
+        for row in result["agent_logs"]
+    )
+
+    skipped_result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=SpyAuditAgent(),
+        retriever=StaticRetriever(),
+    )
+
+    assert skipped_result["rag_context"] == []
+    assert any(
+        row["agent_name"] == "RAGCircuitBreaker" and row["reason"] == "breaker open, skip rag retrieval"
+        for row in skipped_result["agent_logs"]
+    )
+
+
+def test_run_item_rag_half_open_success_closes_breaker(monkeypatch) -> None:
+    now = 0.0
+
+    def fake_time() -> float:
+        return now
+
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=10, time_fn=fake_time)
+    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.rag_circuit_breaker", breaker)
+
+    run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=SpyAuditAgent(),
+        retriever=FailingRetriever(),
+    )
+
+    now = 11.0
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=SpyAuditAgent(),
+        retriever=StaticRetriever(),
+    )
+
+    assert breaker.state == "CLOSED"
+    assert result["rag_context"][0]["chunk_id"] == "rule-001"
+    assert any(
+        row["agent_name"] == "RAGCircuitBreaker" and row["reason"] == "half-open probe succeeded"
+        for row in result["agent_logs"]
+    )
 
 
 def test_run_item_constraint_c3_turns_low_risk_large_diff_to_human() -> None:
@@ -267,6 +367,12 @@ class LowScoreRetriever:
         return RagSearchResponse(items=[_low_score_evidence()])
 
 
+class FailingRetriever:
+    def search(self, request):
+        del request
+        raise RuntimeError("chroma unavailable")
+
+
 class SpyExtractionAgent:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -306,6 +412,9 @@ class SpyTraceAgent:
 
 
 class SpyAuditAgent:
+    def __init__(self) -> None:
+        self.memory_contexts: list[str | None] = []
+
     def decide_with_llm(
         self,
         flow_id: str,
@@ -315,8 +424,10 @@ class SpyAuditAgent:
         clear_amount: str | None,
         amount_diff: str | None,
         evidence: list[RagSearchItem],
+        memory_context: str | None = None,
     ) -> AuditDecision:
         del error_type, exception_branch, bank_amount, clear_amount, amount_diff
+        self.memory_contexts.append(memory_context)
         return AuditDecision(
             flow_id=flow_id,
             decision="PENDING_HUMAN",
@@ -346,6 +457,7 @@ class InvalidSchemaAuditAgent:
         evidence: list[RagSearchItem],
         few_shot_cases: list[dict[str, object]] | None = None,
         trace_context: dict[str, object] | None = None,
+        memory_context: str | None = None,
     ) -> dict[str, object]:
         del (
             error_type,
@@ -356,6 +468,7 @@ class InvalidSchemaAuditAgent:
             evidence,
             few_shot_cases,
             trace_context,
+            memory_context,
         )
         self.calls += 1
         return {

@@ -250,6 +250,29 @@ def test_audit_agent_injects_few_shot_and_trace_context_into_llm_messages() -> N
     assert user_payload["trace_context"] == trace_context
 
 
+def test_audit_agent_injects_memory_context_as_additional_system_message() -> None:
+    provider = RecordingProvider()
+
+    AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F1012",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+        memory_context="Long-term memory: similar amount mismatch",
+    )
+
+    assert provider.messages is not None
+    assert provider.messages[0]["role"] == "system"
+    assert provider.messages[1] == {
+        "role": "system",
+        "content": "Long-term memory: similar amount mismatch",
+    }
+    assert provider.messages[2]["role"] == "user"
+
+
 def test_reconciliation_audit_decision_schema_includes_fallback_fields() -> None:
     decision = AuditAgent(provider=FakeLLMProvider()).decide_with_llm(
         flow_id="F1010",
