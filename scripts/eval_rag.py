@@ -1,16 +1,54 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+import json
+import math
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.rag.retriever import RuleRetriever, rule_retriever
 from bank_reconciliation_agent.rag.scoring import representative_score
-from bank_reconciliation_agent.rag.retriever import DEFAULT_CHUNKS_PATH, RuleRetriever
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_EVAL_SET_PATH = PROJECT_ROOT / "data/rag_eval_set.json"
+DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
+
+
+@dataclass(frozen=True)
+class EvalCase:
+    id: str
+    scenario_type: str
+    error_type: str
+    query: str
+    expected_chunk_ids: list[str]
+
+
+@dataclass(frozen=True)
+class EvalCaseResult:
+    id: str
+    scenario_type: str
+    error_type: str
+    query: str
+    expected_chunk_ids: list[str]
+    retrieved_chunk_ids: list[str]
+    hit_at_1: float
+    recall_at_5: float
+    reciprocal_rank: float
+    ndcg_at_5: float
+
+
+@dataclass(frozen=True)
+class ScenarioSummary:
+    scenario_type: str
+    case_count: int
+    hit_at_1: float
+    recall_at_5: float
+    mrr: float
+    ndcg_at_5: float
 
 
 @dataclass(frozen=True)
@@ -20,7 +58,7 @@ class SmokeCase:
 
 
 @dataclass(frozen=True)
-class CaseResult:
+class LegacyCaseResult:
     query: str
     expected_tag: str
     matched_chunk_id: str | None
@@ -31,9 +69,9 @@ class CaseResult:
 
 
 @dataclass(frozen=True)
-class EvalSummary:
+class LegacyEvalSummary:
     mode: str
-    case_results: list[CaseResult]
+    case_results: list[LegacyCaseResult]
 
     @property
     def hit_count(self) -> int:
@@ -41,11 +79,7 @@ class EvalSummary:
 
     @property
     def average_reranker_score(self) -> float:
-        scores = [
-            result.reranker_score
-            for result in self.case_results
-            if result.reranker_score is not None
-        ]
+        scores = [result.reranker_score for result in self.case_results if result.reranker_score is not None]
         if not scores:
             return 0.0
         return sum(scores) / len(scores)
@@ -59,23 +93,158 @@ class EvalSummary:
 
 
 SMOKE_CASES = [
-    SmokeCase(
-        query="金额差异 对账不平 银行端 清算端 金额",
-        expected_tag="amount_mismatch",
-    ),
-    SmokeCase(
-        query="单边缺失 查询查复 来源文件",
-        expected_tag="single_side_missing",
-    ),
-    SmokeCase(
-        query="差错 台账 审计 留痕 task_id flow_id",
-        expected_tag="audit_trail",
-    ),
-    SmokeCase(
-        query="流水缺失 T+1 追溯 查询查复",
-        expected_tag="single_side_missing",
-    ),
+    SmokeCase(query="金额差异 对账不平 银行端 清算端 金额", expected_tag="amount_mismatch"),
+    SmokeCase(query="单边缺失 查询查复 来源文件", expected_tag="single_side_missing"),
+    SmokeCase(query="差错 台账 审计 留痕 task_id flow_id", expected_tag="audit_trail"),
+    SmokeCase(query="流水缺失 T+1 追溯 查询查复", expected_tag="single_side_missing"),
 ]
+
+
+def load_eval_set(path: Path = DEFAULT_EVAL_SET_PATH) -> list[EvalCase]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return [EvalCase(**item) for item in payload]
+
+
+def evaluate_eval_set(
+    cases: list[EvalCase],
+    *,
+    retriever: RuleRetriever | Any = rule_retriever,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    results = [_evaluate_case(case, retriever=retriever, top_k=top_k) for case in cases]
+    scenario_types = sorted({case.scenario_type for case in cases})
+    summaries = [_summarize_scenario(results, scenario_type) for scenario_type in scenario_types]
+    return {
+        "case_count": len(cases),
+        "notes": [
+            "Recall@5 is saturated on the current 6-chunk bank-enterprise corpus; use MRR, NDCG@5, and hit_at_1 for discrimination."
+        ],
+        "summaries": [asdict(summary) for summary in summaries],
+        "results": [asdict(result) for result in results],
+    }
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Evaluate offline RAG quality with a labeled eval set.")
+    parser.add_argument("--eval-set", type=Path, default=DEFAULT_EVAL_SET_PATH)
+    parser.add_argument("--chunks", type=Path, default=None)
+    parser.add_argument("--chroma", type=Path, default=None)
+    parser.add_argument("--top-k", type=int, default=5)
+    args = parser.parse_args(argv)
+
+    if args.chunks is not None:
+        dense_summary = evaluate_cases(
+            chunks_path=args.chunks,
+            chroma_path=(args.chroma or PROJECT_ROOT / "chroma_eval") / "dense",
+            mode="dense",
+        )
+        hybrid_summary = evaluate_cases(
+            chunks_path=args.chunks,
+            chroma_path=(args.chroma or PROJECT_ROOT / "chroma_eval") / "hybrid_rerank",
+            mode="hybrid_rerank",
+        )
+        _print_legacy_report(dense_summary, hybrid_summary)
+        return
+
+    retriever = (
+        rule_retriever
+        if args.chroma is None
+        else RuleRetriever(chroma_path=args.chroma)
+    )
+    report = evaluate_eval_set(load_eval_set(args.eval_set), retriever=retriever, top_k=args.top_k)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def _evaluate_case(
+    case: EvalCase,
+    *,
+    retriever: RuleRetriever | Any,
+    top_k: int,
+) -> EvalCaseResult:
+    response = retriever.search(
+        RagSearchRequest(
+            query=case.query,
+            top_k=top_k,
+            min_score=0.0,
+            scenario_type=case.scenario_type,
+        )
+    )
+    retrieved_chunk_ids = [item.chunk_id for item in response.items[:top_k]]
+    return EvalCaseResult(
+        id=case.id,
+        scenario_type=case.scenario_type,
+        error_type=case.error_type,
+        query=case.query,
+        expected_chunk_ids=case.expected_chunk_ids,
+        retrieved_chunk_ids=retrieved_chunk_ids,
+        hit_at_1=_hit_at_1(retrieved_chunk_ids, case.expected_chunk_ids),
+        recall_at_5=_recall_at_k(retrieved_chunk_ids, case.expected_chunk_ids, top_k),
+        reciprocal_rank=_reciprocal_rank(retrieved_chunk_ids, case.expected_chunk_ids, top_k),
+        ndcg_at_5=_ndcg_at_k(retrieved_chunk_ids, case.expected_chunk_ids, top_k),
+    )
+
+
+def _summarize_scenario(results: list[EvalCaseResult], scenario_type: str) -> ScenarioSummary:
+    scenario_results = [result for result in results if result.scenario_type == scenario_type]
+    case_count = len(scenario_results)
+    if case_count == 0:
+        return ScenarioSummary(
+            scenario_type=scenario_type,
+            case_count=0,
+            hit_at_1=0.0,
+            recall_at_5=0.0,
+            mrr=0.0,
+            ndcg_at_5=0.0,
+        )
+
+    return ScenarioSummary(
+        scenario_type=scenario_type,
+        case_count=case_count,
+        hit_at_1=sum(result.hit_at_1 for result in scenario_results) / case_count,
+        recall_at_5=sum(result.recall_at_5 for result in scenario_results) / case_count,
+        mrr=sum(result.reciprocal_rank for result in scenario_results) / case_count,
+        ndcg_at_5=sum(result.ndcg_at_5 for result in scenario_results) / case_count,
+    )
+
+
+def _hit_at_1(retrieved_chunk_ids: list[str], expected_chunk_ids: list[str]) -> float:
+    expected = set(expected_chunk_ids)
+    if not expected or not retrieved_chunk_ids:
+        return 0.0
+    return 1.0 if retrieved_chunk_ids[0] in expected else 0.0
+
+
+def _recall_at_k(retrieved_chunk_ids: list[str], expected_chunk_ids: list[str], top_k: int) -> float:
+    expected = set(expected_chunk_ids)
+    if not expected:
+        return 0.0
+    hits = sum(chunk_id in expected for chunk_id in retrieved_chunk_ids[:top_k])
+    return hits / len(expected)
+
+
+def _reciprocal_rank(retrieved_chunk_ids: list[str], expected_chunk_ids: list[str], top_k: int) -> float:
+    expected = set(expected_chunk_ids)
+    for index, chunk_id in enumerate(retrieved_chunk_ids[:top_k], start=1):
+        if chunk_id in expected:
+            return 1.0 / index
+    return 0.0
+
+
+def _ndcg_at_k(retrieved_chunk_ids: list[str], expected_chunk_ids: list[str], top_k: int) -> float:
+    expected = set(expected_chunk_ids)
+    if not expected:
+        return 0.0
+
+    dcg = 0.0
+    for index, chunk_id in enumerate(retrieved_chunk_ids[:top_k], start=1):
+        if chunk_id in expected:
+            dcg += 1.0 / math.log2(index + 1)
+
+    ideal_hits = min(len(expected), top_k)
+    idcg = sum(1.0 / math.log2(index + 1) for index in range(1, ideal_hits + 1))
+    if idcg == 0.0:
+        return 0.0
+    return dcg / idcg
 
 
 def evaluate_cases(
@@ -83,61 +252,19 @@ def evaluate_cases(
     chunks_path: Path = DEFAULT_CHUNKS_PATH,
     chroma_path: Path = PROJECT_ROOT / "chroma_eval",
     mode: str,
-) -> EvalSummary:
+) -> LegacyEvalSummary:
     retriever = RuleRetriever(chunks_path=chunks_path, chroma_path=chroma_path)
-    return EvalSummary(
+    return LegacyEvalSummary(
         mode=mode,
-        case_results=[
-            _evaluate_case(retriever, case, mode=mode)
-            for case in SMOKE_CASES
-        ],
+        case_results=[_evaluate_smoke_case(retriever, case, mode=mode) for case in SMOKE_CASES],
     )
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Run smoke evaluation for dense vs hybrid RAG retrieval.")
-    parser.add_argument("--chunks", type=Path, default=DEFAULT_CHUNKS_PATH)
-    parser.add_argument("--chroma", type=Path, default=PROJECT_ROOT / "chroma_eval")
-    args = parser.parse_args(argv)
-
-    dense_summary = evaluate_cases(
-        chunks_path=args.chunks,
-        chroma_path=args.chroma / "dense",
-        mode="dense",
-    )
-    hybrid_summary = evaluate_cases(
-        chunks_path=args.chunks,
-        chroma_path=args.chroma / "hybrid_rerank",
-        mode="hybrid_rerank",
-    )
-
-    print("mode\thit_count\tcase_count\tavg_reranker_score\tl1_to_l2_trigger_rate")
-    for summary in (dense_summary, hybrid_summary):
-        print(
-            f"{summary.mode}\t{summary.hit_count}\t{len(summary.case_results)}\t"
-            f"{summary.average_reranker_score:.4f}\t{summary.l1_to_l2_trigger_rate:.4f}"
-        )
-
-    print("")
-    print("query\texpected_tag\tdense_hit\thybrid_hit\tdense_chunk\thybrid_chunk")
-    for dense_result, hybrid_result in zip(
-        dense_summary.case_results,
-        hybrid_summary.case_results,
-        strict=True,
-    ):
-        print(
-            f"{dense_result.query}\t{dense_result.expected_tag}\t"
-            f"{int(dense_result.hit)}\t{int(hybrid_result.hit)}\t"
-            f"{dense_result.matched_chunk_id or '-'}\t{hybrid_result.matched_chunk_id or '-'}"
-        )
-
-
-def _evaluate_case(retriever: RuleRetriever, case: SmokeCase, *, mode: str) -> CaseResult:
-    request = _request_for_mode(case.query, mode=mode)
-    response = retriever.search(request)
+def _evaluate_smoke_case(retriever: RuleRetriever, case: SmokeCase, *, mode: str) -> LegacyCaseResult:
+    response = retriever.search(_request_for_mode(case.query, mode=mode))
     matched_item = _find_hit(response.items, expected_tag=case.expected_tag)
     score = representative_score(matched_item) if matched_item is not None else None
-    return CaseResult(
+    return LegacyCaseResult(
         query=case.query,
         expected_tag=case.expected_tag,
         matched_chunk_id=matched_item.chunk_id if matched_item is not None else None,
@@ -167,6 +294,28 @@ def _find_hit(items: list[RagSearchItem], *, expected_tag: str) -> RagSearchItem
         if expected_tag in item.business_tags:
             return item
     return None
+
+
+def _print_legacy_report(dense_summary: LegacyEvalSummary, hybrid_summary: LegacyEvalSummary) -> None:
+    print("mode\thit_count\tcase_count\tavg_reranker_score\tl1_to_l2_trigger_rate")
+    for summary in (dense_summary, hybrid_summary):
+        print(
+            f"{summary.mode}\t{summary.hit_count}\t{len(summary.case_results)}\t"
+            f"{summary.average_reranker_score:.4f}\t{summary.l1_to_l2_trigger_rate:.4f}"
+        )
+
+    print("")
+    print("query\texpected_tag\tdense_hit\thybrid_hit\tdense_chunk\thybrid_chunk")
+    for dense_result, hybrid_result in zip(
+        dense_summary.case_results,
+        hybrid_summary.case_results,
+        strict=True,
+    ):
+        print(
+            f"{dense_result.query}\t{dense_result.expected_tag}\t"
+            f"{int(dense_result.hit)}\t{int(hybrid_result.hit)}\t"
+            f"{dense_result.matched_chunk_id or '-'}\t{hybrid_result.matched_chunk_id or '-'}"
+        )
 
 
 if __name__ == "__main__":

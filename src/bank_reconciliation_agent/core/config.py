@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     trace_dir: str = "./data/traces"
     memory_sqlite_path: str = "./data/memory.sqlite"
+    checkpoint_enabled: bool = False
+    checkpoint_sqlite_path: str = "./data/checkpoint.sqlite"
+    decision_regression_runs: int = 10
     max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
     max_upload_rows: int = 10_000
     llm_provider: Literal["fake", "deepseek"] = "fake"

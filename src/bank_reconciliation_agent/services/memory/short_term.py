@@ -101,6 +101,16 @@ class ShortTermMemoryService:
         with self._engine.connect() as connection:
             return connection.execute(statement).scalar_one()
 
+    def delete_by_queue(self, *, thread_id: str, queue_id: int) -> int:
+        self._ensure_initialized()
+        statement = delete(short_term_memory_table).where(
+            short_term_memory_table.c.thread_id == thread_id,
+            short_term_memory_table.c.queue_id == queue_id,
+        )
+        with self._engine.begin() as connection:
+            result = connection.execute(statement)
+        return result.rowcount or 0
+
     def purge_expired(self) -> int:
         self._ensure_initialized()
         statement = delete(short_term_memory_table).where(
