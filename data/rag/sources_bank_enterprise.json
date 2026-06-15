@@ -1,5 +1,65 @@
 [
   {
+    "source_id": "bank_enterprise_amount_mismatch_playbook",
+    "source_name": "银企对账金额差异处理公开规则摘要",
+    "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_amount_mismatch_playbook.md",
+    "source_type": "policy_summary",
+    "business_tags": [
+      "amount_mismatch",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_bank_unarrived_playbook",
+    "source_name": "银行未达账处理公开规则摘要",
+    "source_url": "https://www.pbc.gov.cn/eportal/fileDir/history_file/files/att_19041_2.pdf",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_bank_unarrived_playbook.md",
+    "source_type": "policy_summary",
+    "business_tags": [
+      "bank_unarrived",
+      "bank_enterprise",
+      "query_reply"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_book_unrecorded_playbook",
+    "source_name": "企业未记账处理公开规则摘要",
+    "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_book_unrecorded_playbook.md",
+    "source_type": "policy_summary",
+    "business_tags": [
+      "book_unrecorded",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_duplicate_booking_playbook",
+    "source_name": "银企重复记账处理公开规则摘要",
+    "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_duplicate_booking_playbook.md",
+    "source_type": "policy_summary",
+    "business_tags": [
+      "duplicate_booking",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_narrative_mismatch_playbook",
+    "source_name": "银企对账摘要户名差异处理公开规则摘要",
+    "source_url": "https://www.pbc.gov.cn/eportal/fileDir/history_file/files/att_19041_2.pdf",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_narrative_mismatch_playbook.md",
+    "source_type": "policy_summary",
+    "business_tags": [
+      "narrative_name_mismatch",
+      "bank_enterprise",
+      "query_reply"
+    ]
+  },
+  {
     "source_id": "pbc_epayment_guideline",
     "source_name": "中国人民银行《电子支付指引（第一号）》公开条款摘录",
     "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",

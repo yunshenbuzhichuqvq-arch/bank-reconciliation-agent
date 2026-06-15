@@ -1,5 +1,17 @@
 [
   {
+    "source_id": "clearing_amount_mismatch_playbook",
+    "source_name": "清算金额不平复核手册（模拟摘录）",
+    "source_url": "https://example.com/bank-clearing/amount-mismatch",
+    "source_file": "data/rag/raw_sources/bank_clearing/clearing_amount_mismatch_playbook.md",
+    "source_type": "markdown",
+    "business_tags": [
+      "amount_mismatch",
+      "clearing_operations",
+      "audit_trail"
+    ]
+  },
+  {
     "source_id": "clearing_cutoff_t1_guideline",
     "source_name": "支付清算跨日切 T+1 补记处理指引（模拟摘录）",
     "source_url": "https://example.com/bank-clearing/cutoff-t1",
@@ -8,6 +20,30 @@
     "business_tags": [
       "cutoff_cross_day",
       "t1_trace",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "clearing_file_exception_playbook",
+    "source_name": "清算文件异常处理指引（模拟摘录）",
+    "source_url": "https://example.com/bank-clearing/file-exception",
+    "source_file": "data/rag/raw_sources/bank_clearing/clearing_file_exception_playbook.md",
+    "source_type": "markdown",
+    "business_tags": [
+      "clearing_file_exception",
+      "file_integrity",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "clearing_query_reply_playbook",
+    "source_name": "清算查询查复作业说明（模拟摘录）",
+    "source_url": "https://example.com/bank-clearing/query-reply",
+    "source_file": "data/rag/raw_sources/bank_clearing/clearing_query_reply_playbook.md",
+    "source_type": "markdown",
+    "business_tags": [
+      "query_reply",
+      "single_side_missing",
       "audit_trail"
     ]
   },
@@ -24,6 +60,18 @@
     ]
   },
   {
+    "source_id": "clearing_reference_match_playbook",
+    "source_name": "清算参考号匹配规则说明（模拟摘录）",
+    "source_url": "https://example.com/bank-clearing/reference-match",
+    "source_file": "data/rag/raw_sources/bank_clearing/clearing_reference_match_playbook.md",
+    "source_type": "markdown",
+    "business_tags": [
+      "reference_match",
+      "t1_trace",
+      "clearing_operations"
+    ]
+  },
+  {
     "source_id": "clearing_single_side_playbook",
     "source_name": "清算单边差错处置手册（模拟摘录）",
     "source_url": "https://example.com/bank-clearing/single-side",
@@ -33,6 +81,18 @@
       "single_side_missing",
       "query_reply",
       "clearing_operations"
+    ]
+  },
+  {
+    "source_id": "clearing_t1_supplement_playbook",
+    "source_name": "清算 T+1 补账追踪说明（模拟摘录）",
+    "source_url": "https://example.com/bank-clearing/t1-supplement",
+    "source_file": "data/rag/raw_sources/bank_clearing/clearing_t1_supplement_playbook.md",
+    "source_type": "markdown",
+    "business_tags": [
+      "cutoff_cross_day",
+      "t1_trace",
+      "single_side_missing"
     ]
   }
 ]

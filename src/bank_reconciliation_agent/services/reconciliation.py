@@ -38,6 +38,7 @@ from bank_reconciliation_agent.services.ledger import error_ledger_table, ledger
 from bank_reconciliation_agent.services.memory.manager import memory_manager
 from bank_reconciliation_agent.services.queue import queue_service, reconciliation_queue_table
 from bank_reconciliation_agent.services.rag_log import rag_log_service
+from bank_reconciliation_agent.services.stream_emitter import StreamEmitter
 from bank_reconciliation_agent.services.task import reconciliation_task_table, task_service
 from bank_reconciliation_agent.services.trace import trace_writer
 from bank_reconciliation_agent.services.transactions import transaction_service
@@ -104,6 +105,7 @@ class ReconciliationService:
         scenario_type: str = "BANK_ENTERPRISE",
         bank_file: UploadFile,
         clear_file: UploadFile,
+        emitter: StreamEmitter | None = None,
     ) -> ReconciliationUploadResponse:
         bank_content = await bank_file.read()
         clear_content = await clear_file.read()
@@ -146,6 +148,7 @@ class ReconciliationService:
             scenario_type,
             match_results,
             queue_rows=queue_rows,
+            emitter=emitter,
         )
 
         return ReconciliationUploadResponse(
@@ -385,6 +388,7 @@ class ReconciliationService:
         results: list[ReconciliationMatchResult],
         *,
         queue_rows: list[dict[str, object]],
+        emitter: StreamEmitter | None = None,
     ) -> None:
         self._ensure_core_transaction_tables()
         write_bundle = self._build_write_bundle(
@@ -392,6 +396,7 @@ class ReconciliationService:
             task_id=task_id,
             scenario_type=scenario_type,
             results=results,
+            emitter=emitter,
         )
         with self._engine.begin() as connection:
             ledger_service.replace_task_rows(
@@ -493,6 +498,7 @@ class ReconciliationService:
         task_id: str,
         scenario_type: str,
         results: list[ReconciliationMatchResult],
+        emitter: StreamEmitter | None = None,
     ) -> ReconciliationWriteBundle:
         rows: list[LedgerRow] = []
         rag_log_rows: list[dict[str, object]] = []
@@ -503,6 +509,7 @@ class ReconciliationService:
         fallback_l3_rows = 0
         total_prompt_tokens = 0
         total_completion_tokens = 0
+        stream_seq = 0
         for result in results:
             if result.status == "AUTO_FIXED":
                 continue
@@ -513,13 +520,19 @@ class ReconciliationService:
                 "exception_branch": result.exception_branch,
             }
             try:
-                workflow_state = self._run_workflow_for_result(
-                    user_id=user_id,
-                    task_id=task_id,
-                    scenario_type=scenario_type,
-                    result=result,
-                    rag_query=rag_query,
-                )
+                workflow_kwargs = {
+                    "user_id": user_id,
+                    "task_id": task_id,
+                    "scenario_type": scenario_type,
+                    "result": result,
+                    "rag_query": rag_query,
+                }
+                if emitter is not None:
+                    workflow_kwargs["emitter"] = emitter
+                    workflow_kwargs["stream_seq_start"] = stream_seq
+                workflow_state = self._run_workflow_for_result(**workflow_kwargs)
+                if emitter is not None:
+                    stream_seq = int(workflow_state.get("stream_seq", stream_seq))
             except AGENT_PROCESSING_ERRORS as exc:
                 log.warning(
                     "reconciliation_row_agent_fallback",
@@ -661,6 +674,8 @@ class ReconciliationService:
         scenario_type: str,
         result: ReconciliationMatchResult,
         rag_query: str,
+        stream_seq_start: int = 0,
+        emitter: StreamEmitter | None = None,
     ) -> ReconciliationState:
         bank_row = transaction_service.get_bank_row(
             user_id=user_id,
@@ -672,7 +687,7 @@ class ReconciliationService:
             task_id=task_id,
             flow_id=result.flow_id,
         )
-        return run_item({
+        state = {
             "task_id": task_id,
             "user_id": user_id,
             "thread_id": task_id,
@@ -696,9 +711,13 @@ class ReconciliationService:
             "next_action": "",
             "error_message": None,
             "agent_logs": [],
+            "stream_seq": stream_seq_start,
             "rag_query": rag_query,
             "t1_candidate": result.t1_candidate,
-        })
+        }
+        if emitter is None:
+            return run_item(state)
+        return run_item(state, emitter=emitter)
 
     def _agent_error_workflow_state(
         self,

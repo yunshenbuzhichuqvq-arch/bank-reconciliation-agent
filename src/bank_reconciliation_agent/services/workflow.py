@@ -11,6 +11,7 @@ from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.core.logging import bind_trace_context, log
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest, RagSearchResponse
+from bank_reconciliation_agent.schemas.stream import StreamEventType
 from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
 from bank_reconciliation_agent.services.fallback import (
     FallbackCaseProvider,
@@ -26,6 +27,7 @@ from bank_reconciliation_agent.services.hooks import (
     memory_hook,
     schema_hook,
 )
+from bank_reconciliation_agent.services.stream_emitter import NullEmitter, StreamEmitter, to_stream_event
 
 
 REVERSAL_HINTS = ("冲正", "红冲", "退款", "抹账", "撤销")
@@ -56,6 +58,7 @@ class ReconciliationState(TypedDict):
     next_action: str
     error_message: str | None
     agent_logs: list[dict[str, Any]]
+    stream_seq: NotRequired[int]
     rag_query: NotRequired[str]
     rag_response: NotRequired[dict[str, Any]]
     fallback_path: NotRequired[str]
@@ -79,7 +82,9 @@ def run_item(
     audit_agent: AuditAgent = audit_agent,
     retriever: Retriever = rule_retriever,
     fallback_case_provider: FallbackCaseProvider = ledger_fallback_case_provider,
+    emitter: StreamEmitter | None = None,
 ) -> ReconciliationState:
+    emitter = emitter or NullEmitter()
     bind_trace_context(
         trace_id=state["task_id"],
         user_id=state["user_id"],
@@ -107,15 +112,13 @@ def run_item(
             remark=remark,
         )
         state["extraction_result"] = _model_or_mapping_dump(extraction_result)
-        state["agent_logs"].append(
-            {
-                "agent_name": "ExtractionAgent",
-                "step": "extract",
-                "flow_id": flow_id,
-                "prompt_version": getattr(extraction_agent, "prompt_version", None),
-                **_llm_usage(extraction_agent),
-            }
-        )
+        _append_agent_log(state, {
+            "agent_name": "ExtractionAgent",
+            "step": "extract",
+            "flow_id": flow_id,
+            "prompt_version": getattr(extraction_agent, "prompt_version", None),
+            **_llm_usage(extraction_agent),
+        }, emitter)
 
     if exception_branch in TRACE_BRANCHES:
         trace_kwargs = {
@@ -129,21 +132,32 @@ def run_item(
             trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
         trace_result = trace_agent.trace(**trace_kwargs)
         trace_payload = _model_or_mapping_dump(trace_result)
-        state["agent_logs"].append(
-            {
-                "agent_name": "TraceAgent",
-                "step": "trace",
-                "flow_id": flow_id,
-                "output": trace_payload,
-                "prompt_version": getattr(trace_agent, "prompt_version", None),
-                **_llm_usage(trace_agent),
-            }
-        )
+        _append_agent_log(state, {
+            "agent_name": "TraceAgent",
+            "step": "trace",
+            "flow_id": flow_id,
+            "output": trace_payload,
+            "prompt_version": getattr(trace_agent, "prompt_version", None),
+            **_llm_usage(trace_agent),
+        }, emitter)
 
-    rag_response = _retrieve_rag_response(state, retriever)
+    rag_response = _retrieve_rag_response(state, retriever, emitter)
     rag_items = rag_response.items
     state["rag_context"] = [item.model_dump(mode="json") for item in rag_items]
     state["rag_response"] = rag_response.model_dump(mode="json")
+    _emit_stream_row(
+        state,
+        {
+            "agent_name": "RuleRetriever",
+            "step": "retrieve",
+            "flow_id": flow_id,
+            "query": state.get("rag_query") or _build_rag_query(state),
+            "chunk_ids": [item.chunk_id for item in rag_items],
+            "best_score": max((item.score for item in rag_items), default=None),
+        },
+        emitter,
+        StreamEventType.RAG_RETRIEVED,
+    )
 
     audit_kwargs = {
         "flow_id": flow_id,
@@ -161,17 +175,17 @@ def run_item(
         state=state,
         audit_agent=audit_agent,
         audit_kwargs=audit_kwargs,
+        emitter=emitter,
     )
-    state["agent_logs"].append(
-        {
-            "agent_name": "AuditAgent",
-            "step": "decide_with_llm",
-            "flow_id": flow_id,
-            "fallback_level": 1,
-            "prompt_version": getattr(audit_agent, "prompt_version", None),
-            **_llm_usage(audit_agent),
-        }
-    )
+    _append_agent_log(state, {
+        "agent_name": "AuditAgent",
+        "step": "decide_with_llm",
+        "flow_id": flow_id,
+        "fallback_level": 1,
+        "output_payload": audit_decision.model_dump(mode="json"),
+        "prompt_version": getattr(audit_agent, "prompt_version", None),
+        **_llm_usage(audit_agent),
+    }, emitter)
 
     fallback_path = "L1"
     if state.get("error_message") == "schema validation failed":
@@ -198,6 +212,7 @@ def run_item(
                 "evidence": rag_items,
                 "few_shot_cases": state["fallback_cases"],
             },
+            emitter=emitter,
         )
         if state.get("error_message") == "schema validation failed":
             fallback_path = "L1->L2->HUMAN"
@@ -208,17 +223,16 @@ def run_item(
             state["next_action"] = audit_decision.next_action
             return state
         audit_decision = mark_fallback(audit_decision, fallback_level=2)
-        state["agent_logs"].append(
-            {
-                "agent_name": "AuditAgent",
-                "step": "decide_with_llm",
-                "flow_id": flow_id,
-                "fallback_level": 2,
-                "few_shot_rows": len(state["fallback_cases"]),
-                "prompt_version": getattr(audit_agent, "prompt_version", None),
-                **_llm_usage(audit_agent),
-            }
-        )
+        _append_agent_log(state, {
+            "agent_name": "AuditAgent",
+            "step": "decide_with_llm",
+            "flow_id": flow_id,
+            "fallback_level": 2,
+            "few_shot_rows": len(state["fallback_cases"]),
+            "output_payload": audit_decision.model_dump(mode="json"),
+            "prompt_version": getattr(audit_agent, "prompt_version", None),
+            **_llm_usage(audit_agent),
+        }, emitter)
         if confidence_is_low(audit_decision.confidence):
             fallback_path = "L1->L2->L3"
             trace_kwargs = {
@@ -234,17 +248,15 @@ def run_item(
                 trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
             trace_result = trace_agent.trace(**trace_kwargs)
             trace_payload = _model_or_mapping_dump(trace_result)
-            state["agent_logs"].append(
-                {
-                    "agent_name": "TraceAgent",
-                    "step": "trace",
-                    "flow_id": flow_id,
-                    "output": trace_payload,
-                    "fallback_level": 3,
-                    "prompt_version": getattr(trace_agent, "prompt_version", None),
-                    **_llm_usage(trace_agent),
-                }
-            )
+            _append_agent_log(state, {
+                "agent_name": "TraceAgent",
+                "step": "trace",
+                "flow_id": flow_id,
+                "output": trace_payload,
+                "fallback_level": 3,
+                "prompt_version": getattr(trace_agent, "prompt_version", None),
+                **_llm_usage(trace_agent),
+            }, emitter)
             audit_decision = _audit_with_schema_retry(
                 state=state,
                 audit_agent=audit_agent,
@@ -259,6 +271,7 @@ def run_item(
                     "few_shot_cases": state["fallback_cases"],
                     "trace_context": trace_payload,
                 },
+                emitter=emitter,
             )
             if state.get("error_message") == "schema validation failed":
                 fallback_path = "L1->L2->L3->HUMAN"
@@ -269,16 +282,15 @@ def run_item(
                 state["next_action"] = audit_decision.next_action
                 return state
             audit_decision = mark_fallback(audit_decision, fallback_level=3)
-            state["agent_logs"].append(
-                {
-                    "agent_name": "AuditAgent",
-                    "step": "decide_with_llm",
-                    "flow_id": flow_id,
-                    "fallback_level": 3,
-                    "prompt_version": getattr(audit_agent, "prompt_version", None),
-                    **_llm_usage(audit_agent),
-                }
-            )
+            _append_agent_log(state, {
+                "agent_name": "AuditAgent",
+                "step": "decide_with_llm",
+                "flow_id": flow_id,
+                "fallback_level": 3,
+                "output_payload": audit_decision.model_dump(mode="json"),
+                "prompt_version": getattr(audit_agent, "prompt_version", None),
+                **_llm_usage(audit_agent),
+            }, emitter)
             if confidence_is_low(float(trace_payload.get("confidence", 0.0))):
                 fallback_path = "L1->L2->L3->HUMAN"
                 audit_decision.reason = f"{audit_decision.reason}；L3 追溯置信度不足，转人工。"
@@ -291,7 +303,20 @@ def run_item(
     state["confidence"] = audit_decision.confidence
     state["fallback_level"] = audit_decision.fallback_level
     state["fallback_path"] = fallback_path
-    _apply_post_hooks(state, audit_decision)
+    _apply_post_hooks(state, audit_decision, emitter)
+    _emit_stream_row(
+        state,
+        {
+            "agent_name": "Workflow",
+            "step": "item_done",
+            "flow_id": flow_id,
+            "status": state["next_action"],
+            "decision": state["audit_decision"]["decision"],
+            "confidence": state["audit_decision"]["confidence"],
+        },
+        emitter,
+        StreamEventType.ITEM_DONE,
+    )
     return state
 
 
@@ -300,6 +325,7 @@ def _audit_with_schema_retry(
     state: ReconciliationState,
     audit_agent: AuditAgent,
     audit_kwargs: dict[str, Any],
+    emitter: StreamEmitter,
 ) -> AuditDecision:
     max_attempts = 3
     state["error_message"] = None
@@ -318,15 +344,13 @@ def _audit_with_schema_retry(
                 retry_count=attempt,
                 flow_id=audit_kwargs.get("flow_id"),
             )
-            state["agent_logs"].append(
-                {
-                    "agent_name": "SchemaHook",
-                    "step": "schema_validate",
-                    "flow_id": audit_kwargs.get("flow_id"),
-                    "retry_count": attempt,
-                    "error_message": "schema validation failed",
-                }
-            )
+            _append_agent_log(state, {
+                "agent_name": "SchemaHook",
+                "step": "schema_validate",
+                "flow_id": audit_kwargs.get("flow_id"),
+                "retry_count": attempt,
+                "error_message": "schema validation failed",
+            }, emitter)
 
     state["retry_count"] = max_attempts
     state["error_message"] = "schema validation failed"
@@ -344,7 +368,11 @@ def _audit_with_schema_retry(
     )
 
 
-def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> RagSearchResponse:
+def _retrieve_rag_response(
+    state: ReconciliationState,
+    retriever: Retriever,
+    emitter: StreamEmitter,
+) -> RagSearchResponse:
     query = state.get("rag_query") or _build_rag_query(state)
     previous_state = rag_circuit_breaker.state
     if not rag_circuit_breaker.allow_request():
@@ -353,6 +381,7 @@ def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> 
             breaker_state=rag_circuit_breaker.state,
             reason="breaker open, skip rag retrieval",
             query=query,
+            emitter=emitter,
         )
         log.warning(
             "rag_circuit_breaker_open",
@@ -380,6 +409,7 @@ def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> 
             breaker_state=breaker_state,
             reason=str(exc),
             query=query,
+            emitter=emitter,
         )
         log.warning(
             "rag_circuit_breaker_failure",
@@ -397,6 +427,7 @@ def _retrieve_rag_response(state: ReconciliationState, retriever: Retriever) -> 
             breaker_state=breaker_state,
             reason="half-open probe succeeded",
             query=query,
+            emitter=emitter,
         )
         log.warning(
             "rag_circuit_breaker_recovered",
@@ -413,21 +444,24 @@ def _append_rag_breaker_log(
     breaker_state: str,
     reason: str,
     query: str,
+    emitter: StreamEmitter,
 ) -> None:
-    state["agent_logs"].append(
-        {
-            "agent_name": "RAGCircuitBreaker",
-            "step": "retrieve",
-            "hook_name": "RAGCircuitBreaker",
-            "breaker_state": breaker_state,
-            "reason": reason,
-            "query": query,
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+    _append_agent_log(state, {
+        "agent_name": "RAGCircuitBreaker",
+        "step": "retrieve",
+        "hook_name": "RAGCircuitBreaker",
+        "breaker_state": breaker_state,
+        "reason": reason,
+        "query": query,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }, emitter)
 
 
-def _apply_post_hooks(state: ReconciliationState, audit_decision: AuditDecision) -> None:
+def _apply_post_hooks(
+    state: ReconciliationState,
+    audit_decision: AuditDecision,
+    emitter: StreamEmitter,
+) -> None:
     rag_items = [RagSearchItem.model_validate(item) for item in state["rag_context"]]
     constraint = constraint_hook(
         audit_decision,
@@ -453,14 +487,38 @@ def _apply_post_hooks(state: ReconciliationState, audit_decision: AuditDecision)
     state["confidence"] = audit_decision.confidence
     state["fallback_level"] = audit_decision.fallback_level
     state["next_action"] = route
-    state["agent_logs"].append(
-        {
-            "agent_name": "DecisionHook",
-            "step": "post_hook_route",
-            "flow_id": audit_decision.flow_id,
-            "violated": constraint.violated,
-            "next_action": route,
-        }
+    _append_agent_log(state, {
+        "agent_name": "DecisionHook",
+        "step": "post_hook_route",
+        "flow_id": audit_decision.flow_id,
+        "violated": constraint.violated,
+        "next_action": route,
+    }, emitter)
+
+
+def _append_agent_log(
+    state: ReconciliationState,
+    row: dict[str, Any],
+    emitter: StreamEmitter,
+) -> None:
+    state["agent_logs"].append(row)
+    _emit_stream_row(state, row, emitter)
+
+
+def _emit_stream_row(
+    state: ReconciliationState,
+    row: dict[str, Any],
+    emitter: StreamEmitter,
+    event_type: StreamEventType | None = None,
+) -> None:
+    state["stream_seq"] = int(state.get("stream_seq", 0)) + 1
+    emitter.emit(
+        to_stream_event(
+            row,
+            seq=state["stream_seq"],
+            task_id=state["task_id"],
+            event_type=event_type,
+        )
     )
 
 

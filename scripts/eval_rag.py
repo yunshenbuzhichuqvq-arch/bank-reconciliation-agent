@@ -16,6 +16,7 @@ from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchReques
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVAL_SET_PATH = PROJECT_ROOT / "data/rag_eval_set.json"
 DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
+DEFAULT_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval.md"
 
 
 @dataclass(frozen=True)
@@ -117,7 +118,7 @@ def evaluate_eval_set(
     return {
         "case_count": len(cases),
         "notes": [
-            "Recall@5 is saturated on the current 6-chunk bank-enterprise corpus; use MRR, NDCG@5, and hit_at_1 for discrimination."
+            "Recall@5 is evaluated on desaturated bank-enterprise and bank-clearing corpora; use MRR, NDCG@5, and Hit@1 for ranking quality."
         ],
         "summaries": [asdict(summary) for summary in summaries],
         "results": [asdict(result) for result in results],
@@ -130,6 +131,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--chunks", type=Path, default=None)
     parser.add_argument("--chroma", type=Path, default=None)
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     args = parser.parse_args(argv)
 
     if args.chunks is not None:
@@ -152,7 +154,31 @@ def main(argv: list[str] | None = None) -> None:
         else RuleRetriever(chroma_path=args.chroma)
     )
     report = evaluate_eval_set(load_eval_set(args.eval_set), retriever=retriever, top_k=args.top_k)
+    write_markdown_report(report, args.report)
     print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def write_markdown_report(report: dict[str, Any], output_path: Path = DEFAULT_REPORT_PATH) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(_format_markdown_report(report), encoding="utf-8")
+
+
+def _format_markdown_report(report: dict[str, Any]) -> str:
+    lines = [
+        "# RAG Evaluation Report",
+        "",
+        f"- Cases: {report['case_count']}",
+        "",
+        "| Scenario | Cases | Hit@1 | Recall@5 | MRR | NDCG@5 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for summary in report["summaries"]:
+        lines.append(
+            "| {scenario_type} | {case_count} | {hit_at_1:.4f} | {recall_at_5:.4f} | "
+            "{mrr:.4f} | {ndcg_at_5:.4f} |".format(**summary)
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _evaluate_case(

@@ -93,7 +93,16 @@ def test_eval_rag_cli_prints_metric_fields(tmp_path: Path, capsys: pytest.Captur
         encoding="utf-8",
     )
 
-    eval_rag.main(["--eval-set", str(eval_set_path), "--chroma", str(tmp_path / "chroma")])
+    eval_rag.main(
+        [
+            "--eval-set",
+            str(eval_set_path),
+            "--chroma",
+            str(tmp_path / "chroma"),
+            "--report",
+            str(tmp_path / "rag_eval.md"),
+        ]
+    )
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["case_count"] == 1
@@ -102,4 +111,4 @@ def test_eval_rag_cli_prints_metric_fields(tmp_path: Path, capsys: pytest.Captur
     assert "recall_at_5" in payload["summaries"][0]
     assert "mrr" in payload["summaries"][0]
     assert "ndcg_at_5" in payload["summaries"][0]
-    assert "Recall@5 is saturated" in payload["notes"][0]
+    assert "Recall@5 is evaluated" in payload["notes"][0]
