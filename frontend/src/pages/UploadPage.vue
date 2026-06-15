@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { uploadReconciliation } from "../api/reconcile";
 import type { ApiError } from "../api/client";
 import type { UploadResult } from "../types/api";
+import { SCENARIO_META, type ScenarioType } from "../constants/enums";
 import FilePicker from "../components/upload/FilePicker.vue";
 import BaseButton from "../components/ui/BaseButton.vue";
 import BaseCard from "../components/ui/BaseCard.vue";
@@ -11,7 +12,7 @@ import PageHeader from "../components/ui/PageHeader.vue";
 
 const router = useRouter();
 
-const scenario = ref<"BANK_ENTERPRISE">("BANK_ENTERPRISE");
+const scenario = ref<ScenarioType>("BANK_ENTERPRISE");
 const bankFile = ref<File | null>(null);
 const clearFile = ref<File | null>(null);
 const loading = ref(false);
@@ -19,6 +20,8 @@ const errorText = ref("");
 const result = ref<UploadResult | null>(null);
 
 const canSubmit = computed(() => Boolean(bankFile.value && clearFile.value && !loading.value));
+const scenarioEntries = Object.entries(SCENARIO_META) as [ScenarioType, typeof SCENARIO_META[ScenarioType]][];
+const currentScenarioMeta = computed(() => SCENARIO_META[scenario.value]);
 
 const stats = computed(() => {
   if (!result.value) {
@@ -42,7 +45,7 @@ async function submitUpload() {
   errorText.value = "";
 
   try {
-    result.value = await uploadReconciliation(bankFile.value, clearFile.value);
+    result.value = await uploadReconciliation(bankFile.value, clearFile.value, scenario.value);
   } catch (error) {
     const apiError = error as ApiError;
     errorText.value = apiError.message;
@@ -78,13 +81,28 @@ function goToTask() {
     </div>
 
     <BaseCard title="对账场景">
-      <label class="scenario-option">
-        <input v-model="scenario" type="radio" value="BANK_ENTERPRISE">
-        <span>
-          <strong>银企对账</strong>
-          <small>银行端流水与企业/清算端流水逐笔比对</small>
-        </span>
-      </label>
+      <div class="scenario-options" role="radiogroup" aria-label="对账场景">
+        <label v-for="[value, meta] in scenarioEntries" :key="value" class="scenario-option">
+          <input v-model="scenario" type="radio" :value="value">
+          <span>
+            <strong>{{ meta.label }}</strong>
+            <small>{{ meta.description }}</small>
+          </span>
+        </label>
+      </div>
+      <div class="scenario-template">
+        <p>字段模板提示</p>
+        <dl>
+          <div>
+            <dt>银行端</dt>
+            <dd>{{ currentScenarioMeta.bankTemplate }}</dd>
+          </div>
+          <div>
+            <dt>企业/清算端</dt>
+            <dd>{{ currentScenarioMeta.clearTemplate }}</dd>
+          </div>
+        </dl>
+      </div>
     </BaseCard>
 
     <BaseCard title="上传文件">
@@ -165,12 +183,30 @@ function goToTask() {
   font-family: var(--font-mono);
 }
 
+.scenario-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
 .scenario-option {
   display: flex;
   gap: var(--space-3);
   align-items: flex-start;
-  max-width: 520px;
+  min-width: 0;
+  padding: var(--space-4);
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
   cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.scenario-option:has(input:checked) {
+  background: color-mix(in srgb, var(--color-accent-soft) 42%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border-soft));
 }
 
 .scenario-option input {
@@ -192,12 +228,46 @@ function goToTask() {
 }
 
 .scenario-option small,
+.scenario-template p,
+.scenario-template dt,
 .upload-page__actions p,
 .result-summary__label,
 .stats-grid dt {
   margin: 0;
   color: var(--color-text-muted);
   font-size: 13px;
+  line-height: 1.5;
+}
+
+.scenario-template {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
+}
+
+.scenario-template p,
+.scenario-template dl,
+.scenario-template dd {
+  margin: 0;
+}
+
+.scenario-template dl {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.scenario-template div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.scenario-template dd {
+  color: var(--color-text);
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -273,14 +343,15 @@ function goToTask() {
 }
 
 @media (max-width: 560px) {
+  .scenario-options,
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
   .upload-page__actions,
   .result-summary {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .stats-grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>

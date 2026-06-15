@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onServerPrefetch, ref } from "vue";
 import { useRoute } from "vue-router";
 
 import { getTaskExceptions, getTaskStatus, startReconciliation } from "../api/reconcile";
@@ -69,6 +69,7 @@ const distribution = computed(() => {
 onMounted(() => {
   refreshData();
 });
+onServerPrefetch(() => refreshData());
 
 async function refreshData() {
   errorText.value = "";

@@ -1,10 +1,16 @@
 import { apiGet, apiPost, apiUpload } from "./client";
 import type { ExceptionList, TaskStatus, UploadResult } from "../types/api";
+import type { ScenarioType } from "../constants/enums";
 
-export function uploadReconciliation(bankFile:File, clearFile:File):Promise<UploadResult> {
+export function uploadReconciliation(
+  bankFile:File,
+  clearFile:File,
+  scenarioType:ScenarioType = "BANK_ENTERPRISE",
+):Promise<UploadResult> {
   const form = new FormData();
   form.append("bank_file", bankFile);
   form.append("clear_file", clearFile);
+  form.append("scenario_type", scenarioType);
   return apiUpload<UploadResult>("/reconcile/upload", form);
 }
 
