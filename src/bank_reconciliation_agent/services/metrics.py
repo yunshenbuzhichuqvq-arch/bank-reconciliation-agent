@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import case, func, select
 from sqlalchemy.engine import Engine
@@ -8,6 +10,7 @@ from sqlalchemy.engine import Engine
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.metrics import (
     DashboardMetricsResponse,
+    OfflineMetrics,
     OfflineNoSnapshot,
     OnlineMetrics,
     UnavailableMetrics,
@@ -17,9 +20,22 @@ from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_RAG_SNAPSHOT_PATH = PROJECT_ROOT / "reports/rag_eval_metrics.json"
+DEFAULT_SCHEMA_SNAPSHOT_PATH = PROJECT_ROOT / "reports/agent_schema_conformance.json"
+
+
 class MetricsService:
-    def __init__(self, engine: Engine | None = None) -> None:
+    def __init__(
+        self,
+        engine: Engine | None = None,
+        *,
+        rag_snapshot_path: Path = DEFAULT_RAG_SNAPSHOT_PATH,
+        schema_snapshot_path: Path = DEFAULT_SCHEMA_SNAPSHOT_PATH,
+    ) -> None:
         self._engine = engine or get_engine()
+        self._rag_snapshot_path = rag_snapshot_path
+        self._schema_snapshot_path = schema_snapshot_path
         self._initialized = False
 
     def get_dashboard(self, *, user_id: str) -> DashboardMetricsResponse:
@@ -76,7 +92,7 @@ class MetricsService:
                 total_cost=Decimal(str(task_totals[4] or "0")).quantize(Decimal("0.0001")),
                 confidence_dist=self._confidence_dist(confidence_rows),
             ),
-            offline=OfflineNoSnapshot(status="no_snapshot"),
+            offline=self._read_offline_snapshot(),
             unavailable=UnavailableMetrics(
                 latency="no_data_source",
                 agent_accuracy="no_ground_truth",
@@ -105,6 +121,19 @@ class MetricsService:
             else:
                 dist["low"] += 1
         return dist
+
+    def _read_offline_snapshot(self) -> OfflineMetrics | OfflineNoSnapshot:
+        if not self._rag_snapshot_path.exists() or not self._schema_snapshot_path.exists():
+            return OfflineNoSnapshot(status="no_snapshot")
+        rag_snapshot = json.loads(self._rag_snapshot_path.read_text(encoding="utf-8"))
+        schema_snapshot = json.loads(self._schema_snapshot_path.read_text(encoding="utf-8"))
+        evaluated_at = max(rag_snapshot["evaluated_at"], schema_snapshot["evaluated_at"])
+        return OfflineMetrics(
+            rag_recall_at5=rag_snapshot["rag_recall_at5"],
+            rag_mrr=rag_snapshot["rag_mrr"],
+            schema_conformance_rate=schema_snapshot["schema_conformance_rate"],
+            evaluated_at=evaluated_at,
+        )
 
 
 metrics_service = MetricsService()

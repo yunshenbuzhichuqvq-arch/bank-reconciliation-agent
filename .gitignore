@@ -13,6 +13,8 @@ build/
 chroma_data/
 uploads/
 data/traces/
+reports/agent_schema_conformance.json
+reports/rag_eval_metrics.json
 .worktrees/
 /spec.md
 /tasks.md

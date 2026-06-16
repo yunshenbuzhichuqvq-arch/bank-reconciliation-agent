@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVAL_SET_PATH = PROJECT_ROOT / "data/rag_eval_set.json"
 DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval.md"
+DEFAULT_JSON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_metrics.json"
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--chroma", type=Path, default=None)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
+    parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT_PATH)
     args = parser.parse_args(argv)
 
     if args.chunks is not None:
@@ -155,12 +158,40 @@ def main(argv: list[str] | None = None) -> None:
     )
     report = evaluate_eval_set(load_eval_set(args.eval_set), retriever=retriever, top_k=args.top_k)
     write_markdown_report(report, args.report)
+    write_json_metrics_snapshot(report, args.json_report)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 def write_markdown_report(report: dict[str, Any], output_path: Path = DEFAULT_REPORT_PATH) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(_format_markdown_report(report), encoding="utf-8")
+
+
+def write_json_metrics_snapshot(
+    report: dict[str, Any],
+    output_path: Path = DEFAULT_JSON_REPORT_PATH,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(_to_metrics_snapshot(report), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _to_metrics_snapshot(report: dict[str, Any]) -> dict[str, object]:
+    summaries = report["summaries"]
+    total_cases = sum(summary["case_count"] for summary in summaries)
+    return {
+        "rag_recall_at5": _weighted_average(summaries, "recall_at_5", total_cases),
+        "rag_mrr": _weighted_average(summaries, "mrr", total_cases),
+        "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _weighted_average(summaries: list[dict[str, Any]], metric: str, total_cases: int) -> float:
+    if total_cases == 0:
+        return 0.0
+    return sum(summary[metric] * summary["case_count"] for summary in summaries) / total_cases
 
 
 def _format_markdown_report(report: dict[str, Any]) -> str:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert
@@ -8,6 +10,7 @@ from sqlalchemy import delete, insert
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.ledger import error_ledger_table
+from bank_reconciliation_agent.services.metrics import MetricsService
 from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 
@@ -124,6 +127,43 @@ def test_dashboard_metrics_filters_other_users_and_handles_empty_data() -> None:
         "total_tokens": 0,
         "total_cost": "0.0000",
         "confidence_dist": {"high": 0, "medium": 0, "low": 0, "unknown": 0},
+    }
+
+
+def test_dashboard_metrics_reads_offline_snapshot_files(tmp_path: Path) -> None:
+    _reset_metrics_tables()
+    rag_snapshot = tmp_path / "rag_eval_metrics.json"
+    schema_snapshot = tmp_path / "agent_schema_conformance.json"
+    rag_snapshot.write_text(
+        json.dumps(
+            {
+                "rag_recall_at5": 0.75,
+                "rag_mrr": 0.625,
+                "evaluated_at": "2026-06-16T10:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    schema_snapshot.write_text(
+        json.dumps(
+            {
+                "schema_conformance_rate": 1.0,
+                "evaluated_at": "2026-06-16T11:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = MetricsService(
+        rag_snapshot_path=rag_snapshot,
+        schema_snapshot_path=schema_snapshot,
+    ).get_dashboard(user_id="demo_user")
+
+    assert result.offline.model_dump(mode="json") == {
+        "rag_recall_at5": 0.75,
+        "rag_mrr": 0.625,
+        "schema_conformance_rate": 1.0,
+        "evaluated_at": "2026-06-16T11:00:00Z",
     }
 
 
