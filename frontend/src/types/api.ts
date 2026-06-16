@@ -11,6 +11,11 @@ export interface PendingReviewList{ scenario_type:string; items:PendingReviewIte
 export type ReviewAction = "APPROVED_MATCH" | "FORCE_HOLD"
 export interface ReviewResult{ queue_id:number; current_status:string; memory_updated:Record<string,boolean> }
 export interface LedgerRow{ id:number; task_id:string; flow_id:string; error_type:string; exception_branch:string|null; bank_amount:string|null; clear_amount:string|null; discrepancy_amount:string; ai_audit_opinion:string|null; ai_confidence:string|null; rag_source:string|null; handle_status:string }
+export interface OnlineMetrics{ auto_fix_rate:number; pending_human_count:number; hung_count:number; exception_dist:Record<string, number>; fallback_dist:Record<string, number>; total_tokens:number; total_cost:string; confidence_dist:Record<"high"|"medium"|"low"|"unknown", number> }
+export interface OfflineMetrics{ rag_recall_at5:number; rag_mrr:number; schema_conformance_rate:number; evaluated_at:string }
+export interface OfflineNoSnapshot{ status:"no_snapshot" }
+export interface UnavailableMetrics{ latency:"no_data_source"; agent_accuracy:"no_ground_truth" }
+export interface DashboardMetrics{ online:OnlineMetrics; offline:OfflineMetrics|OfflineNoSnapshot; unavailable:UnavailableMetrics }
 
 // Keep aligned with backend schemas/stream.py and services/stream_emitter.py.
 export type StreamEventType = "task_started" | "task_progress" | "hook" | "rag_retrieved" | "agent_decision" | "fallback" | "item_done" | "task_done"
