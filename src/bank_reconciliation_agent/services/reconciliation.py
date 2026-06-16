@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -38,7 +39,9 @@ from bank_reconciliation_agent.services.ledger import error_ledger_table, ledger
 from bank_reconciliation_agent.services.memory.manager import memory_manager
 from bank_reconciliation_agent.services.queue import queue_service, reconciliation_queue_table
 from bank_reconciliation_agent.services.rag_log import rag_log_service
-from bank_reconciliation_agent.services.stream_emitter import StreamEmitter
+from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
+from bank_reconciliation_agent.services.live_registry import register, unregister
+from bank_reconciliation_agent.services.stream_emitter import QueueEmitter, StreamEmitter
 from bank_reconciliation_agent.services.task import reconciliation_task_table, task_service
 from bank_reconciliation_agent.services.trace import trace_writer
 from bank_reconciliation_agent.services.transactions import transaction_service
@@ -242,6 +245,95 @@ class ReconciliationService:
         if not task_service.update_status(user_id=user_id, task_id=task_id, status="AI_RUNNING"):
             raise HTTPException(status_code=404, detail="reconciliation task not found")
         return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
+
+    async def start_live(self, *, user_id: str, task_id: str) -> ReconciliationStartResponse:
+        auth_hook(user_id=user_id, task_id=task_id)
+        task = task_service.get(user_id=user_id, task_id=task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="reconciliation task not found")
+        if task.status != "UPLOADED":
+            raise HTTPException(status_code=409, detail="reconciliation task is not startable")
+
+        if not task_service.update_status(user_id=user_id, task_id=task_id, status="AI_RUNNING"):
+            raise HTTPException(status_code=404, detail="reconciliation task not found")
+        emitter = register(task_id)
+        asyncio.create_task(self._run_live_task(user_id=user_id, task_id=task_id, emitter=emitter))
+        return ReconciliationStartResponse(task_id=task_id, status="AI_RUNNING")
+
+    async def _run_live_task(self, *, user_id: str, task_id: str, emitter: QueueEmitter) -> None:
+        try:
+            await asyncio.to_thread(
+                self._emit_live_progress,
+                user_id=user_id,
+                task_id=task_id,
+                emitter=emitter,
+            )
+            task_service.update_status(user_id=user_id, task_id=task_id, status="COMPLETED")
+            emitter.emit(
+                self._build_live_event(
+                    event_type=StreamEventType.TASK_DONE,
+                    seq=2,
+                    task_id=task_id,
+                    payload={"status": "COMPLETED"},
+                )
+            )
+        except Exception as exc:
+            task_service.update_status(user_id=user_id, task_id=task_id, status="FAILED")
+            emitter.emit(
+                self._build_live_event(
+                    event_type=StreamEventType.TASK_DONE,
+                    seq=1,
+                    task_id=task_id,
+                    payload={"status": "FAILED", "error_message": str(exc)},
+                )
+            )
+        finally:
+            unregister(task_id)
+
+    def _emit_live_progress(self, *, user_id: str, task_id: str, emitter: QueueEmitter) -> None:
+        task = task_service.get(user_id=user_id, task_id=task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="reconciliation task not found")
+        total = max(task.total_bank_rows, task.total_clear_rows)
+        exception_dist: dict[str, int] = {}
+        ledger_page = ledger_service.list(
+            user_id=user_id,
+            query=LedgerQuery(task_id=task_id, page=1, page_size=10_000),
+        )
+        for row in ledger_page.items:
+            exception_dist[row.error_type] = exception_dist.get(row.error_type, 0) + 1
+        emitter.emit(
+            self._build_live_event(
+                event_type=StreamEventType.TASK_PROGRESS,
+                seq=1,
+                task_id=task_id,
+                payload={
+                    "processed": total,
+                    "total": total,
+                    "auto_fixed": task.auto_fixed_rows,
+                    "pending_ai": task.pending_ai_rows,
+                    "pending_human": task.pending_human_rows,
+                    "unresolved": task.unresolved_rows,
+                    "exception_dist": exception_dist,
+                },
+            )
+        )
+
+    def _build_live_event(
+        self,
+        *,
+        event_type: StreamEventType,
+        seq: int,
+        task_id: str,
+        payload: dict[str, object],
+    ) -> AgentStreamEvent:
+        return AgentStreamEvent(
+            event_type=event_type,
+            seq=seq,
+            task_id=task_id,
+            ts=datetime.now(timezone.utc),
+            payload=payload,
+        )
 
     def get_status(self, *, user_id: str, task_id: str) -> ReconciliationStatusResponse:
         task = task_service.get(user_id=user_id, task_id=task_id)
