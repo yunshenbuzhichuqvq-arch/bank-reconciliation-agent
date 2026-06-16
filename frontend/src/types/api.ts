@@ -13,13 +13,14 @@ export interface ReviewResult{ queue_id:number; current_status:string; memory_up
 export interface LedgerRow{ id:number; task_id:string; flow_id:string; error_type:string; exception_branch:string|null; bank_amount:string|null; clear_amount:string|null; discrepancy_amount:string; ai_audit_opinion:string|null; ai_confidence:string|null; rag_source:string|null; handle_status:string }
 
 // Keep aligned with backend schemas/stream.py and services/stream_emitter.py.
-export type StreamEventType = "task_started" | "hook" | "rag_retrieved" | "agent_decision" | "fallback" | "item_done" | "task_done"
+export type StreamEventType = "task_started" | "task_progress" | "hook" | "rag_retrieved" | "agent_decision" | "fallback" | "item_done" | "task_done"
 export interface TaskStartedPayload{ scenario_type:string; total_rows?:number }
+export interface TaskProgressPayload{ processed:number; total:number; auto_fixed:number; pending_ai:number; pending_human:number; unresolved:number; exception_dist:Record<string, number> }
 export interface HookPayload{ hook_name?:string; agent_name?:string; status?:string; step?:string; [key:string]:unknown }
 export interface RagRetrievedPayload{ agent_name?:string; chunk_ids:string[]; best_score:number; query:string; evidence?:RagEvidence[] }
 export interface AgentDecisionPayload{ agent_name?:string; decision?:string; confidence?:number; evidence?:RagEvidence[]; next_action?:string; prompt_version?:string; reason?:string; fallback_level?:number; [key:string]:unknown }
 export interface FallbackPayload{ agent_name?:string; fallback_level:number; reason?:string; next_action?:string; [key:string]:unknown }
 export interface ItemDonePayload{ flow_id?:string; status:string; decision?:string; confidence?:number; [key:string]:unknown }
 export interface TaskDonePayload{ status:string; total_bank_rows?:number; total_clear_rows?:number; auto_fixed_rows?:number; pending_ai_rows?:number; pending_human_rows?:number; ai_processed_rows?:number; fallback_l2_rows?:number; fallback_l3_rows?:number; error_message?:string }
-export type StreamPayload = TaskStartedPayload | HookPayload | RagRetrievedPayload | AgentDecisionPayload | FallbackPayload | ItemDonePayload | TaskDonePayload
+export type StreamPayload = TaskStartedPayload | TaskProgressPayload | HookPayload | RagRetrievedPayload | AgentDecisionPayload | FallbackPayload | ItemDonePayload | TaskDonePayload
 export interface AgentStreamEvent{ schema_version:string; event_type:StreamEventType; seq:number; task_id:string; flow_id:string|null; ts:string; payload:StreamPayload }

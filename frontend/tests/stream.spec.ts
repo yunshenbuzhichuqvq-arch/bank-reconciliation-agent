@@ -5,7 +5,7 @@ import type { AgentStreamEvent } from "../src/types/api";
 
 function event(event_type: AgentStreamEvent["event_type"], seq: number): AgentStreamEvent {
   return {
-    schema_version: "1.0",
+    schema_version: "1.1",
     event_type,
     seq,
     task_id: event_type === "task_done" ? "TASK-1" : "PENDING",

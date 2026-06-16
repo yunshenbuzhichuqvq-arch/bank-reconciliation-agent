@@ -17,7 +17,7 @@ const apiState = vi.hoisted(() => ({
     unresolved_rows: 5,
   })),
   getTaskExceptions: vi.fn(async () => ({ task_id: "TASK-1", total: 0, items: [] })),
-  startReconciliation: vi.fn(async () => ({ task_id: "TASK-1", status: "AI_RUNNING" })),
+  startLiveReconciliation: vi.fn(async () => ({ task_id: "TASK-1", status: "AI_RUNNING" })),
 }));
 
 vi.mock("../src/api/reconcile", () => apiState);
@@ -40,16 +40,17 @@ describe("DashboardPage", () => {
     vi.clearAllMocks();
   });
 
-  it("uses the synchronous status fetch path and has no stream panel", async () => {
+  it("keeps manual refresh and wires audit start to the live task stream", async () => {
     const html = await renderDashboard();
     const source = readFileSync(new URL("../src/pages/DashboardPage.vue", import.meta.url), "utf8");
 
     expect(apiState.getTaskStatus).toHaveBeenCalledWith("TASK-1");
     expect(apiState.getTaskExceptions).toHaveBeenCalledWith("TASK-1");
-    expect(source).not.toContain("useReconcileStream");
-    expect(source).not.toContain("stream.");
-    expect(html).not.toContain("实时流进度");
-    expect(html).not.toContain("实时重跑");
+    expect(source).toContain("startLiveReconciliation");
+    expect(source).toContain("useTaskEventStream");
+    expect(source).toContain("taskStream.progress");
+    expect(source).not.toContain("startReconciliation");
+    expect(html).toContain("刷新");
     expect(html).toContain("自动修复");
     expect(html).toContain(">1<");
     expect(html).toContain("AI 已处理");

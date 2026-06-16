@@ -10,7 +10,7 @@ from sqlalchemy import delete, insert
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.ledger import error_ledger_table
-from bank_reconciliation_agent.services.metrics import MetricsService
+from bank_reconciliation_agent.services.metrics import MetricsService, metrics_service
 from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 
@@ -18,8 +18,14 @@ from bank_reconciliation_agent.services.task import reconciliation_task_table
 client = TestClient(app)
 
 
-def test_dashboard_metrics_aggregates_online_rows_for_current_user() -> None:
+def test_dashboard_metrics_aggregates_online_rows_for_current_user(tmp_path: Path, monkeypatch) -> None:
     _reset_metrics_tables()
+    monkeypatch.setattr(metrics_service, "_rag_snapshot_path", tmp_path / "missing_rag_eval_metrics.json")
+    monkeypatch.setattr(
+        metrics_service,
+        "_schema_snapshot_path",
+        tmp_path / "missing_agent_schema_conformance.json",
+    )
     _insert_task(
         user_id="demo_user",
         task_id="TASK_METRICS_A",
