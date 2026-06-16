@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class StreamEventType(StrEnum):
     TASK_STARTED = "task_started"
+    TASK_PROGRESS = "task_progress"
     HOOK = "hook"
     RAG_RETRIEVED = "rag_retrieved"
     AGENT_DECISION = "agent_decision"
@@ -20,6 +21,8 @@ class AgentStreamEvent(BaseModel):
 
     Payload keys are intentionally aligned with agent_log semantics:
     - task_started: scenario_type, total_rows
+    - task_progress: processed, total, auto_fixed, pending_ai, pending_human, unresolved,
+      exception_dist
     - hook: hook_name, agent_name, status
     - rag_retrieved: agent_name, chunk_ids, best_score, query
     - agent_decision: agent_name, decision, confidence, evidence, next_action, prompt_version
@@ -28,7 +31,7 @@ class AgentStreamEvent(BaseModel):
     - task_done: status, ai_processed_rows, fallback_l2_rows, fallback_l3_rows
     """
 
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
     event_type: StreamEventType
     seq: int
     task_id: str
