@@ -199,7 +199,7 @@ MVP-1 暂不包含：
   - **长期记忆**：SQLite 表 `t_long_term_memory`，按 `user_id` 隔离，仅存储人工确认的最终结果。按 `error_type` + 关键字段做语义相似度检索。
   - **摘要记忆**：SQLite 表 `t_summary_memory`，按 `thread_id` 隔离。累计满 20 笔异常时触发 LLM 压缩（DeepSeek V4 Pro 调用），将前 N 笔决策模式压缩为约 300 token 的摘要文本。
   - **MemoryManager 接口**：`build_context()` 组装 Context Window（System Prompt → Long-term Memory → Short-term Memory → Summary Buffer → RAG Context → Current Item）；`update_after_decision()` 在决策后更新三层记忆。
-  - 为什么 MVP-2b 不用 Redis：MVP-2 承诺“本地可运行”，引入 Redis 会增加环境复杂度。SQLite 在本地场景下延迟可接受（< 5ms），且与长期记忆存储统一。Redis 推迟到 V1（需要 Docker Compose 时一起引入）。
+  - 为什么 MVP-2b 不用 Redis：MVP-2 承诺“本地可运行”，引入 Redis 会增加环境复杂度。SQLite 在本地场景下延迟可接受（< 5ms），且与长期记忆存储统一。Redis 推迟到 V1 引入（V1 先用单实例 Redis，完整 Docker Compose 编排在 V2 接入）。
 - **摘要压缩质量验证**（PRD 7.4 节详细设计）：
   - 压缩前保存：触发压缩时将 20 条原始记录写入临时快照（JSON）。
   - 压缩后回检：HIGH 风险条目是否被提及、PENDING_HUMAN 条目是否保留、flow_id 覆盖率 ≥ 80%。
