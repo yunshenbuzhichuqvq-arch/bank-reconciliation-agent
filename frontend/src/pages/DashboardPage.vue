@@ -2,10 +2,11 @@
 import { computed, onMounted, onServerPrefetch, ref } from "vue";
 import { useRoute } from "vue-router";
 
-import { getTaskExceptions, getTaskStatus, startReconciliation } from "../api/reconcile";
+import { getTaskExceptions, getTaskStatus, startLiveReconciliation } from "../api/reconcile";
 import type { ApiError } from "../api/client";
 import type { ExceptionList, TaskStatus } from "../types/api";
 import { ERROR_TYPE_LABEL } from "../constants/enums";
+import { useTaskEventStream } from "../composables/useTaskEventStream";
 import BranchDistribution from "../components/dashboard/BranchDistribution.vue";
 import StatCard from "../components/dashboard/StatCard.vue";
 import BaseButton from "../components/ui/BaseButton.vue";
@@ -23,9 +24,10 @@ const statusLoading = ref(false);
 const exceptionsLoading = ref(false);
 const startLoading = ref(false);
 const errorText = ref("");
+const taskStream = useTaskEventStream();
 
 const isLoading = computed(() => statusLoading.value || exceptionsLoading.value);
-const isAiRunning = computed(() => status.value?.status === "AI_RUNNING");
+const isAiRunning = computed(() => status.value?.status === "AI_RUNNING" || taskStream.status.value === "streaming");
 
 // MVP 近似：auto_fixed_rows / (auto_fixed_rows + exceptions.total)，分母为 0 显示 —。
 const autoRate = computed(() => {
@@ -43,16 +45,28 @@ const stats = computed(() => {
   if (!status.value) {
     return [];
   }
+  const progress = taskStream.progress.value;
   return [
-    { label: "自动修复", value: status.value.auto_fixed_rows },
-    { label: "AI 已处理", value: status.value.ai_processed_rows },
-    { label: "待人工复核", value: status.value.pending_human_rows },
-    { label: "未解决", value: status.value.unresolved_rows },
+    { label: "自动修复", value: progress?.auto_fixed ?? status.value.auto_fixed_rows },
+    { label: "AI 已处理", value: progress?.processed ?? status.value.ai_processed_rows },
+    { label: "待人工复核", value: progress?.pending_human ?? status.value.pending_human_rows },
+    { label: "未解决", value: progress?.unresolved ?? status.value.unresolved_rows },
     { label: "自动平账率", value: formatRate(autoRate.value), note: "按异常总数近似计算" },
   ];
 });
 
 const distribution = computed(() => {
+  const progressDist = taskStream.progress.value?.exception_dist;
+  if (progressDist) {
+    return Object.entries(progressDist)
+      .map(([type, count]) => ({
+        type,
+        count,
+        label: ERROR_TYPE_LABEL[type] ?? type,
+      }))
+      .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+  }
+
   const counts = new Map<string, number>();
   for (const item of exceptions.value?.items ?? []) {
     counts.set(item.error_type, (counts.get(item.error_type) ?? 0) + 1);
@@ -65,6 +79,12 @@ const distribution = computed(() => {
     }))
     .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
 });
+
+const distributionTotal = computed(() =>
+  taskStream.progress.value
+    ? Object.values(taskStream.progress.value.exception_dist).reduce((sum, count) => sum + count, 0)
+    : (exceptions.value?.total ?? 0),
+);
 
 onMounted(() => {
   refreshData();
@@ -112,10 +132,12 @@ async function startAudit() {
   errorText.value = "";
 
   try {
-    await startReconciliation(taskId.value);
+    await startLiveReconciliation(taskId.value);
+    status.value = status.value ? { ...status.value, status: "AI_RUNNING" } : status.value;
+    await taskStream.start(taskId.value);
     await refreshData();
   } catch (error) {
-    errorText.value = errorMessage(error);
+    errorText.value = taskStream.error.value ?? errorMessage(error);
   } finally {
     startLoading.value = false;
   }
@@ -191,7 +213,7 @@ function errorMessage(error: unknown) {
       <BranchDistribution
         v-else
         :items="distribution"
-        :total="exceptions?.total ?? 0"
+        :total="distributionTotal"
       />
     </BaseCard>
   </div>

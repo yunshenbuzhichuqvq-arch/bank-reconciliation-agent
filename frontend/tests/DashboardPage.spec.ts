@@ -1,7 +1,5 @@
-import { renderToString } from "@vue/server-renderer";
-import { createSSRApp } from "vue";
-import { readFileSync } from "node:fs";
-import { createRouter, createMemoryHistory } from "vue-router";
+import { flushPromises, mount } from "@vue/test-utils";
+import { createMemoryHistory, createRouter } from "vue-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import DashboardPage from "../src/pages/DashboardPage.vue";
@@ -17,12 +15,22 @@ const apiState = vi.hoisted(() => ({
     unresolved_rows: 5,
   })),
   getTaskExceptions: vi.fn(async () => ({ task_id: "TASK-1", total: 0, items: [] })),
-  startReconciliation: vi.fn(async () => ({ task_id: "TASK-1", status: "AI_RUNNING" })),
+  startLiveReconciliation: vi.fn(async () => ({ task_id: "TASK-1", status: "AI_RUNNING" })),
 }));
 
 vi.mock("../src/api/reconcile", () => apiState);
+vi.mock("../src/composables/useTaskEventStream", () => ({
+  useTaskEventStream: () => ({
+    events: { value: [] },
+    progress: { value: null },
+    status: { value: "idle" },
+    error: { value: null },
+    start: vi.fn(),
+    abort: vi.fn(),
+  }),
+}));
 
-async function renderDashboard() {
+async function mountDashboard() {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: "/tasks/:taskId", component: DashboardPage }],
@@ -30,9 +38,13 @@ async function renderDashboard() {
   router.push("/tasks/TASK-1");
   await router.isReady();
 
-  const app = createSSRApp(DashboardPage);
-  app.use(router);
-  return renderToString(app);
+  const wrapper = mount(DashboardPage, {
+    global: {
+      plugins: [router],
+    },
+  });
+  await flushPromises();
+  return wrapper;
 }
 
 describe("DashboardPage", () => {
@@ -40,21 +52,37 @@ describe("DashboardPage", () => {
     vi.clearAllMocks();
   });
 
-  it("uses the synchronous status fetch path and has no stream panel", async () => {
-    const html = await renderDashboard();
-    const source = readFileSync(new URL("../src/pages/DashboardPage.vue", import.meta.url), "utf8");
+  it("keeps manual refresh and wires audit start to the live task stream", async () => {
+    const wrapper = await mountDashboard();
 
     expect(apiState.getTaskStatus).toHaveBeenCalledWith("TASK-1");
     expect(apiState.getTaskExceptions).toHaveBeenCalledWith("TASK-1");
-    expect(source).not.toContain("useReconcileStream");
-    expect(source).not.toContain("stream.");
-    expect(html).not.toContain("实时流进度");
-    expect(html).not.toContain("实时重跑");
-    expect(html).toContain("自动修复");
-    expect(html).toContain(">1<");
-    expect(html).toContain("AI 已处理");
-    expect(html).toContain(">3<");
-    expect(html).toContain("待人工复核");
-    expect(html).toContain(">4<");
+
+    apiState.getTaskStatus.mockClear();
+    apiState.getTaskExceptions.mockClear();
+
+    const refreshButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("刷新"));
+    expect(refreshButton).toBeDefined();
+    await refreshButton!.trigger("click");
+    await flushPromises();
+
+    expect(apiState.getTaskStatus).toHaveBeenCalledWith("TASK-1");
+    expect(apiState.getTaskExceptions).toHaveBeenCalledWith("TASK-1");
+
+    apiState.getTaskStatus.mockClear();
+    apiState.getTaskExceptions.mockClear();
+
+    const startButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("启动 AI 审计"));
+    expect(startButton).toBeDefined();
+    await startButton!.trigger("click");
+    await flushPromises();
+
+    expect(apiState.startLiveReconciliation).toHaveBeenCalledWith("TASK-1");
+    expect(apiState.getTaskStatus).toHaveBeenCalledWith("TASK-1");
+    expect(apiState.getTaskExceptions).toHaveBeenCalledWith("TASK-1");
   });
 });

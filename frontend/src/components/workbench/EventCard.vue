@@ -9,6 +9,7 @@ const props = defineProps<{ event: AgentStreamEvent }>();
 
 const EVENT_LABEL: Record<AgentStreamEvent["event_type"], string> = {
   task_started: "任务启动",
+  task_progress: "任务进度",
   hook: "Hook 校验",
   rag_retrieved: "RAG 召回",
   agent_decision: "Agent 决策",

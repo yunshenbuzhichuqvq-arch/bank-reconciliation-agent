@@ -1,7 +1,7 @@
 import { getDefaultHeaders } from "./client";
 import type { AgentStreamEvent } from "../types/api";
 
-const STREAM_SCHEMA_VERSION = "1.0";
+const SUPPORTED_STREAM_SCHEMA_VERSIONS = new Set(["1.0", "1.1"]);
 
 export interface StreamHandlers {
   onEvent: (event: AgentStreamEvent) => void;
@@ -54,7 +54,7 @@ function buildFormData(params: StreamParams): FormData {
   return form;
 }
 
-async function readSseBody(
+export async function readSseBody(
   body: ReadableStream<Uint8Array>,
   handlers: StreamHandlers,
   signal?: AbortSignal,
@@ -103,7 +103,7 @@ function parseFrame(rawFrame: string, handlers: StreamHandlers): void {
   }
 
   const event = JSON.parse(data) as AgentStreamEvent;
-  if (event.schema_version !== STREAM_SCHEMA_VERSION) {
+  if (!SUPPORTED_STREAM_SCHEMA_VERSIONS.has(event.schema_version)) {
     throw new Error(`不支持的流式事件版本: ${event.schema_version}`);
   }
 

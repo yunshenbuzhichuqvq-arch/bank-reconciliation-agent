@@ -13,6 +13,7 @@ const navItems = [
   { label: "Agent 工作台", to: "/workbench" },
   { label: "差错台账", to: "/ledger" },
   { label: "人工复核", to: "/review" },
+  { label: "量化指标", to: "/metrics" },
 ];
 </script>
 
@@ -184,7 +185,7 @@ const navItems = [
   }
 
   .app-shell__nav {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .app-shell__nav-link {

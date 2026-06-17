@@ -12,6 +12,7 @@ def test_eval_rag_cli_writes_markdown_report_for_both_scenarios(
     capsys,
 ) -> None:
     report_path = tmp_path / "rag_eval.md"
+    json_report_path = tmp_path / "rag_eval_metrics.json"
 
     eval_rag.main(
         [
@@ -21,6 +22,8 @@ def test_eval_rag_cli_writes_markdown_report_for_both_scenarios(
             str(tmp_path / "chroma"),
             "--report",
             str(report_path),
+            "--json-report",
+            str(json_report_path),
         ]
     )
 
@@ -45,3 +48,9 @@ def test_eval_rag_cli_writes_markdown_report_for_both_scenarios(
     assert "| Scenario | Cases | Hit@1 | Recall@5 | MRR | NDCG@5 |" in markdown
     assert "| BANK_CLEARING |" in markdown
     assert "| BANK_ENTERPRISE |" in markdown
+
+    snapshot = json.loads(json_report_path.read_text(encoding="utf-8"))
+    assert set(snapshot) == {"rag_recall_at5", "rag_mrr", "evaluated_at"}
+    assert 0.0 <= snapshot["rag_recall_at5"] <= 1.0
+    assert 0.0 <= snapshot["rag_mrr"] <= 1.0
+    assert snapshot["evaluated_at"]
