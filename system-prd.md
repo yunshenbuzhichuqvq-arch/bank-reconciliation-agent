@@ -25,9 +25,9 @@
 
 本项目采用 MVP-0 -> MVP-1 -> MVP-2a -> MVP-2b -> V1 -> V2 的递进式版本规划。六个版本不是互相独立的功能清单，而是围绕同一条主链路逐层加厚。
 
-MVP-0 是后续阶段的前置子集，用于降低开发风险，先验证核心业务链路和 AI 审计链路是否成立。MVP-1 把后端能力变成本地可演示产品；MVP-2a 将确定性 Agent 升级为真实 LLM 调用并补齐增强 RAG；MVP-2b 再补 Hook 链、记忆引擎和工作流深度；V1 实现在线部署和评测体系；V2 完成深度优化和安全验证。
+MVP-0 是后续阶段的前置子集，用于降低开发风险，先验证核心业务链路和 AI 审计链路是否成立。MVP-1 把后端能力变成本地可演示产品；MVP-2a 将确定性 Agent 升级为真实 LLM 调用并补齐增强 RAG；MVP-2b 再补 Hook 链、记忆引擎和工作流深度；V1 实现在线化能力和评测体系；V2 完成深度优化、安全验证和云端部署。
 
-每个阶段都必须有可验收产物。MVP-0 的产物是 API、数据库记录、RAG/Agent JSON 和最小 trace；MVP-1 的产物是本地页面、人工复核流、YAML 规则和复核记录；MVP-2a 的产物是真实 LLM Agent 输出、增强 RAG trace 和 Fallback 日志；MVP-2b 的产物是 Hook/Memory 日志、Checkpoint 工作流和 Agent 回归测试；V1 的产物是部署地址、SSE 演示、评测报告和指标仪表板；V2 的产物是失败样本分析、A/B 对比、安全验证和压力测试报告。
+每个阶段都必须有可验收产物。MVP-0 的产物是 API、数据库记录、RAG/Agent JSON 和最小 trace；MVP-1 的产物是本地页面、人工复核流、YAML 规则和复核记录；MVP-2a 的产物是真实 LLM Agent 输出、增强 RAG trace 和 Fallback 日志；MVP-2b 的产物是 Hook/Memory 日志、Checkpoint 工作流和 Agent 回归测试；V1 的产物是 SSE 演示、评测报告和指标仪表板；V2 的产物是失败样本分析、A/B 对比、安全验证、压力测试报告和云端部署地址。
 
 ### 3.1 MVP-0：后端最小 AI 对账闭环
 
@@ -234,7 +234,6 @@ MVP-1 暂不包含：
 新增：
 
 - **前端场景选择**：上传页按 `scenario_type` 切换字段模板，RAG 知识库、Prompt 和报告模板按场景自动切换。
-- Docker Compose 一键启动（含 Nginx 反向代理、Redis）。
 - **Celery/ARQ 后台任务队列**：对账任务异步执行，上传接口即时返回 task_id。
 - JWT 登录鉴权（替代 X-User-ID 模拟）。
 - SSE 展示 Agent 执行过程（含 Pre/Post Hook 状态、RAG 检索详情、Fallback 层级）。
@@ -246,8 +245,7 @@ MVP-1 暂不包含：
 - **RAG 评测集**：手写 120 条 (query, expected_rule_ids)，评测脚本输出 Recall@5/MRR/NDCG。
 - **Agent Schema 符合性测试**：Pytest + Pydantic，统计通过率。
 - **量化指标仪表板**：前端展示核心指标。
-- README、演示数据和部署说明。
-- 云服务器部署。
+- README、演示数据和本地启动说明。
 
 ### 3.6 V2：深度优化版
 
@@ -264,6 +262,8 @@ MVP-1 暂不包含：
 - 失败样本分析。
 - 压力测试与性能调优。
 - **安全审查**：依赖扫描（`pip-audit` / `npm audit`）、静态代码分析（Bandit / Semgrep）、OWASP Top 10 检查（SQL 注入、XSS、路径遍历、敏感信息泄露）。输出安全审查报告，标注风险等级和修复建议。
+- Docker Compose 一键启动（含 Nginx 反向代理、Redis）。
+- 云服务器部署和部署说明。
 
 ## 4. 页面与交互设计
 
@@ -1723,7 +1723,7 @@ MVP-0 阶段至少准备主账源 / 对账账源两类 Excel（默认 `scenario_
 - RAG 评测集可用（120+ 条），输出 Recall@5/MRR/NDCG 数据。
 - Agent Schema 符合性测试可运行。
 - 量化指标仪表板可用。
-- README 包含本地启动、部署说明和演示账号。
+- README 包含本地启动和演示账号。
 - MCP 协议工具层可作为加分项独立运行，不作为 V1 必须验收项。
 
 ### 15.6 V2 验收标准

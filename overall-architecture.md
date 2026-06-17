@@ -536,13 +536,11 @@ MVP-2b 阶段：
 
 V1 阶段：
 - 前端支持**场景选择**，上传页按 `scenario_type` 切换字段模板，RAG / Prompt / 报告模板自动切换。
-- Docker Compose 一键启动（含 Nginx 反向代理、Redis）。
 - Celery/ARQ 后台任务队列（对账任务异步执行）。
 - JWT 鉴权 + 多租户中间件。
 - 记忆引擎 Redis 升级。
 - SSE 流式推送 Agent 执行过程。
-- 云服务器部署。
-- README、演示数据和部署说明。
+- README、演示数据和本地启动说明。
 - MCP 协议工具层。
 - RAG 评测集（120+ 条）+ Agent Schema 符合性测试。
 - 量化指标仪表板。
@@ -555,6 +553,8 @@ V2 阶段：
 - PDF 报告导出。
 - 压力测试与性能调优。
 - 安全审查。
+- Docker Compose 一键启动（含 Nginx 反向代理、Redis）。
+- 云服务器部署和部署说明。
 
 ## 3. 核心设计原则
 
