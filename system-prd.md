@@ -1713,7 +1713,6 @@ MVP-0 阶段至少准备主账源 / 对账账源两类 Excel（默认 `scenario_
 ### 15.5 V1 验收标准
 
 - 前端支持场景选择，上传页按 `scenario_type` 切换字段模板，RAG / Prompt / 报告模板自动切换。
-- Docker Compose 可启动前端、后端、MySQL、Redis 和 ChromaDB。
 - Celery/ARQ 后台异步对账任务。
 - 支持 JWT 登录。
 - 记忆引擎 Redis 升级完成（短期记忆从 SQLite 迁移到 Redis）。
@@ -1725,7 +1724,6 @@ MVP-0 阶段至少准备主账源 / 对账账源两类 Excel（默认 `scenario_
 - Agent Schema 符合性测试可运行。
 - 量化指标仪表板可用。
 - README 包含本地启动、部署说明和演示账号。
-- 项目可部署到云服务器。
 - MCP 协议工具层可作为加分项独立运行，不作为 V1 必须验收项。
 
 ### 15.6 V2 验收标准
@@ -1739,6 +1737,8 @@ MVP-0 阶段至少准备主账源 / 对账账源两类 Excel（默认 `scenario_
 - 压力测试通过（单任务 50000 笔流水），并记录 P50/P95/P99、内存峰值和数据库写入耗时。
 - 能输出失败样本分类：RAG 未命中、规则冲突、Agent JSON 失败、证据不足、人工推翻。
 - 能完成基础安全验证：越权访问、user_id 隔离、日志脱敏、Prompt injection 基础防护。
+- Docker Compose 可启动前端、后端、MySQL、Redis 和 ChromaDB。
+- 项目可部署到云服务器。
 
 ## 16. 生产级可靠性保障
 
