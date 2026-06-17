@@ -18,3 +18,4 @@ reports/rag_eval_metrics.json
 .worktrees/
 /spec.md
 /tasks.md
+/PR.md
