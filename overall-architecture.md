@@ -1152,7 +1152,6 @@ class TenantMiddleware:
 实现目标：
 
 - 前端支持**场景选择**，上传页按 `scenario_type` 切换字段模板，RAG / Prompt / 报告模板自动切换。
-- Docker Compose 一键启动（含 Nginx、Redis）。
 - Celery/ARQ 后台任务队列（对账异步执行，上传即时返回 task_id）。
 - JWT 登录鉴权。
 - 记忆引擎 Redis 升级（短期记忆从 SQLite 迁移到 Redis）。
@@ -1165,7 +1164,6 @@ class TenantMiddleware:
 - Agent Schema 符合性测试。
 - 量化指标仪表板。
 - README 含启动说明、演示数据和量化指标。
-- 部署到云服务器。
 
 ### 11.6 V2：深度优化版
 
@@ -1178,3 +1176,5 @@ class TenantMiddleware:
 - PDF 报告导出（含图表）。
 - 压力测试与性能调优。
 - 安全审查（依赖扫描、静态分析、OWASP Top 10）。
+- Docker Compose 一键启动（含 Nginx、Redis）。
+- 部署到云服务器。
