@@ -1,9 +1,9 @@
 import { renderToString } from "@vue/server-renderer";
-import { readFileSync } from "node:fs";
 import { createSSRApp } from "vue";
 import { describe, expect, it, vi } from "vitest";
 
 import WorkbenchPage from "../src/pages/WorkbenchPage.vue";
+import workbenchSource from "../src/pages/WorkbenchPage.vue?raw";
 import { router } from "../src/router";
 import type { AgentStreamEvent } from "../src/types/api";
 
@@ -91,9 +91,8 @@ describe("WorkbenchPage", () => {
     expect(html).toContain("银企对账");
     expect(html).toContain("银行清算对账");
 
-    const source = readFileSync(new URL("../src/pages/WorkbenchPage.vue", import.meta.url), "utf8");
-    expect(source).toContain("ref<ScenarioType>(\"BANK_ENTERPRISE\")");
-    expect(source).toContain("v-for=\"[value, meta] in scenarioEntries\"");
-    expect(source).toContain("scenarioType: scenario.value");
+    expect(workbenchSource).toContain("ref<ScenarioType>(\"BANK_ENTERPRISE\")");
+    expect(workbenchSource).toContain("v-for=\"[value, meta] in scenarioEntries\"");
+    expect(workbenchSource).toContain("scenarioType: scenario.value");
   });
 });
