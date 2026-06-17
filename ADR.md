@@ -6,17 +6,19 @@
 
 ---
 
-## ADR-045: 看板实时执行模型——start 后台驱动 + by-taskId SSE 进度流
+## ADR-045: 看板实时执行模型——start 后台驱动 + by-taskId SSE 结果推送
 
 **Slug**: `dashboard-live-start-background-and-by-taskid-sse`
-**Status**: accepted
+**Status**: accepted (revised 2026-06-16, V1-3 review)
 **Date**: 2026-06-16
+
+> **Revision (V1-3 review)**:初稿 Context 误判"start 同步阻塞跑对账"。实际对账在 `upload` 完成,`start_live` 之后无执行过程可推,看板"实时"诚实降级为"启动后 SSE 推一次最终结果快照"(非进度过程)。下文已就地订正,保留教训留痕。
 
 ### Context
 
 PRD §4.2 要求任务看板"V1 改为 SSE 实时更新";V1-2 的 ADR-043 已把"看板真·实时"显式延到 V1-3,是 V1-2 唯一明确欠下的债。
 
-现状阻碍:`reconcile/{task_id}/start` 里 `reconciliation_service.start(...)` 是**同步阻塞**调用(无 await),一路把任务跑到终态才返回——执行过程对外无观测窗口,看板只能手动刷新。
+现状(**V1-3 review 订正**):初稿以为 `start` 同步阻塞跑对账。实际:**对账(匹配/异常分类/落台账)在 `upload` 阶段已完成,`start`/`start_live` 仅把状态翻成 AI_RUNNING**。因此 `start_live` 之后没有"对账执行过程"可推——看板"实时"的本质是把 upload 已算好的最终统计**推一次**,把"手动刷新"升级为"启动后自动 SSE 推送一次结果"(收 ADR-043 欠债),但**不是"实时进度过程"**。
 
 可复用资产:`stream.py`(ADR-036)已验证"后台驱动 + `QueueEmitter` + SSE 边跑边 yield"。但它是 **multipart 一次性请求内、per-request** 的 emitter;看板是对**已存在 task** 的进度订阅,天然**跨请求**(start 请求触发执行、SSE 请求订阅进度),现有 per-request emitter 不能直接复用。
 
@@ -41,14 +43,17 @@ PRD §4.2 要求任务看板"V1 改为 SSE 实时更新";V1-2 的 ADR-043 已把
 
 采用 **A**(后台驱动 + `task_id → emitter` 注册表 + by-taskId SSE 端点);回归边界采用 **A1 双路径**——保留现有同步 `start` 端点零回归,新增异步驱动入口供看板实时订阅。
 
+**实时语义(V1-3 review 校正)**:因对账在 upload 完成,`start_live` emit 一帧最终统计快照(`task_progress`,processed=total)+ `task_done`;看板由"手动刷新"升级为"启动后 SSE 自动推送一次结果"。这是**实时结果推送**,非实时进度过程——后者需把对账过程挪到 start 之后(已评估为大改、回归高,本 stage 不做)。
+
 ### Consequences
 
-- 正面:真·实时看板;复用 `stream.py` 机制;零新基础设施;收 ADR-043 欠债。
+- 正面:看板从手动刷新升级为 SSE 自动推送(收 ADR-043 欠债);复用 `stream.py` 机制;零新基础设施。(实时语义见 Decision 校正:结果推送而非进度过程)
 - 负面:
   - 进程内 `task_id → emitter` 注册表假设**单进程**(多 worker 不共享)——生产化需 SSE-over-Redis,登记技术债(与 ADR-036 同源)。
   - 沿用 `stream.py` 后台驱动反模式(`asyncio` 嵌套 / 跨线程),不在收官 stage 做大重构。
   - 若采纳 A1,留两套 `start` 语义。
   - 后台任务**异常/超时/清理**须明确:任务跑挂时 emitter 如何清理、SSE 如何收尾(终帧 + 注册表移除),否则泄漏。
+  - **现状误判教训(V1-3 review)**:初稿未核实 `start`/`upload` 的真实分工(对账在 upload),致"实时进度"建立在不存在的"start 后执行过程"上,最终诚实降级为"实时结果推送"。Codex 在错误前提下实现合理(读已落数据 emit 一帧),但撞到"无中途过程"矛盾时未按红线停下标注——设计方与实现方流程均有可改进处。
 
 ### 防降级硬约束(从 V1-1 SSE 回放 gap 提炼)
 
@@ -56,7 +61,7 @@ V1-1 的真实时曾静默退化为一次性回放(见 ADR-036 Implementation No
 
 1. **数据源唯一**:`events` 的帧只能来自注册表的 live emitter,**禁止读 `agent_log`/DB 回放**。
 2. **订阅边界不得降级**:订阅时 emitter 不存在(未 start-live / 已 unregister)→ 明确报错或空流收尾,**不得 fallback 读 DB**。
-3. **测试锁时序 + 数据源**:不止断言首帧早于完成,还须断言"`agent_log` 落库为空/no-op 时 events 仍推实时帧"(证明不靠 DB)+ "任务 RUNNING 中途客户端已收到前序事件"。
+3. **测试锁数据源 + 端点流式转发**:断言(a)`events` 数据来自 live emitter,落库为空/no-op 时仍推帧(不靠 DB);(b)端点**流式转发不缓存**——首帧在 `task_done` 前即可取得(防 V1-1 整体 drain 回放)。注:`start_live` 实际只 emit 一帧 `task_progress`(对账在 upload 完成),"边算边推的中途多帧"不适用;端点流式转发可用手喂多帧验证"不缓存",但**不得据此声称验证了 start_live 的实时进度**(它没有进度过程)。
 
 违反 1/2 即等价于把真实时降级为回放——这是 ADR-045 的红线,非可选优化。
 
@@ -161,3 +166,40 @@ PRD §4.8 量化指标仪表板列 8 类指标。数据源盘点(已核对 `sche
 - 正面:分布/趋势图表现力强、贴 PRD 架构原文、作品版观感强。
 - 负面:前端依赖变重(echarts 体积),需按需引入控体积;局部打破 ADR-040/041 最小依赖一致性(已接受)。
 - 被否的 B(轻量自绘)价值:零依赖、风格一致,但图表表现力/视觉冲击不足,不匹配 §4.8 高光定位。
+
+---
+
+## ADR-049: 前端行为测试基础设施——引入 @vue/test-utils + happy-dom(dev-only)
+
+**Slug**: `frontend-behavior-test-utils-happy-dom`
+**Status**: accepted
+**Date**: 2026-06-17
+
+### Context
+
+V1-3 看板防空壳闸(T6 change request → T3.9)要求"点击启动审计按钮 → 断言 `startLiveReconciliation` 被调"的**真行为**测试。但现状:vitest 跑默认 **node 环境**(`vite.config.ts` 无 `test` 块),且未装 `@vue/test-utils` / DOM 模拟库——现有所有页测试都用 `createSSRApp` + `renderToString`(SSR,无法交互)。**标准 `mount`+`trigger` 在当前工具链下根本跑不起来。**
+
+T3.9 首版(commit `0c57f77`)为绕开此限制,手搓了 200 行无依赖 headless renderer(自实现 `createRenderer` + `@vue/compiler-sfc` 重编译 SFC + 正则改写编译产物 + `new Function` 执行 + 多个 stub)。行为虽真,但**强耦合 compiler-sfc 输出格式**(Vue 升级即可能 crash)、维护负债重,且违反 T6 "只留一条最小行为闸、不要重写成大测试"的约定。
+
+张力:项目有最小依赖倾向(ADR-040 手写 SSE 客户端、ADR-041 不引 Pinia)。需厘清该倾向**是否约束测试依赖**。
+
+### Options Considered
+
+- **A. 引入 @vue/test-utils + happy-dom(dev-only,采纳)** — `vite.config.ts` 加 `test.environment = "happy-dom"`,看板闸用标准 `mount`+`trigger`(~10 行)。
+  - Pros: 业界标准、不脆弱;dev-only 不进生产 bundle,不触 ADR-040/041 关心的运行时体积;项目自此具备 DOM 交互测试能力,后续页可复用。
+  - Cons: +2 个 devDependencies;首次引入 DOM 测试环境,需确认现有 SSR 测试零回归。
+- **B. 零依赖,放弃模拟点击** — 不渲染模板,直接验 `startAudit` 调用链。
+  - Pros: 零依赖。Cons: 丢"点按钮"交互语义(测函数非按钮);`<script setup>` 下需把逻辑暴露为可测,反而要动组件。
+- **C. 维持 headless renderer** — 保留 200 行自搓方案。
+  - Pros: 绝对零依赖。Cons: 脆弱(耦合编译产物格式)、维护负债、违反"最小一条"约定。
+
+### Decision
+
+采用 **A**:引入 `@vue/test-utils` + `happy-dom` 作为 **devDependencies**,`vite.config.ts` 配 `test.environment`。明确边界:**ADR-040/041 的最小依赖倾向针对运行时依赖(bundle 体积 / SSR 复杂度),不约束 dev-only 测试依赖**。与 ADR-048(为 §4.8 高光破例引 ECharts)对称——此处为"可靠的行为闸"破一次 dev 依赖之例。
+
+### Consequences
+
+- 正面:看板闸回归 ~10 行标准写法,删 200 行脆弱基础设施;项目获得 DOM 交互测试能力供后续复用;厘清了"最小依赖只管运行时"的边界(可复用判据)。
+- 负面:+2 devDependencies;node → happy-dom 环境切换须确认现有 `renderToString` SSR 测试零回归(T3.9 DoD 锁全套绿)。
+- 选 happy-dom 而非 jsdom:更轻更快、API 覆盖足够本项目断言;若遇兼容缺口可换 jsdom(同为 `environment` 配置项,迁移成本低)。
+- **流程教训**:T3.9 指令写"`mount`+trigger"时设计方未核实工具链能否支撑(node env + 无 test-utils),给了落不了地的指令;Codex 撞到"无 mount 能力"时未按 tasks.md 红线停下标注,而是自行决策搞 workaround——与 ADR-045 现状误判教训同构。
