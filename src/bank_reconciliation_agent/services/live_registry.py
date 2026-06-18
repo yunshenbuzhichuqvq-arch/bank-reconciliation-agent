@@ -7,7 +7,7 @@ from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
 
 
 LIVE_EMITTER_TTL_SECONDS = 60
-LIVE_EMITTER_MAX_AGE_SECONDS = 30
+LIVE_EMITTER_MAX_AGE_SECONDS = 3600
 
 _emitters: dict[str, QueueEmitter] = {}
 _lock = Lock()

@@ -40,6 +40,7 @@ def test_unfinished_emitter_is_removed_after_max_age(monkeypatch) -> None:
     task_id = "TASK_V1_3_2_REGISTRY_MAX_AGE"
     now = 200.0
     monkeypatch.setattr(live_registry, "monotonic", lambda: now)
+    assert live_registry.LIVE_EMITTER_MAX_AGE_SECONDS == 3600
 
     register(task_id)
 
