@@ -16,6 +16,9 @@ export interface OfflineMetrics{ rag_recall_at5:number; rag_mrr:number; schema_c
 export interface OfflineNoSnapshot{ status:"no_snapshot" }
 export interface UnavailableMetrics{ latency:"no_data_source"; agent_accuracy:"no_ground_truth" }
 export interface DashboardMetrics{ online:OnlineMetrics; offline:OfflineMetrics|OfflineNoSnapshot; unavailable:UnavailableMetrics }
+export interface TaskReportMetrics{ task_id:string; user_id:string; recon_date:string; source_a_rows:number; source_b_rows:number; auto_fixed_rows:number; auto_fix_rate:number; ai_processed_rows:number; pending_human_count:number; review_count:number; hold_count:number; discrepancy_amount_total:string; exception_dist:Record<string,number>; agent_decision_dist:Record<string,number>; fallback_dist:Record<string,number>; total_tokens:number; total_cost:string; offline:OfflineMetrics|OfflineNoSnapshot; rag_sources:string[] }
+export interface ReportNarrative{ risk_summary:string; review_advice:string; followup:string; llm_used:boolean }
+export interface TaskReport{ task_id:string; generated_at:string; llm_used:boolean; metrics:TaskReportMetrics; narrative:ReportNarrative; markdown:string }
 
 // Keep aligned with backend schemas/stream.py and services/stream_emitter.py.
 export type StreamEventType = "task_started" | "task_progress" | "hook" | "rag_retrieved" | "agent_decision" | "fallback" | "item_done" | "task_done"
