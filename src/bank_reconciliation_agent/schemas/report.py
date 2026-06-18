@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from bank_reconciliation_agent.schemas.metrics import OfflineMetrics, OfflineNoSnapshot
 
@@ -25,3 +25,13 @@ class TaskReportMetrics(BaseModel):
     total_cost: Decimal
     offline: OfflineMetrics | OfflineNoSnapshot
     rag_sources: list[str]
+
+
+class LLMReportNarrative(BaseModel):
+    risk_summary: str = Field(min_length=1)
+    review_advice: str = Field(min_length=1)
+    followup: str = Field(min_length=1)
+
+
+class ReportNarrative(LLMReportNarrative):
+    llm_used: bool
