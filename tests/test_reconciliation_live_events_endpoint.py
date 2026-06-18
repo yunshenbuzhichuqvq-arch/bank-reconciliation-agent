@@ -11,6 +11,7 @@ from bank_reconciliation_agent.api.v1 import reconcile as reconcile_api
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
 from bank_reconciliation_agent.services.live_registry import register, unregister
+from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.task import task_service
 
 
@@ -101,6 +102,38 @@ def test_events_endpoint_yields_progress_before_task_done_is_emitted() -> None:
             unregister(task_id)
 
     anyio.run(run_case)
+
+
+@pytest.mark.anyio
+async def test_events_after_background_finished_does_not_404() -> None:
+    task_id = "TASK_V1_3_3_EVENTS_AFTER_FINISHED"
+    user_id = "demo_user"
+    task_service.replace_task(
+        user_id=user_id,
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=1,
+        total_clear_rows=1,
+        auto_fixed_rows=0,
+        pending_ai_rows=0,
+        pending_human_rows=1,
+    )
+
+    service = ReconciliationService()
+    await service.start_live(user_id=user_id, task_id=task_id)
+
+    async with asyncio.timeout(1):
+        while service.get_status(user_id=user_id, task_id=task_id).status != "COMPLETED":
+            await asyncio.sleep(0.01)
+
+    response = await reconcile_api.stream_task_events(task_id=task_id, user_id=user_id)
+    frames = [frame async for frame in response.body_iterator]
+    events = [_event_from_frame(frame) for frame in frames]
+
+    assert [event.event_type for event in events] == [
+        StreamEventType.TASK_PROGRESS,
+        StreamEventType.TASK_DONE,
+    ]
 
 
 def _event(event_type: StreamEventType, task_id: str, *, seq: int) -> AgentStreamEvent:
