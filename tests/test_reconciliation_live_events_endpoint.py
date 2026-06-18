@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from bank_reconciliation_agent.api.v1 import reconcile as reconcile_api
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
-from bank_reconciliation_agent.services.live_registry import register, unregister
+from bank_reconciliation_agent.services.live_registry import get_emitter, register, unregister
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.task import task_service
 
@@ -52,14 +52,11 @@ def test_events_endpoint_streams_registered_live_emitter_without_db_replay() -> 
     async def run_case() -> None:
         task_id = "TASK_V1_3_3_EVENTS"
         emitter = register(task_id)
-        try:
-            emitter.emit(_event(StreamEventType.TASK_PROGRESS, task_id, seq=1))
-            emitter.emit(_event(StreamEventType.TASK_DONE, task_id, seq=2))
+        emitter.emit(_event(StreamEventType.TASK_PROGRESS, task_id, seq=1))
+        emitter.emit(_event(StreamEventType.TASK_DONE, task_id, seq=2))
 
-            response = await reconcile_api.stream_task_events(task_id=task_id, user_id="demo_user")
-            frames = [frame async for frame in response.body_iterator]
-        finally:
-            unregister(task_id)
+        response = await reconcile_api.stream_task_events(task_id=task_id, user_id="demo_user")
+        frames = [frame async for frame in response.body_iterator]
 
         events = [_event_from_frame(frame) for frame in frames]
         assert [event.event_type for event in events] == [
@@ -67,6 +64,7 @@ def test_events_endpoint_streams_registered_live_emitter_without_db_replay() -> 
             StreamEventType.TASK_DONE,
         ]
         assert events[0].payload["processed"] == 1
+        assert get_emitter(task_id) is None
 
     anyio.run(run_case)
 

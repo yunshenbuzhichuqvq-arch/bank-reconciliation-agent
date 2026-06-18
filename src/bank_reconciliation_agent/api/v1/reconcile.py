@@ -16,7 +16,7 @@ from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationUploadResponse,
 )
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
-from bank_reconciliation_agent.services.live_registry import get_emitter
+from bank_reconciliation_agent.services.live_registry import get_emitter, unregister
 from bank_reconciliation_agent.services.reconciliation import reconciliation_service
 
 
@@ -77,7 +77,7 @@ async def stream_task_events(
     emitter = get_emitter(task_id)
     if emitter is None:
         raise HTTPException(status_code=404, detail="live event stream not found")
-    return StreamingResponse(_task_event_frames(emitter), media_type="text/event-stream")
+    return StreamingResponse(_task_event_frames(task_id, emitter), media_type="text/event-stream")
 
 
 @router.get("/{task_id}/status", response_model=ApiResponse[ReconciliationStatusResponse])
@@ -100,15 +100,23 @@ async def list_reconciliation_exceptions(
     return ApiResponse(data=result)
 
 
-async def _task_event_frames(emitter) -> AsyncIterator[str]:
-    while True:
-        try:
-            event = await asyncio.to_thread(emitter.get, 0.1)
-        except Empty:
-            continue
-        yield _to_sse_frame(event)
-        if event.event_type == StreamEventType.TASK_DONE:
-            return
+async def _task_event_frames(task_id: str, emitter) -> AsyncIterator[str]:
+    try:
+        while True:
+            events = emitter.drain()
+            if not events:
+                if emitter.finished:
+                    return
+                try:
+                    events = [await asyncio.to_thread(emitter.get, 0.1)]
+                except Empty:
+                    continue
+            for event in events:
+                yield _to_sse_frame(event)
+                if event.event_type == StreamEventType.TASK_DONE:
+                    return
+    finally:
+        unregister(task_id)
 
 
 def _to_sse_frame(event: AgentStreamEvent) -> str:

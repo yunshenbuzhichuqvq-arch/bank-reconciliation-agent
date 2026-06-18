@@ -40,7 +40,7 @@ from bank_reconciliation_agent.services.memory.manager import memory_manager
 from bank_reconciliation_agent.services.queue import queue_service, reconciliation_queue_table
 from bank_reconciliation_agent.services.rag_log import rag_log_service
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
-from bank_reconciliation_agent.services.live_registry import register, unregister
+from bank_reconciliation_agent.services.live_registry import mark_finished, register
 from bank_reconciliation_agent.services.stream_emitter import QueueEmitter, StreamEmitter
 from bank_reconciliation_agent.services.task import reconciliation_task_table, task_service
 from bank_reconciliation_agent.services.trace import trace_writer
@@ -288,7 +288,7 @@ class ReconciliationService:
                 )
             )
         finally:
-            unregister(task_id)
+            mark_finished(task_id)
 
     def _emit_live_progress(self, *, user_id: str, task_id: str, emitter: QueueEmitter) -> None:
         task = task_service.get(user_id=user_id, task_id=task_id)
