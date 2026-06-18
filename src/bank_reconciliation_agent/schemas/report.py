@@ -35,3 +35,12 @@ class LLMReportNarrative(BaseModel):
 
 class ReportNarrative(LLMReportNarrative):
     llm_used: bool
+
+
+class TaskReport(BaseModel):
+    task_id: str
+    generated_at: str
+    llm_used: bool
+    metrics: TaskReportMetrics
+    narrative: ReportNarrative
+    markdown: str
