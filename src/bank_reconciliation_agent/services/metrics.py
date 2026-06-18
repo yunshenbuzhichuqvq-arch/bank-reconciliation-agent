@@ -15,7 +15,9 @@ from bank_reconciliation_agent.schemas.metrics import (
     OnlineMetrics,
     UnavailableMetrics,
 )
+from bank_reconciliation_agent.schemas.report import TaskReportMetrics
 from bank_reconciliation_agent.services.ledger import error_ledger_table
+from bank_reconciliation_agent.services.rag_log import rag_retrieval_log_table
 from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 
@@ -99,13 +101,121 @@ class MetricsService:
             ),
         )
 
+    def get_task_report_metrics(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+    ) -> TaskReportMetrics | None:
+        self._ensure_initialized()
+        task_filters = (
+            reconciliation_task_table.c.user_id == user_id,
+            reconciliation_task_table.c.task_id == task_id,
+        )
+        ledger_filters = (
+            error_ledger_table.c.user_id == user_id,
+            error_ledger_table.c.task_id == task_id,
+        )
+        review_filters = (
+            human_review_table.c.user_id == user_id,
+            human_review_table.c.task_id == task_id,
+        )
+        rag_filters = (
+            rag_retrieval_log_table.c.user_id == user_id,
+            rag_retrieval_log_table.c.task_id == task_id,
+        )
+
+        with self._engine.connect() as connection:
+            task_row = connection.execute(
+                select(reconciliation_task_table).where(*task_filters)
+            ).mappings().first()
+            if task_row is None:
+                return None
+
+            ledger_totals = connection.execute(
+                select(
+                    func.coalesce(func.sum(error_ledger_table.c.discrepancy_amount), 0),
+                    func.coalesce(
+                        func.sum(case((error_ledger_table.c.handle_status == "HELD", 1), else_=0)),
+                        0,
+                    ),
+                ).where(*ledger_filters)
+            ).one()
+            exception_rows = connection.execute(
+                select(error_ledger_table.c.exception_branch, func.count())
+                .where(*ledger_filters, error_ledger_table.c.exception_branch.is_not(None))
+                .group_by(error_ledger_table.c.exception_branch)
+            ).all()
+            decision_rows = connection.execute(
+                select(error_ledger_table.c.handle_status, func.count())
+                .where(*ledger_filters)
+                .group_by(error_ledger_table.c.handle_status)
+            ).all()
+            fallback_rows = connection.execute(
+                select(error_ledger_table.c.fallback_path, func.count())
+                .where(*ledger_filters, error_ledger_table.c.fallback_path.is_not(None))
+                .group_by(error_ledger_table.c.fallback_path)
+            ).all()
+            review_count = connection.execute(
+                select(func.count()).select_from(human_review_table).where(*review_filters)
+            ).scalar_one()
+            ledger_sources = connection.execute(
+                select(error_ledger_table.c.rag_source)
+                .where(*ledger_filters, error_ledger_table.c.rag_source.is_not(None))
+                .order_by(error_ledger_table.c.id)
+            ).scalars()
+            rag_source_rows = connection.execute(
+                select(rag_retrieval_log_table.c.sources)
+                .where(*rag_filters, rag_retrieval_log_table.c.sources.is_not(None))
+                .order_by(rag_retrieval_log_table.c.id)
+            ).scalars()
+
+        total_rows = int(task_row["total_bank_rows"] or 0)
+        created_at = task_row["created_at"]
+        return TaskReportMetrics(
+            task_id=task_id,
+            user_id=user_id,
+            recon_date=created_at.isoformat() if created_at is not None else "",
+            source_a_rows=total_rows,
+            source_b_rows=int(task_row["total_clear_rows"] or 0),
+            auto_fixed_rows=int(task_row["auto_fixed_rows"] or 0),
+            auto_fix_rate=(round(int(task_row["auto_fixed_rows"] or 0) / total_rows, 4) if total_rows else 0.0),
+            ai_processed_rows=int(task_row["ai_processed_rows"] or 0),
+            pending_human_count=int(task_row["pending_human_rows"] or 0),
+            review_count=int(review_count),
+            hold_count=int(ledger_totals[1] or 0),
+            discrepancy_amount_total=Decimal(str(ledger_totals[0] or "0")),
+            exception_dist={str(key): int(value) for key, value in exception_rows},
+            agent_decision_dist={str(key): int(value) for key, value in decision_rows},
+            fallback_dist={str(key): int(value) for key, value in fallback_rows},
+            total_tokens=int(task_row["total_llm_tokens"] or 0),
+            total_cost=Decimal(str(task_row["total_llm_cost"] or "0")).quantize(
+                Decimal("0.0001")
+            ),
+            offline=self._read_offline_snapshot(),
+            rag_sources=self._collect_rag_sources(ledger_sources, rag_source_rows),
+        )
+
     def _ensure_initialized(self) -> None:
         if self._initialized:
             return
         reconciliation_task_table.metadata.create_all(self._engine, tables=[reconciliation_task_table])
         error_ledger_table.metadata.create_all(self._engine, tables=[error_ledger_table])
         human_review_table.metadata.create_all(self._engine, tables=[human_review_table])
+        rag_retrieval_log_table.metadata.create_all(self._engine, tables=[rag_retrieval_log_table])
         self._initialized = True
+
+    def _collect_rag_sources(self, ledger_sources, rag_source_rows) -> list[str]:
+        sources: list[str] = []
+        for source in ledger_sources:
+            if source not in sources:
+                sources.append(source)
+        for row in rag_source_rows:
+            values = json.loads(row) if isinstance(row, str) else row
+            for source in values:
+                if source not in sources:
+                    sources.append(source)
+        return sources
 
     def _confidence_dist(self, values) -> dict[str, int]:
         dist = {"high": 0, "medium": 0, "low": 0, "unknown": 0}

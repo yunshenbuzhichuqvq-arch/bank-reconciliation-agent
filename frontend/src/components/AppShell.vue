@@ -14,6 +14,7 @@ const navItems = [
   { label: "差错台账", to: "/ledger" },
   { label: "人工复核", to: "/review" },
   { label: "量化指标", to: "/metrics" },
+  { label: "报表审计", to: "/reports" },
 ];
 </script>
 
@@ -185,7 +186,7 @@ const navItems = [
   }
 
   .app-shell__nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .app-shell__nav-link {

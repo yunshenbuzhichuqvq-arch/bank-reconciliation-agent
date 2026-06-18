@@ -51,6 +51,8 @@ class FakeLLMProvider:
         )
 
     def _payload_for(self, content: str) -> dict[str, object]:
+        if '"task": "report"' in content:
+            return self._report_payload()
         if '"task": "query_rewrite"' in content or "query_rewrite" in content or "改写" in content:
             return self._query_rewrite_payload(content)
         if '"task": "memory_summary"' in content or "memory_summary" in content:
@@ -66,6 +68,13 @@ class FakeLLMProvider:
         if "trace" in content or "追溯" in content or "跨日" in content or "t+1" in content:
             return self._trace_payload(content)
         return self._audit_payload(content)
+
+    def _report_payload(self) -> dict[str, object]:
+        return {
+            "risk_summary": "存在需要关注的异常事项，建议结合业务依据审慎判断。",
+            "review_advice": "建议优先复核待人工处理事项，并核对相关审计证据。",
+            "followup": "建议完成复核后更新处理状态，并持续跟踪未决事项。",
+        }
 
     def _query_rewrite_payload(self, content: str) -> dict[str, object]:
         query = "规则检索"
