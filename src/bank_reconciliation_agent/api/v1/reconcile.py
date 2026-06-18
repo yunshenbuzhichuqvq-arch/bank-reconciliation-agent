@@ -15,9 +15,11 @@ from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationStatusResponse,
     ReconciliationUploadResponse,
 )
+from bank_reconciliation_agent.schemas.report import TaskReport
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
 from bank_reconciliation_agent.services.live_registry import get_emitter, unregister
 from bank_reconciliation_agent.services.reconciliation import reconciliation_service
+from bank_reconciliation_agent.services.report import build_report
 
 
 router = APIRouter()
@@ -97,6 +99,19 @@ async def list_reconciliation_exceptions(
 ) -> ApiResponse[ReconciliationExceptionListResponse]:
     """查询指定对账任务的基础异常明细。"""
     result = reconciliation_service.get_exceptions(user_id=user_id, task_id=task_id)
+    return ApiResponse(data=result)
+
+
+@router.get("/{task_id}/report", response_model=ApiResponse[TaskReport])
+async def get_reconciliation_report(
+    task_id: str,
+    user_id: CurrentUserId,
+) -> ApiResponse[TaskReport]:
+    """按需生成指定对账任务的审计报告。"""
+    try:
+        result = build_report(user_id=user_id, task_id=task_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="reconciliation task not found") from exc
     return ApiResponse(data=result)
 
 
