@@ -6,14 +6,14 @@ from fastapi import HTTPException
 
 from bank_reconciliation_agent.schemas.ledger import LedgerRow
 from bank_reconciliation_agent.schemas.stream import StreamEventType
-from bank_reconciliation_agent.services.live_registry import get_emitter
+from bank_reconciliation_agent.services.live_registry import get_emitter, unregister
 from bank_reconciliation_agent.services.ledger import ledger_service
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.task import task_service
 
 
 @pytest.mark.anyio
-async def test_start_live_marks_running_emits_task_progress_and_cleans_registry() -> None:
+async def test_start_live_marks_running_emits_task_progress_and_retains_finished_emitter() -> None:
     task_id = "TASK_V1_3_2_LIVE_SUCCESS"
     user_id = "demo_user"
     task_service.replace_task(
@@ -61,8 +61,10 @@ async def test_start_live_marks_running_emits_task_progress_and_cleans_registry(
     assert terminal_event.payload["status"] == "COMPLETED"
 
     await asyncio.sleep(0)
-    assert get_emitter(task_id) is None
+    assert emitter.finished
+    assert get_emitter(task_id) is emitter
     assert ReconciliationService().get_status(user_id=user_id, task_id=task_id).status == "COMPLETED"
+    unregister(task_id)
 
 
 @pytest.mark.anyio
@@ -89,7 +91,9 @@ async def test_start_live_rejects_running_task_without_replacing_emitter() -> No
 
 
 @pytest.mark.anyio
-async def test_start_live_unregisters_on_background_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_start_live_retains_finished_emitter_on_background_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     task_id = "TASK_V1_3_2_LIVE_ERROR"
     user_id = "demo_user"
     task_service.replace_task(
@@ -119,8 +123,10 @@ async def test_start_live_unregisters_on_background_exception(monkeypatch: pytes
     assert "live failure" in terminal_event.payload["error_message"]
 
     await asyncio.sleep(0)
-    assert get_emitter(task_id) is None
+    assert emitter.finished
+    assert get_emitter(task_id) is emitter
     assert ReconciliationService().get_status(user_id=user_id, task_id=task_id).status == "FAILED"
+    unregister(task_id)
 
 
 def test_sync_start_still_marks_task_ai_running() -> None:
