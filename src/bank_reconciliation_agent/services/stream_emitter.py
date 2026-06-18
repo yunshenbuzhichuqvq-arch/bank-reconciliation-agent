@@ -17,8 +17,17 @@ class NullEmitter:
 
 
 class QueueEmitter:
-    def __init__(self) -> None:
+    def __init__(self, *, created_at: float | None = None) -> None:
         self._queue: Queue[AgentStreamEvent] = Queue()
+        self.created_at = created_at
+        self.finished_at: float | None = None
+
+    @property
+    def finished(self) -> bool:
+        return self.finished_at is not None
+
+    def mark_finished(self, *, finished_at: float) -> None:
+        self.finished_at = finished_at
 
     def emit(self, event: AgentStreamEvent) -> None:
         self._queue.put(event)
