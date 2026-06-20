@@ -12,6 +12,7 @@ class LLMResult(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     model: str
+    cached: bool = False
 
 
 class LLMUnavailable(RuntimeError):

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     checkpoint_sqlite_path: str = "./data/checkpoint.sqlite"
     redis_dsn: str = "redis://127.0.0.1:6379/0"
     async_queue_enabled: bool = False
+    enable_llm_cache: bool = False
+    llm_cache_ttl_seconds: int = 604800
+    job_idempotency_ttl_seconds: int = 3600
     decision_regression_runs: int = 10
     max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
     max_upload_rows: int = 10_000
