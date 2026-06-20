@@ -37,6 +37,7 @@ def test_worker_completes_queued_reconciliation_with_sync_equivalent_results(
                 scenario_type="BANK_ENTERPRISE",
                 bank_file=UploadFile(filename="bank.xlsx", file=bank_file),
                 clear_file=UploadFile(filename="clear.xlsx", file=clear_file),
+                force=True,
             )
 
         assert queued_result.task_id == sync_result.task_id

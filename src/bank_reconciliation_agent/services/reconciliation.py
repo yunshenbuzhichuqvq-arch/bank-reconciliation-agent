@@ -138,6 +138,7 @@ class ReconciliationService:
         scenario_type: str,
         bank_file: UploadFile,
         clear_file: UploadFile,
+        force: bool = False,
     ) -> ReconciliationUploadResponse:
         bank_content = await bank_file.read()
         clear_content = await clear_file.read()
@@ -148,6 +149,21 @@ class ReconciliationService:
         clear_df = self._read_dataframe(clear_content, "clear_file")
         validation_hook(bank_df, clear_df, scenario_type=scenario_type)
         task_id = self._generate_task_id((bank_df, clear_df))
+        existing_task = task_service.get(user_id=user_id, task_id=task_id)
+        terminal_statuses = {"UPLOADED", "COMPLETED"}
+        if existing_task is not None:
+            if force and existing_task.status == "RUNNING":
+                raise HTTPException(status_code=409, detail="running task cannot be forced")
+            if not force or existing_task.status not in terminal_statuses:
+                return ReconciliationUploadResponse(
+                    task_id=existing_task.task_id,
+                    status=existing_task.status,
+                    total_bank_rows=existing_task.total_bank_rows,
+                    total_clear_rows=existing_task.total_clear_rows,
+                    auto_fixed_rows=existing_task.auto_fixed_rows,
+                    pending_ai_rows=existing_task.pending_ai_rows,
+                    pending_human_rows=existing_task.pending_human_rows,
+                )
 
         upload_dir = Path(settings.upload_dir)
         upload_dir.mkdir(parents=True, exist_ok=True)
@@ -173,6 +189,7 @@ class ReconciliationService:
             scenario_type,
             str(bank_path),
             str(clear_path),
+            force=force and existing_task is not None,
         )
         return ReconciliationUploadResponse(
             task_id=task_id,
@@ -194,6 +211,10 @@ class ReconciliationService:
         clear_path: str,
     ) -> None:
         log.info("reconciliation_job_started", task_id=task_id, user_id=user_id)
+        existing_task = task_service.get(user_id=user_id, task_id=task_id)
+        if existing_task is not None and existing_task.status in {"UPLOADED", "COMPLETED"}:
+            log.info("reconciliation_job_skipped", task_id=task_id, user_id=user_id)
+            return
         task_service.update_status(user_id=user_id, task_id=task_id, status="RUNNING")
         try:
             bank_df = self._read_dataframe(Path(bank_path).read_bytes(), "bank_file")

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pandas as pd
 from arq.connections import ArqRedis
 from fastapi.testclient import TestClient
 
@@ -40,6 +41,9 @@ def test_upload_async_queues_task_and_persists_files(
     fake_arq_redis: ArqRedis,
 ) -> None:
     bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+    bank_df = pd.read_excel(bank_path)
+    bank_df.loc[0, "remark"] = tmp_path.name
+    bank_df.to_excel(bank_path, index=False)
     upload_dir = tmp_path / "uploads"
     monkeypatch.setattr(settings, "async_queue_enabled", True)
     monkeypatch.setattr(settings, "upload_dir", str(upload_dir))

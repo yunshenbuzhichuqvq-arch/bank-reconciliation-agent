@@ -56,6 +56,7 @@ async def upload_reconciliation_files_async(
     clear_file: UploadFile,
     user_id: CurrentUserId,
     scenario_type: str = Form("BANK_ENTERPRISE"),
+    force: bool = Form(False),
 ) -> ApiResponse[ReconciliationUploadResponse]:
     if not settings.async_queue_enabled:
         raise HTTPException(status_code=503, detail="async reconciliation queue is disabled")
@@ -69,6 +70,7 @@ async def upload_reconciliation_files_async(
         scenario_type=scenario_type,
         bank_file=bank_file,
         clear_file=clear_file,
+        force=force,
     )
     return ApiResponse(message="upload queued", data=result)
 

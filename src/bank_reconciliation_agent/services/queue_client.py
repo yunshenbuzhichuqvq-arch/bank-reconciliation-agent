@@ -20,9 +20,13 @@ async def enqueue_reconciliation(
     scenario_type: str,
     bank_path: str,
     clear_path: str,
+    force: bool = False,
 ) -> bool:
     redis_pool = await get_redis_pool()
-    acquired = await redis_pool.set(f"job:{task_id}", "1", nx=True)
+    job_key = f"job:{task_id}"
+    if force:
+        await redis_pool.delete(job_key)
+    acquired = await redis_pool.set(job_key, "1", nx=True)
     if not acquired:
         return False
 
