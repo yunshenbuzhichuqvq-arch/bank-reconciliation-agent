@@ -152,7 +152,7 @@ class ReconciliationService:
         validation_hook(bank_df, clear_df, scenario_type=scenario_type)
         task_id = self._generate_task_id((bank_df, clear_df))
         existing_task = task_service.get(user_id=user_id, task_id=task_id)
-        terminal_statuses = {"UPLOADED", "COMPLETED"}
+        terminal_statuses = {"UPLOADED", "COMPLETED", "FAILED"}
         if existing_task is not None:
             if force and existing_task.status == "RUNNING":
                 raise HTTPException(status_code=409, detail="running task cannot be forced")

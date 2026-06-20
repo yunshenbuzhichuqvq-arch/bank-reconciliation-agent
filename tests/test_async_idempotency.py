@@ -4,12 +4,12 @@ from pathlib import Path
 from arq.connections import ArqRedis
 from fastapi import HTTPException
 import pandas as pd
+import pytest
 from starlette.datastructures import UploadFile
 
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.services.reconciliation import reconciliation_service
 from bank_reconciliation_agent.services.task import task_service
-from bank_reconciliation_agent.worker import run_reconciliation_job
 from scripts.generate_mock_excel import generate_mvp1_mock_excel
 
 
@@ -51,32 +51,32 @@ def test_duplicate_queued_upload_is_not_enqueued_twice(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("terminal_status", ["UPLOADED", "COMPLETED", "FAILED"])
 def test_terminal_task_requires_force_to_enqueue_again(
     tmp_path: Path,
     monkeypatch,
     fake_arq_redis: ArqRedis,
+    terminal_status: str,
 ) -> None:
     async def run() -> None:
         bank_path, clear_path = _generate_unique_excel(tmp_path)
         monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "uploads"))
         queued = await _upload(bank_path, clear_path)
-        upload_dir = Path(settings.upload_dir)
-        job_kwargs = {
-            "user_id": "demo_user",
-            "task_id": queued.task_id,
-            "scenario_type": "BANK_ENTERPRISE",
-            "bank_path": str(upload_dir / f"{queued.task_id}_bank.xlsx"),
-            "clear_path": str(upload_dir / f"{queued.task_id}_clear.xlsx"),
-        }
-        await run_reconciliation_job({}, **job_kwargs)
+        task_service.update_status(
+            user_id="demo_user",
+            task_id=queued.task_id,
+            status=terminal_status,
+        )
 
         existing = await _upload(bank_path, clear_path)
-        assert existing.status == "UPLOADED"
+        assert existing.status == terminal_status
         assert await fake_arq_redis.zcard("arq:queue") == 1
+        assert await fake_arq_redis.get(f"job:{queued.task_id}") == b"1"
 
         forced = await _upload(bank_path, clear_path, force=True)
         assert forced.status == "QUEUED"
         assert await fake_arq_redis.zcard("arq:queue") == 2
+        assert await fake_arq_redis.get(f"job:{queued.task_id}") == b"1"
 
     asyncio.run(run())
 
