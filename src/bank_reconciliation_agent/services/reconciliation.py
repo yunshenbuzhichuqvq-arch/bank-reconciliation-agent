@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 import pandas as pd
+from redis.exceptions import ConnectionError as RedisConnectionError
+from sqlalchemy.exc import OperationalError
 from fastapi import HTTPException, UploadFile
 from pydantic import ValidationError
 
@@ -227,6 +229,14 @@ class ReconciliationService:
                 clear_df=clear_df,
             )
             log.info("reconciliation_job_completed", task_id=task_id, user_id=user_id)
+        except (RedisConnectionError, OperationalError) as exc:
+            log.warning(
+                "reconciliation_job_retrying",
+                task_id=task_id,
+                user_id=user_id,
+                error_type=type(exc).__name__,
+            )
+            raise
         except Exception as exc:
             task_service.update_status(user_id=user_id, task_id=task_id, status="FAILED")
             log.warning(
