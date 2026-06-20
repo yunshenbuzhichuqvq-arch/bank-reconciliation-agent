@@ -1,6 +1,7 @@
 import hashlib
 import json
-from typing import Any, Literal
+from threading import Lock
+from typing import Any, ClassVar, Literal
 
 import structlog
 from redis.exceptions import RedisError
@@ -12,6 +13,12 @@ log = structlog.get_logger()
 
 
 class CachingLLMProvider:
+    _metrics_lock: ClassVar[Lock] = Lock()
+    _hits: ClassVar[int] = 0
+    _misses: ClassVar[int] = 0
+    _saved_prompt_tokens: ClassVar[int] = 0
+    _saved_completion_tokens: ClassVar[int] = 0
+
     def __init__(
         self,
         inner: LLMProvider,
@@ -47,10 +54,22 @@ class CachingLLMProvider:
             )
 
         if cached_value is not None:
-            return LLMResult.model_validate_json(cached_value).model_copy(
+            result = LLMResult.model_validate_json(cached_value).model_copy(
                 update={"cached": True}
             )
+            with self._metrics_lock:
+                type(self)._hits += 1
+                type(self)._saved_prompt_tokens += result.prompt_tokens
+                type(self)._saved_completion_tokens += result.completion_tokens
+            log.info(
+                "llm_cache_hit",
+                model=result.model,
+                cache_key=cache_key[:24],
+            )
+            return result
 
+        with self._metrics_lock:
+            type(self)._misses += 1
         result = self._complete_inner(
             messages,
             temperature=temperature,
@@ -65,6 +84,16 @@ class CachingLLMProvider:
         except RedisError as exc:
             self._log_degraded("setex", exc)
         return result
+
+    @classmethod
+    def metrics_snapshot(cls) -> dict[str, int]:
+        with cls._metrics_lock:
+            return {
+                "hits": cls._hits,
+                "misses": cls._misses,
+                "saved_prompt_tokens": cls._saved_prompt_tokens,
+                "saved_completion_tokens": cls._saved_completion_tokens,
+            }
 
     def _cache_key(
         self,

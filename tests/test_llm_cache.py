@@ -64,6 +64,24 @@ def test_same_messages_hit_cache_on_second_call() -> None:
     assert inner.calls == 1
 
 
+def test_cache_hit_logs_model_and_short_cache_key() -> None:
+    provider = CachingLLMProvider(CountingProvider(), FakeStrictRedis(), ttl_seconds=60)
+    messages = [{"role": "system", "content": "audit prompt v1"}]
+    provider.complete(messages)
+
+    with capture_logs() as logs:
+        provider.complete(messages)
+
+    hit = next(entry for entry in logs if entry["event"] == "llm_cache_hit")
+    assert hit["model"] == "test-model"
+    assert hit["cache_key"].startswith("llmcache:v1:")
+    assert len(hit["cache_key"]) < len(provider._cache_key(
+        messages,
+        temperature=0.0,
+        response_format="json_object",
+    ))
+
+
 def test_message_change_misses_cache() -> None:
     inner = CountingProvider()
     provider = CachingLLMProvider(inner, FakeStrictRedis(), ttl_seconds=60)
