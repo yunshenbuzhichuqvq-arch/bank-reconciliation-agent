@@ -8,6 +8,8 @@ from sqlalchemy import case, func, select
 from sqlalchemy.engine import Engine
 
 from bank_reconciliation_agent.db.session import get_engine
+from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
+from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.schemas.metrics import (
     DashboardMetricsResponse,
     OfflineMetrics,
@@ -39,6 +41,19 @@ class MetricsService:
         self._rag_snapshot_path = rag_snapshot_path
         self._schema_snapshot_path = schema_snapshot_path
         self._initialized = False
+
+    def get_llm_cache_metrics(self) -> dict[str, str | int | float | Decimal]:
+        snapshot = CachingLLMProvider.metrics_snapshot()
+        total = snapshot["hits"] + snapshot["misses"]
+        return {
+            "source": "runtime_memory",
+            **snapshot,
+            "hit_rate": round(snapshot["hits"] / total, 4) if total else 0.0,
+            "saved_cost": compute_cost(
+                snapshot["saved_prompt_tokens"],
+                snapshot["saved_completion_tokens"],
+            ),
+        }
 
     def get_dashboard(self, *, user_id: str) -> DashboardMetricsResponse:
         self._ensure_initialized()

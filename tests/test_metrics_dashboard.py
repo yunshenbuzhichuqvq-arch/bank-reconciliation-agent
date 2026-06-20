@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert
 
 from bank_reconciliation_agent.db.session import get_engine
+from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
+from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.ledger import error_ledger_table
 from bank_reconciliation_agent.services.metrics import MetricsService, metrics_service
@@ -16,6 +18,73 @@ from bank_reconciliation_agent.services.task import reconciliation_task_table
 
 
 client = TestClient(app)
+
+
+def test_llm_cache_metrics_exposes_runtime_hit_rate_and_saved_cost(monkeypatch) -> None:
+    _reset_llm_cache_metrics(monkeypatch)
+    provider = CachingLLMProvider(_MetricsCountingProvider(), _MetricsCache(), ttl_seconds=60)
+    messages = [{"role": "user", "content": "reconcile"}]
+
+    provider.complete(messages)
+    provider.complete(messages)
+
+    assert MetricsService().get_llm_cache_metrics() == {
+        "source": "runtime_memory",
+        "hits": 1,
+        "misses": 1,
+        "hit_rate": 0.5,
+        "saved_prompt_tokens": 12,
+        "saved_completion_tokens": 4,
+        "saved_cost": compute_cost(12, 4),
+    }
+
+
+def test_llm_cache_metrics_returns_honest_zeroes_without_runtime_data(monkeypatch) -> None:
+    _reset_llm_cache_metrics(monkeypatch)
+
+    assert MetricsService().get_llm_cache_metrics() == {
+        "source": "runtime_memory",
+        "hits": 0,
+        "misses": 0,
+        "hit_rate": 0.0,
+        "saved_prompt_tokens": 0,
+        "saved_completion_tokens": 0,
+        "saved_cost": Decimal("0"),
+    }
+
+
+class _MetricsCountingProvider:
+    model = "metrics-test"
+
+    def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        del messages, temperature, response_format
+        from bank_reconciliation_agent.core.llm.provider import LLMResult
+
+        return LLMResult(
+            text="cached response",
+            prompt_tokens=12,
+            completion_tokens=4,
+            model=self.model,
+        )
+
+
+class _MetricsCache:
+    def __init__(self) -> None:
+        self.values = {}
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def setex(self, key, ttl_seconds, value):
+        del ttl_seconds
+        self.values[key] = value
+
+
+def _reset_llm_cache_metrics(monkeypatch) -> None:
+    monkeypatch.setattr(CachingLLMProvider, "_hits", 0)
+    monkeypatch.setattr(CachingLLMProvider, "_misses", 0)
+    monkeypatch.setattr(CachingLLMProvider, "_saved_prompt_tokens", 0)
+    monkeypatch.setattr(CachingLLMProvider, "_saved_completion_tokens", 0)
 
 
 def test_dashboard_metrics_aggregates_online_rows_for_current_user(tmp_path: Path, monkeypatch) -> None:

@@ -2,7 +2,25 @@ from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecisi
 from bank_reconciliation_agent.core.llm.provider import LLMResult
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
-from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from bank_reconciliation_agent.services.workflow import ReconciliationState, _llm_usage, run_item
+
+
+def test_llm_usage_carries_cached_flag() -> None:
+    class CachedAgent:
+        last_llm_result = LLMResult(
+            text="{}",
+            prompt_tokens=100,
+            completion_tokens=20,
+            model="fake",
+            cached=True,
+        )
+
+    assert _llm_usage(CachedAgent()) == {
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "llm_tokens": 120,
+        "cached": True,
+    }
 
 
 def _evidence() -> RagSearchItem:

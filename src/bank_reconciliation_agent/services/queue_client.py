@@ -26,7 +26,12 @@ async def enqueue_reconciliation(
     job_key = f"job:{task_id}"
     if force:
         await redis_pool.delete(job_key)
-    acquired = await redis_pool.set(job_key, "1", nx=True)
+    acquired = await redis_pool.set(
+        job_key,
+        "1",
+        nx=True,
+        ex=settings.job_idempotency_ttl_seconds,
+    )
     if not acquired:
         return False
 

@@ -584,14 +584,20 @@ def _model_or_mapping_dump(value: Any) -> dict[str, Any]:
     return dict(value)
 
 
-def _llm_usage(agent: Any) -> dict[str, int]:
+def _llm_usage(agent: Any) -> dict[str, int | bool]:
     result = getattr(agent, "last_llm_result", None)
     if result is None:
-        return {"prompt_tokens": 0, "completion_tokens": 0, "llm_tokens": 0}
+        return {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "llm_tokens": 0,
+            "cached": False,
+        }
     prompt_tokens = int(getattr(result, "prompt_tokens", 0))
     completion_tokens = int(getattr(result, "completion_tokens", 0))
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "llm_tokens": prompt_tokens + completion_tokens,
+        "cached": bool(getattr(result, "cached", False)),
     }
