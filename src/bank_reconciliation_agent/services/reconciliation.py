@@ -119,13 +119,32 @@ class ReconciliationService:
         clear_df = self._read_dataframe(clear_content, "clear_file")
         validation_hook(bank_df, clear_df, scenario_type=scenario_type)
 
+        task_id = self._generate_task_id((bank_df, clear_df))
+        return self._execute_reconciliation(
+            user_id=user_id,
+            task_id=task_id,
+            scenario_type=scenario_type,
+            bank_df=bank_df,
+            clear_df=clear_df,
+            emitter=emitter,
+        )
+
+    def _execute_reconciliation(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        scenario_type: str,
+        bank_df: pd.DataFrame,
+        clear_df: pd.DataFrame,
+        emitter: StreamEmitter | None = None,
+    ) -> ReconciliationUploadResponse:
         match_results = self._build_match_results(
             bank_df,
             clear_df,
             scenario_type=scenario_type,
         )
         match_summary = self._summarize_match_results(match_results)
-        task_id = self._generate_task_id((bank_df, clear_df))
 
         task_service.replace_task(
             user_id=user_id,
