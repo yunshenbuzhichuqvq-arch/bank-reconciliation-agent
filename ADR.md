@@ -3,13 +3,13 @@
 > 续全局连续编号(decisions/ 现到 ADR-061),本 stage 从 ADR-062 起。
 > 范围 = ADR-059 显式 defer 的「LLM 结果缓存」+ ADR-059 收尾 follow-up「`job:{task_id}` 无 TTL 堆积」收口。
 > ADR-059 另一 defer 项「API 限流」仍留 backlog,不在本 stage。
-> 状态均为 proposed,待用户 review 后拍板转 accepted。
+> 状态:用户 2026-06-20 review 后全部拍板 accepted。
 
 ---
 
 ## ADR-062: LLM 缓存的边界位置 —— Provider 层 memoization vs Agent 层语义缓存
 **Slug**: `llm-cache-provider-layer-memoization`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-06-20
 
 ### Context
@@ -39,7 +39,7 @@ ADR-059 把「LLM 结果缓存」措辞为 key = `prompt_version + 异常指纹`
 
 ## ADR-063: 缓存键构成、命名空间与失效策略
 **Slug**: `llm-cache-key-namespace-ttl`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-06-20
 
 ### Context
@@ -66,7 +66,7 @@ ADR-059 把「LLM 结果缓存」措辞为 key = `prompt_version + 异常指纹`
 
 ## ADR-064: 缓存接入方式、开关与 Redis 不可用降级
 **Slug**: `llm-cache-toggle-and-observable-degrade`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-06-20
 
 ### Context
@@ -94,7 +94,7 @@ ADR-059 把「LLM 结果缓存」措辞为 key = `prompt_version + 异常指纹`
 
 ## ADR-065: 命中可观测与成本记账
 **Slug**: `llm-cache-hit-observability-and-cost`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-06-20
 
 ### Context
@@ -120,7 +120,7 @@ ADR-059 把「LLM 结果缓存」措辞为 key = `prompt_version + 异常指纹`
 
 ## ADR-066: Redis 客户端边界与测试策略
 **Slug**: `llm-cache-sync-redis-client-and-fakeredis`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-06-20
 
 ### Context
@@ -145,7 +145,7 @@ ADR-059 把「LLM 结果缓存」措辞为 key = `prompt_version + 异常指纹`
 
 ## ADR-067: `job:{task_id}` 幂等键 TTL 收口(ADR-059 follow-up)
 **Slug**: `job-idempotency-key-ttl`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-06-20
 
 ### Context
