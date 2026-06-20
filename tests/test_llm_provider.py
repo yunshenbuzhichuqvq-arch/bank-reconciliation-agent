@@ -2,7 +2,13 @@ from decimal import Decimal
 import json
 import sys
 
+from fakeredis import FakeStrictRedis
+import redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from structlog.testing import capture_logs
+
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
 from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.core.llm.provider import (
     DeepSeekProvider,
@@ -19,6 +25,54 @@ def test_get_llm_provider_defaults_to_fake() -> None:
     provider = get_llm_provider()
 
     assert isinstance(provider, FakeLLMProvider)
+
+
+def test_get_llm_provider_does_not_touch_redis_when_cache_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "llm_provider", "fake")
+    monkeypatch.setattr(settings, "enable_llm_cache", False)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Redis must not be constructed when cache is disabled")
+
+    monkeypatch.setattr(redis.Redis, "from_url", fail_if_called)
+
+    provider = get_llm_provider()
+
+    assert isinstance(provider, FakeLLMProvider)
+
+
+def test_get_llm_provider_wraps_base_provider_when_cache_enabled(monkeypatch) -> None:
+    redis_client = FakeStrictRedis()
+    monkeypatch.setattr(settings, "llm_provider", "fake")
+    monkeypatch.setattr(settings, "enable_llm_cache", True)
+    monkeypatch.setattr(settings, "llm_cache_ttl_seconds", 123)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: redis_client)
+
+    provider = get_llm_provider()
+
+    assert isinstance(provider, CachingLLMProvider)
+    assert isinstance(provider.inner, FakeLLMProvider)
+    assert provider.redis_client is redis_client
+    assert provider.ttl_seconds == 123
+
+
+def test_get_llm_provider_degrades_when_redis_ping_fails(monkeypatch) -> None:
+    class UnavailableRedis:
+        def ping(self) -> None:
+            raise RedisConnectionError("redis unavailable")
+
+    monkeypatch.setattr(settings, "llm_provider", "fake")
+    monkeypatch.setattr(settings, "enable_llm_cache", True)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: UnavailableRedis())
+
+    with capture_logs() as logs:
+        provider = get_llm_provider()
+
+    assert isinstance(provider, FakeLLMProvider)
+    assert any(
+        entry["event"] == "llm_cache_degraded" and entry["reason"] == "connect"
+        for entry in logs
+    )
 
 
 def test_fake_provider_returns_deterministic_json_for_agent_prompts() -> None:

@@ -3,8 +3,14 @@ import re
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
+import redis
+from redis.exceptions import RedisError
+import structlog
 
 from bank_reconciliation_agent.core.config import settings
+
+
+log = structlog.get_logger()
 
 
 class LLMResult(BaseModel):
@@ -233,11 +239,30 @@ class DeepSeekProvider:
 
 def get_llm_provider() -> LLMProvider:
     if settings.llm_provider == "fake":
-        return FakeLLMProvider()
-    if settings.llm_provider == "deepseek":
-        return DeepSeekProvider(
+        base_provider: LLMProvider = FakeLLMProvider()
+    elif settings.llm_provider == "deepseek":
+        base_provider = DeepSeekProvider(
             api_key=settings.deepseek_api_key,
             model=settings.deepseek_model,
             base_url=settings.deepseek_base_url,
         )
-    raise LLMUnavailable(f"Unsupported LLM provider: {settings.llm_provider}")
+    else:
+        raise LLMUnavailable(f"Unsupported LLM provider: {settings.llm_provider}")
+
+    if not settings.enable_llm_cache:
+        return base_provider
+
+    try:
+        redis_client = redis.Redis.from_url(settings.redis_dsn)
+        redis_client.ping()
+    except RedisError:
+        log.warning("llm_cache_degraded", reason="connect")
+        return base_provider
+
+    from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
+
+    return CachingLLMProvider(
+        base_provider,
+        redis_client,
+        ttl_seconds=settings.llm_cache_ttl_seconds,
+    )
