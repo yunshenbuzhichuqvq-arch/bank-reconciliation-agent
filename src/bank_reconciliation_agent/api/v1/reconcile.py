@@ -8,6 +8,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from bank_reconciliation_agent.api.dependencies import CurrentUserId
+from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.schemas.common import ApiResponse
 from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationExceptionListResponse,
@@ -47,6 +48,31 @@ async def upload_reconciliation_files(
         clear_file=clear_file,
     )
     return ApiResponse(message="upload success", data=result)
+
+
+@router.post("/upload-async", response_model=ApiResponse[ReconciliationUploadResponse])
+async def upload_reconciliation_files_async(
+    bank_file: UploadFile,
+    clear_file: UploadFile,
+    user_id: CurrentUserId,
+    scenario_type: str = Form("BANK_ENTERPRISE"),
+    force: bool = Form(False),
+) -> ApiResponse[ReconciliationUploadResponse]:
+    if not settings.async_queue_enabled:
+        raise HTTPException(status_code=503, detail="async reconciliation queue is disabled")
+    if scenario_type not in VALID_SCENARIO_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="scenario_type must be one of: BANK_ENTERPRISE, BANK_CLEARING",
+        )
+    result = await reconciliation_service.upload_async(
+        user_id=user_id,
+        scenario_type=scenario_type,
+        bank_file=bank_file,
+        clear_file=clear_file,
+        force=force,
+    )
+    return ApiResponse(message="upload queued", data=result)
 
 
 @router.post("/{task_id}/start", response_model=ApiResponse[ReconciliationStartResponse])
