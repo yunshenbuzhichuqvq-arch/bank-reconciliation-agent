@@ -88,6 +88,12 @@ class ReconciliationWriteBundle(NamedTuple):
     fallback_l3_rows: int
     total_prompt_tokens: int
     total_completion_tokens: int
+    saved_prompt_tokens: int = 0
+    saved_completion_tokens: int = 0
+
+    @property
+    def saved_cost(self) -> Decimal:
+        return compute_cost(self.saved_prompt_tokens, self.saved_completion_tokens)
 
 
 class ReconciliationService:
@@ -737,6 +743,8 @@ class ReconciliationService:
         fallback_l3_rows = 0
         total_prompt_tokens = 0
         total_completion_tokens = 0
+        saved_prompt_tokens = 0
+        saved_completion_tokens = 0
         stream_seq = 0
         for result in results:
             if result.status == "AUTO_FIXED":
@@ -796,9 +804,17 @@ class ReconciliationService:
             ))
             audit_decision = AuditDecision.model_validate(workflow_state["audit_decision"])
             fallback_path = workflow_state.get("fallback_path")
-            prompt_tokens = sum(int(row.get("prompt_tokens", 0)) for row in workflow_state["agent_logs"])
+            consumed_logs = [
+                row for row in workflow_state["agent_logs"] if not row.get("cached", False)
+            ]
+            cached_logs = [row for row in workflow_state["agent_logs"] if row.get("cached", False)]
+            prompt_tokens = sum(int(row.get("prompt_tokens", 0)) for row in consumed_logs)
             completion_tokens = sum(
-                int(row.get("completion_tokens", 0)) for row in workflow_state["agent_logs"]
+                int(row.get("completion_tokens", 0)) for row in consumed_logs
+            )
+            saved_prompt_tokens += sum(int(row.get("prompt_tokens", 0)) for row in cached_logs)
+            saved_completion_tokens += sum(
+                int(row.get("completion_tokens", 0)) for row in cached_logs
             )
             llm_tokens = prompt_tokens + completion_tokens
             ai_processed_rows += 1
@@ -873,6 +889,8 @@ class ReconciliationService:
             fallback_l3_rows=fallback_l3_rows,
             total_prompt_tokens=total_prompt_tokens,
             total_completion_tokens=total_completion_tokens,
+            saved_prompt_tokens=saved_prompt_tokens,
+            saved_completion_tokens=saved_completion_tokens,
         )
 
     def _run_side_effect(

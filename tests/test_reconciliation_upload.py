@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService, error_ledger_table
@@ -37,6 +38,66 @@ from scripts.generate_mock_excel import (
 
 client = TestClient(app)
 DEMO_HEADERS = {"X-User-ID": "demo_user"}
+
+
+def _cost_test_result(flow_id: str) -> ReconciliationMatchResult:
+    return ReconciliationMatchResult(
+        flow_id=flow_id,
+        status="PENDING_HUMAN",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount=Decimal("100.00"),
+        clear_amount=Decimal("99.00"),
+        amount_diff=Decimal("1.00"),
+    )
+
+
+def _build_bundle_with_usage(monkeypatch: pytest.MonkeyPatch, usage: list[dict[str, object]]):
+    service = ReconciliationService()
+    result = _cost_test_result("FLOW-CACHE-COST")
+    workflow_state = service._agent_error_workflow_state(
+        user_id="demo_user",
+        task_id="TASK-CACHE-COST",
+        scenario_type="BANK_ENTERPRISE",
+        result=result,
+        error=RuntimeError("test"),
+    )
+    workflow_state["agent_logs"] = usage
+    monkeypatch.setattr(service, "_run_workflow_for_result", lambda **kwargs: workflow_state)
+    return service._build_write_bundle(
+        user_id="demo_user",
+        task_id="TASK-CACHE-COST",
+        scenario_type="BANK_ENTERPRISE",
+        results=[result],
+    )
+
+
+def test_write_bundle_splits_consumed_and_saved_llm_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _build_bundle_with_usage(monkeypatch, [
+        {"prompt_tokens": 100, "completion_tokens": 20, "cached": False},
+        {"prompt_tokens": 300, "completion_tokens": 40, "cached": True},
+    ])
+
+    assert bundle.total_prompt_tokens == 100
+    assert bundle.total_completion_tokens == 20
+    assert bundle.saved_prompt_tokens == 300
+    assert bundle.saved_completion_tokens == 40
+    assert bundle.saved_cost == compute_cost(300, 40)
+    assert bundle.agent_log_rows[0]["llm_tokens"] == 120
+
+
+def test_write_bundle_all_cached_llm_usage_has_zero_consumed_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _build_bundle_with_usage(monkeypatch, [
+        {"prompt_tokens": 300, "completion_tokens": 40, "cached": True}
+    ])
+
+    assert bundle.total_prompt_tokens + bundle.total_completion_tokens == 0
+    assert compute_cost(bundle.total_prompt_tokens, bundle.total_completion_tokens) == 0
+    assert bundle.saved_cost > 0
 
 
 def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) -> None:
