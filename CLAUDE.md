@@ -70,6 +70,12 @@ stage-N-xxx 分支(从 main 拉出):
  └─ src/ tests/ docs/ decisions/ ...  tracked,Codex 常规 commit,经 PR 合并进 main
 ```
 
+**ADR.md 防漏闸(`ADR.md` 已两次漏进 main:stage-ReportAgent、stage-async-infra —— 收尾三道闸缺一不可)**:
+
+1. **删除闸(push 前)**:`decisions/` 归档后必须 `git rm ADR.md` 并 commit,**立即验证** `git ls-files ADR.md` 为空、`git diff --stat main...HEAD` 不含 `ADR.md`,空才放行 push。
+2. **head 闸(merge 前)**:`ADR.md` 删除 commit 必须先于 merge 进入 PR 的 head。merge 前 `gh pr view <n> --json headRefOid` 取 head、`git ls-tree <oid> ADR.md` 必须为空 —— 只查本地工作区拦不住"PR 早开、被提前 merge"(stage-async-infra 的漏因)。删除 commit 没进 head 就先 push 再 merge。
+3. **复核闸(merge 后)**:`git ls-tree origin/main ADR.md` 必须为空;漏了走 `fix/*` 分支 + PR 热修删除,**不在 main 直接删**。
+
 ### 4.3 `.gitignore` 与开工体检
 
 `.gitignore` 必须含以下(`ADR.md` **不在**其中,它要被 commit):
@@ -211,11 +217,11 @@ stage-N-xxx 分支(从 main 拉出):
 - **步骤 0 PR 前体检**:`git status`、`git branch --show-current`、`git fetch origin`、`git diff --stat main...HEAD`,确认:在 `stage-N-*`、main 没在 stage 期间被改坏、工作区无未提交代码改动、`spec.md`/`tasks.md`/`PR.md` 未被 git 跟踪。若 main 已变,先让 stage 分支 `git merge origin/main` 同步;**有冲突就停下来报告冲突文件与性质,不擅自改实现代码**。
 - **步骤 1 状态校验**:`tasks.md` 全 `done` 或明确 `out-of-scope`;`ADR.md` 无 `proposed`(都已 accepted/rejected/superseded);每个 task 的 Report Back 写明测试结果与偏差。
 - **步骤 2 拆分到 `decisions/`**:对每条 `accepted` ADR 生成 `decisions/ADR-<stage>.<seq>-<slug>.md`(例 `decisions/ADR-2.1-llm-provider-abstraction.md`);`rejected` 不归档(仍留分支历史)。提示用户 `git add decisions/ && git commit -m "docs(adr): archive stage-N decisions"`。
-- **步骤 3 删除 scratchpad ADR**:`ADR.md` 投影进 `decisions/` 后,PR 前 `git rm ADR.md && git commit -m "docs(adr): drop stage-N scratchpad"`。
+- **步骤 3 删除 scratchpad ADR(§4.2 删除闸)**:`ADR.md` 投影进 `decisions/` 后,push 前 `git rm ADR.md && git commit -m "docs(adr): drop stage-N scratchpad"`;**立即验证** `git ls-files ADR.md` 为空、`git diff --stat main...HEAD` 不含 `ADR.md`,空才进步骤 5。
 - **步骤 4 确认 `PR.md` 草稿就绪**:`PR.md` 由 Codex 汇总各 task 的 Report Back 生成(见 `AGENTS.md`),**你不写它**,在步骤 6 核对。提醒用户它不 commit、复制进 GitHub PR 描述框。
 - **步骤 5 push + 开 PR**:`git push origin stage-N-xxx`,用户在 GitHub 建 PR(base=main, compare=stage-N-xxx)。
-- **步骤 6 PR review**:核对 Files changed 无不该提交的文件、`decisions/` 含本 stage accepted ADR、`ADR.md`/`spec.md`/`tasks.md`/`PR.md` 未进 PR、测试通过、实现满足 Acceptance Criteria 与 DoD;**核对 Codex 的 `PR.md`**——对应任务齐、架构决策列对、测试情况与 Report Back 一致、scope 未越界,不实则退回。结论只能是 `Approve`(可 merge)或 `Request Changes`(必改 Blocking 项)。
-- 合并后的本地同步与清理见 §4.1。
+- **步骤 6 PR review + merge 前 head 闸(§4.2 head 闸)**:核对 Files changed 无不该提交的文件、`decisions/` 含本 stage accepted ADR、`ADR.md`/`spec.md`/`tasks.md`/`PR.md` 未进 PR、测试通过、实现满足 Acceptance Criteria 与 DoD;**核对 Codex 的 `PR.md`**——对应任务齐、架构决策列对、测试情况与 Report Back 一致、scope 未越界,不实则退回。**merge 前**额外验 PR head:`gh pr view <n> --json headRefOid` + `git ls-tree <oid> ADR.md` 为空(PR 可能早于步骤 3 就开、head 未必含删除 commit)。结论只能是 `Approve`(可 merge)或 `Request Changes`(必改 Blocking 项)。
+- **步骤 7 合并后复核(§4.2 复核闸)**:`git ls-tree origin/main ADR.md` 必须为空;漏了走 `fix/*` 分支 + PR 热修删除,不在 main 直接删。本地同步与清理见 §4.1。
 
 **F — 用户想跳过流程直接写代码**:拒绝,转为补 task 或调 spec。例外:只动 `ADR.md`/`spec.md`/`tasks.md`/`decisions/`/`docs/` 的规划与文档类修改。
 
@@ -225,6 +231,7 @@ stage-N-xxx 分支(从 main 拉出):
 - **spec.md**:Stage Goal 一句话?Builds On 引了本 stage + 历史 ADR?In/Out of Scope 明确?接口/签名/contract 够具体?非平凡设计点能指回 ADR?
 - **tasks.md**:每 task 有 Spec ref + ADR ref?Acceptance Criteria 客观可验证?Out of Scope 明确?DoD 可复制运行?单 task 控制在 2–4 小时?含 Report Back 模板?
 - **PR.md(Codex 产出,你审查时核对)**:变更内容、对应 task、归档后的 decisions ADR、测试情况(与 Report Back 一致)、风险点与未完成项、reviewer 重点区域——是否齐全且属实?
+- **scratchpad 防漏(§4.2 三道闸)**:删除闸——push 前 `git ls-files ADR.md` 空?head 闸——merge 前 `git ls-tree <PR-head-oid> ADR.md` 空?复核闸——merge 后 `git ls-tree origin/main ADR.md` 空?三道缺一就别宣布 stage 收尾完成。
 
 ## 9. 沟通风格
 
