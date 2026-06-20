@@ -90,6 +90,7 @@ class TaskService:
         auto_fixed_rows: int,
         pending_ai_rows: int,
         pending_human_rows: int,
+        status: str = "UPLOADED",
         connection: Connection | None = None,
     ) -> None:
         """写入上传后的任务状态；同 task_id 重试时覆盖旧任务统计。"""
@@ -109,7 +110,7 @@ class TaskService:
                     task_id=task_id,
                     scenario_type=scenario_type,
                     task_name=f"{task_id} reconciliation",
-                    status="UPLOADED",
+                    status=status,
                     total_bank_rows=total_bank_rows,
                     total_clear_rows=total_clear_rows,
                     auto_fixed_rows=auto_fixed_rows,

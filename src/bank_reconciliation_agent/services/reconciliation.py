@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 from typing import Callable, NamedTuple
 
 import pandas as pd
@@ -38,6 +39,7 @@ from bank_reconciliation_agent.services.hooks import auth_hook, validation_hook
 from bank_reconciliation_agent.services.ledger import error_ledger_table, ledger_service
 from bank_reconciliation_agent.services.memory.manager import memory_manager
 from bank_reconciliation_agent.services.queue import queue_service, reconciliation_queue_table
+from bank_reconciliation_agent.services.queue_client import enqueue_reconciliation
 from bank_reconciliation_agent.services.rag_log import rag_log_service
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
 from bank_reconciliation_agent.services.live_registry import mark_finished, register
@@ -128,6 +130,90 @@ class ReconciliationService:
             clear_df=clear_df,
             emitter=emitter,
         )
+
+    async def upload_async(
+        self,
+        *,
+        user_id: str,
+        scenario_type: str,
+        bank_file: UploadFile,
+        clear_file: UploadFile,
+    ) -> ReconciliationUploadResponse:
+        bank_content = await bank_file.read()
+        clear_content = await clear_file.read()
+        self._validate_file_size(bank_file, len(bank_content))
+        self._validate_file_size(clear_file, len(clear_content))
+
+        bank_df = self._read_dataframe(bank_content, "bank_file")
+        clear_df = self._read_dataframe(clear_content, "clear_file")
+        validation_hook(bank_df, clear_df, scenario_type=scenario_type)
+        task_id = self._generate_task_id((bank_df, clear_df))
+
+        upload_dir = Path(settings.upload_dir)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        bank_path = upload_dir / f"{task_id}_bank.xlsx"
+        clear_path = upload_dir / f"{task_id}_clear.xlsx"
+        bank_path.write_bytes(bank_content)
+        clear_path.write_bytes(clear_content)
+
+        task_service.replace_task(
+            user_id=user_id,
+            task_id=task_id,
+            scenario_type=scenario_type,
+            total_bank_rows=0,
+            total_clear_rows=0,
+            auto_fixed_rows=0,
+            pending_ai_rows=0,
+            pending_human_rows=0,
+            status="QUEUED",
+        )
+        await enqueue_reconciliation(
+            task_id,
+            user_id,
+            scenario_type,
+            str(bank_path),
+            str(clear_path),
+        )
+        return ReconciliationUploadResponse(
+            task_id=task_id,
+            status="QUEUED",
+            total_bank_rows=len(bank_df),
+            total_clear_rows=len(clear_df),
+            auto_fixed_rows=0,
+            pending_ai_rows=0,
+            pending_human_rows=0,
+        )
+
+    def run_reconciliation_job(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        scenario_type: str,
+        bank_path: str,
+        clear_path: str,
+    ) -> None:
+        log.info("reconciliation_job_started", task_id=task_id, user_id=user_id)
+        task_service.update_status(user_id=user_id, task_id=task_id, status="RUNNING")
+        try:
+            bank_df = self._read_dataframe(Path(bank_path).read_bytes(), "bank_file")
+            clear_df = self._read_dataframe(Path(clear_path).read_bytes(), "clear_file")
+            self._execute_reconciliation(
+                user_id=user_id,
+                task_id=task_id,
+                scenario_type=scenario_type,
+                bank_df=bank_df,
+                clear_df=clear_df,
+            )
+            log.info("reconciliation_job_completed", task_id=task_id, user_id=user_id)
+        except Exception as exc:
+            task_service.update_status(user_id=user_id, task_id=task_id, status="FAILED")
+            log.warning(
+                "reconciliation_job_failed",
+                task_id=task_id,
+                user_id=user_id,
+                error_type=type(exc).__name__,
+            )
 
     def _execute_reconciliation(
         self,
