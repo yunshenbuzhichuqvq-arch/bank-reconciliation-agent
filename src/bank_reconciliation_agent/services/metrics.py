@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
 from bank_reconciliation_agent.core.llm.cost import compute_cost
+from bank_reconciliation_agent.core.llm.rate_limit import RateLimitedLLMProvider
 from bank_reconciliation_agent.schemas.metrics import (
     DashboardMetricsResponse,
     OfflineMetrics,
@@ -53,6 +54,12 @@ class MetricsService:
                 snapshot["saved_prompt_tokens"],
                 snapshot["saved_completion_tokens"],
             ),
+        }
+
+    def get_llm_rate_limit_metrics(self) -> dict[str, str | int | float]:
+        return {
+            "source": "runtime_memory",
+            **RateLimitedLLMProvider.metrics_snapshot(),
         }
 
     def get_dashboard(self, *, user_id: str) -> DashboardMetricsResponse:

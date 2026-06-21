@@ -17,6 +17,7 @@ from bank_reconciliation_agent.core.llm.provider import (
     LLMUnavailable,
     get_llm_provider,
 )
+from bank_reconciliation_agent.core.llm.rate_limit import RateLimitedLLMProvider
 
 
 def test_get_llm_provider_defaults_to_fake() -> None:
@@ -30,6 +31,7 @@ def test_get_llm_provider_defaults_to_fake() -> None:
 def test_get_llm_provider_does_not_touch_redis_when_cache_disabled(monkeypatch) -> None:
     monkeypatch.setattr(settings, "llm_provider", "fake")
     monkeypatch.setattr(settings, "enable_llm_cache", False)
+    monkeypatch.setattr(settings, "enable_llm_rate_limit", False)
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("Redis must not be constructed when cache is disabled")
@@ -73,6 +75,82 @@ def test_get_llm_provider_degrades_when_redis_ping_fails(monkeypatch) -> None:
         entry["event"] == "llm_cache_degraded" and entry["reason"] == "connect"
         for entry in logs
     )
+
+
+def test_get_llm_provider_wraps_base_when_rate_limit_enabled(monkeypatch) -> None:
+    redis_client = FakeStrictRedis()
+    monkeypatch.setattr(settings, "llm_provider", "fake")
+    monkeypatch.setattr(settings, "enable_llm_cache", False)
+    monkeypatch.setattr(settings, "enable_llm_rate_limit", True)
+    monkeypatch.setattr(settings, "llm_rate_limit_rpm", 12)
+    monkeypatch.setattr(settings, "llm_rate_limit_max_concurrency", 3)
+    monkeypatch.setattr(settings, "llm_rate_limit_max_wait_seconds", 1.5)
+    monkeypatch.setattr(settings, "llm_rate_limit_window_seconds", 30)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: redis_client)
+
+    provider = get_llm_provider()
+
+    assert isinstance(provider, RateLimitedLLMProvider)
+    assert isinstance(provider.inner, FakeLLMProvider)
+    assert provider.redis_client is redis_client
+    assert provider.rpm == 12
+    assert provider.max_concurrency == 3
+    assert provider.max_wait_seconds == 1.5
+    assert provider.window_seconds == 30
+
+
+def test_get_llm_provider_nests_cache_outside_rate_limit(monkeypatch) -> None:
+    redis_client = FakeStrictRedis()
+    monkeypatch.setattr(settings, "llm_provider", "fake")
+    monkeypatch.setattr(settings, "enable_llm_cache", True)
+    monkeypatch.setattr(settings, "enable_llm_rate_limit", True)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: redis_client)
+
+    provider = get_llm_provider()
+
+    assert isinstance(provider, CachingLLMProvider)
+    assert isinstance(provider.inner, RateLimitedLLMProvider)
+    assert isinstance(provider.inner.inner, FakeLLMProvider)
+
+
+def test_get_llm_provider_degrades_when_rate_limit_redis_ping_fails(monkeypatch) -> None:
+    class UnavailableRedis:
+        def ping(self) -> None:
+            raise RedisConnectionError("redis unavailable")
+
+    monkeypatch.setattr(settings, "llm_provider", "fake")
+    monkeypatch.setattr(settings, "enable_llm_cache", False)
+    monkeypatch.setattr(settings, "enable_llm_rate_limit", True)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: UnavailableRedis())
+
+    with capture_logs() as logs:
+        provider = get_llm_provider()
+
+    assert isinstance(provider, FakeLLMProvider)
+    assert any(
+        entry["event"] == "llm_rate_limit_degraded" and entry["reason"] == "connect"
+        for entry in logs
+    )
+
+
+def test_cache_connect_failure_preserves_rate_limit_wrapper(monkeypatch) -> None:
+    rate_limit_redis = FakeStrictRedis()
+
+    class UnavailableRedis:
+        def ping(self) -> None:
+            raise RedisConnectionError("redis unavailable")
+
+    clients = iter([rate_limit_redis, UnavailableRedis()])
+    monkeypatch.setattr(settings, "llm_provider", "fake")
+    monkeypatch.setattr(settings, "enable_llm_cache", True)
+    monkeypatch.setattr(settings, "enable_llm_rate_limit", True)
+    monkeypatch.setattr(redis.Redis, "from_url", lambda *args, **kwargs: next(clients))
+
+    with capture_logs() as logs:
+        provider = get_llm_provider()
+
+    assert isinstance(provider, RateLimitedLLMProvider)
+    assert any(entry["event"] == "llm_cache_degraded" for entry in logs)
 
 
 def test_fake_provider_returns_deterministic_json_for_agent_prompts() -> None:
