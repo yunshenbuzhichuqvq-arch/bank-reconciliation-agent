@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     async_queue_enabled: bool = False
     enable_llm_cache: bool = False
     llm_cache_ttl_seconds: int = 604800
+    enable_llm_rate_limit: bool = False
+    llm_rate_limit_rpm: int = 60
+    llm_rate_limit_max_concurrency: int = 8
+    llm_rate_limit_max_wait_seconds: float = 10.0
+    llm_rate_limit_window_seconds: int = 60
     job_idempotency_ttl_seconds: int = 3600
     decision_regression_runs: int = 10
     max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
