@@ -249,20 +249,41 @@ def get_llm_provider() -> LLMProvider:
     else:
         raise LLMUnavailable(f"Unsupported LLM provider: {settings.llm_provider}")
 
+    provider = base_provider
+    if settings.enable_llm_rate_limit:
+        try:
+            rate_limit_redis = redis.Redis.from_url(settings.redis_dsn)
+            rate_limit_redis.ping()
+        except RedisError:
+            log.warning("llm_rate_limit_degraded", reason="connect")
+        else:
+            from bank_reconciliation_agent.core.llm.rate_limit import (
+                RateLimitedLLMProvider,
+            )
+
+            provider = RateLimitedLLMProvider(
+                provider,
+                rate_limit_redis,
+                rpm=settings.llm_rate_limit_rpm,
+                max_concurrency=settings.llm_rate_limit_max_concurrency,
+                max_wait_seconds=settings.llm_rate_limit_max_wait_seconds,
+                window_seconds=settings.llm_rate_limit_window_seconds,
+            )
+
     if not settings.enable_llm_cache:
-        return base_provider
+        return provider
 
     try:
-        redis_client = redis.Redis.from_url(settings.redis_dsn)
-        redis_client.ping()
+        cache_redis = redis.Redis.from_url(settings.redis_dsn)
+        cache_redis.ping()
     except RedisError:
         log.warning("llm_cache_degraded", reason="connect")
-        return base_provider
+        return provider
 
     from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
 
     return CachingLLMProvider(
-        base_provider,
-        redis_client,
+        provider,
+        cache_redis,
         ttl_seconds=settings.llm_cache_ttl_seconds,
     )
