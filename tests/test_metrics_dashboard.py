@@ -10,6 +10,7 @@ from sqlalchemy import delete, insert
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
 from bank_reconciliation_agent.core.llm.cost import compute_cost
+from bank_reconciliation_agent.core.llm.rate_limit import RateLimitedLLMProvider
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.ledger import error_ledger_table
 from bank_reconciliation_agent.services.metrics import MetricsService, metrics_service
@@ -53,6 +54,34 @@ def test_llm_cache_metrics_returns_honest_zeroes_without_runtime_data(monkeypatc
     }
 
 
+def test_llm_rate_limit_metrics_exposes_runtime_activity(monkeypatch) -> None:
+    _reset_llm_rate_limit_metrics(monkeypatch)
+    monkeypatch.setattr(RateLimitedLLMProvider, "_waits", 3)
+    monkeypatch.setattr(RateLimitedLLMProvider, "_wait_seconds_total", 1.25)
+    monkeypatch.setattr(RateLimitedLLMProvider, "_rejections", 2)
+    monkeypatch.setattr(RateLimitedLLMProvider, "_degraded", 1)
+
+    assert MetricsService().get_llm_rate_limit_metrics() == {
+        "source": "runtime_memory",
+        "waits": 3,
+        "wait_seconds_total": 1.25,
+        "rejections": 2,
+        "degraded": 1,
+    }
+
+
+def test_llm_rate_limit_metrics_returns_honest_zeroes(monkeypatch) -> None:
+    _reset_llm_rate_limit_metrics(monkeypatch)
+
+    assert MetricsService().get_llm_rate_limit_metrics() == {
+        "source": "runtime_memory",
+        "waits": 0,
+        "wait_seconds_total": 0.0,
+        "rejections": 0,
+        "degraded": 0,
+    }
+
+
 class _MetricsCountingProvider:
     model = "metrics-test"
 
@@ -85,6 +114,13 @@ def _reset_llm_cache_metrics(monkeypatch) -> None:
     monkeypatch.setattr(CachingLLMProvider, "_misses", 0)
     monkeypatch.setattr(CachingLLMProvider, "_saved_prompt_tokens", 0)
     monkeypatch.setattr(CachingLLMProvider, "_saved_completion_tokens", 0)
+
+
+def _reset_llm_rate_limit_metrics(monkeypatch) -> None:
+    monkeypatch.setattr(RateLimitedLLMProvider, "_waits", 0)
+    monkeypatch.setattr(RateLimitedLLMProvider, "_wait_seconds_total", 0.0)
+    monkeypatch.setattr(RateLimitedLLMProvider, "_rejections", 0)
+    monkeypatch.setattr(RateLimitedLLMProvider, "_degraded", 0)
 
 
 def test_dashboard_metrics_aggregates_online_rows_for_current_user(tmp_path: Path, monkeypatch) -> None:
