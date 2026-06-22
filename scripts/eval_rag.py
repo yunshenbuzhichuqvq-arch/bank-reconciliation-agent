@@ -68,7 +68,6 @@ class LegacyCaseResult:
     representative_score: float | None
     reranker_score: float | None
     hit: bool
-    triggers_l1_to_l2: bool
 
 
 @dataclass(frozen=True)
@@ -86,14 +85,6 @@ class LegacyEvalSummary:
         if not scores:
             return 0.0
         return sum(scores) / len(scores)
-
-    @property
-    def l1_to_l2_trigger_rate(self) -> float:
-        if not self.case_results:
-            return 0.0
-        triggered = sum(result.triggers_l1_to_l2 for result in self.case_results)
-        return triggered / len(self.case_results)
-
 
 SMOKE_CASES = [
     SmokeCase(query="金额差异 对账不平 银行端 清算端 金额", expected_tag="amount_mismatch"),
@@ -328,7 +319,6 @@ def _evaluate_smoke_case(retriever: RuleRetriever, case: SmokeCase, *, mode: str
         representative_score=score,
         reranker_score=matched_item.reranker_score if matched_item is not None else None,
         hit=matched_item is not None,
-        triggers_l1_to_l2=score is None or score < settings.rag_low_score,
     )
 
 
@@ -354,11 +344,11 @@ def _find_hit(items: list[RagSearchItem], *, expected_tag: str) -> RagSearchItem
 
 
 def _print_legacy_report(dense_summary: LegacyEvalSummary, hybrid_summary: LegacyEvalSummary) -> None:
-    print("mode\thit_count\tcase_count\tavg_reranker_score\tl1_to_l2_trigger_rate")
+    print("mode\thit_count\tcase_count\tavg_reranker_score")
     for summary in (dense_summary, hybrid_summary):
         print(
             f"{summary.mode}\t{summary.hit_count}\t{len(summary.case_results)}\t"
-            f"{summary.average_reranker_score:.4f}\t{summary.l1_to_l2_trigger_rate:.4f}"
+            f"{summary.average_reranker_score:.4f}"
         )
 
     print("")

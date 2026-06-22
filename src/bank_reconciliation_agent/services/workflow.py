@@ -202,7 +202,7 @@ def run_item(
     elif not rag_items:
         audit_decision = mark_fallback(audit_decision, fallback_level=0, next_action="PENDING_HUMAN")
         fallback_path = "HUMAN"
-    elif l1_requires_l2(audit_decision, rag_items):
+    elif l1_requires_l2(audit_decision):
         fallback_path = "L1->L2"
         state["fallback_cases"] = fallback_case_provider.confirmed_cases(
             user_id=state["user_id"],
