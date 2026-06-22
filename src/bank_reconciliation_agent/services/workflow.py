@@ -516,7 +516,7 @@ def _retrieve_rag_response(
     request = RagSearchRequest(
         query=query,
         top_k=settings.rag_rerank_top_k,
-        min_score=0.0,
+        min_score=settings.rag_dense_min_score,
         scenario_type=state["scenario_type"],
         enable_rewrite=settings.enable_rag_rewrite,
         enable_hybrid=settings.enable_rag_hybrid,

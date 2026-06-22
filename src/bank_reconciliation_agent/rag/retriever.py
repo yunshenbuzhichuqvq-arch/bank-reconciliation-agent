@@ -381,7 +381,7 @@ def _passes_threshold(
     if reranker_enabled:
         return (hit.reranker_score or 0.0) >= max(threshold, settings.rag_reranker_min_score)
     if hit.dense_score is not None:
-        return hit.dense_score > threshold
+        return hit.dense_score >= threshold
     return hit.fusion_score > threshold
 
 
