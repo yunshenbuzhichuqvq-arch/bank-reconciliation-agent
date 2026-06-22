@@ -19,3 +19,6 @@ reports/rag_eval_metrics.json
 /spec.md
 /tasks.md
 /PR.md
+/architecture-lite.md
+/optimize_prompt.md
+/prd-lite.md
