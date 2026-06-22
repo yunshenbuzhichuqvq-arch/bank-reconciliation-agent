@@ -31,10 +31,9 @@ def test_decode_token_rejects_expired_token() -> None:
 
 def test_decode_token_rejects_tampered_token() -> None:
     token = create_access_token("demo_user")
-    replacement = "a" if token[-1] != "a" else "b"
 
     with pytest.raises(jwt.InvalidTokenError):
-        decode_token(f"{token[:-1]}{replacement}")
+        decode_token(f"{token}x")
 
 
 def test_password_hash_verification() -> None:

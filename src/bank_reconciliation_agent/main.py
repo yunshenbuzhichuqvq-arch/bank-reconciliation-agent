@@ -14,7 +14,7 @@ from bank_reconciliation_agent.db.session import get_engine
 
 def create_app() -> FastAPI:
     configure_logging()
-    if settings.jwt_secret_key == "dev-insecure-secret-change-me":
+    if settings.jwt_secret_key == "dev-insecure-secret-change-me-please-set-env":
         log.warning("default_jwt_secret_in_use")
     if settings.demo_user_password == "demo12345":
         log.warning("default_demo_user_password_in_use")

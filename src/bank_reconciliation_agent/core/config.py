@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "Bank Reconciliation Agent"
     app_env: str = "local"
     api_v1_prefix: str = "/api/v1"
-    jwt_secret_key: str = "dev-insecure-secret-change-me"
+    jwt_secret_key: str = "dev-insecure-secret-change-me-please-set-env"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 720
     demo_user_password: str = "demo12345"
