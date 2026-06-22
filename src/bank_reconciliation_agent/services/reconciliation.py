@@ -362,9 +362,12 @@ class ReconciliationService:
         ]
 
     def _to_match_result(self, result: BranchResult) -> ReconciliationMatchResult:
+        status = "AUTO_FIXED" if result.action == "AUTO_FIX" else "PENDING_HUMAN"
+        if result.error_type == "FUZZY_MATCH_CANDIDATE":
+            status = "PENDING_AI"
         return ReconciliationMatchResult(
             flow_id=result.flow_id,
-            status="AUTO_FIXED" if result.action == "AUTO_FIX" else "PENDING_HUMAN",
+            status=status,
             error_type=result.error_type,
             exception_branch=result.exception_branch,
             bank_amount=result.bank_amount,
