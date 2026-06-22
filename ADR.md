@@ -130,12 +130,15 @@
   - Cons:削弱「无据不判定」核心护栏(§3.3),与本 stage 初衷相悖。**不推荐**。
 
 ### Decision
-采用 **B**(用户拍板):RAG 分数只判「有没有据」—— retriever 工作流主链路 `min_score` 接回 `rag_dense_min_score`(0.5),低于地板的 hit 被过滤;过滤后为空 → 现有 `not rag_items` 路径 → `PENDING_HUMAN`(§6.7,不触发 fallback)。L2 fallback 触发改为**仅 `confidence < CONFIDENCE_THRESHOLD(0.85)`** —— 即从 `l1_requires_l2` 移除 `best_rag_score < rag_low_score` 分支。此举**修订 ADR-013**:其 `l1_requires_l2` 的「RAG 低分触发 L2」语义部分 superseded(fallback 状态机结构与 L2/L3 链不变,仅触发条件由「分数+置信」收敛为「置信」)。`best_rag_score` 因此 orphan,随之删除;`rag_low_score` 在 `scripts/eval_rag.py` 的 `triggers_l1_to_l2` 口径同步更新。retriever 调试 API(`/rag/search`)保留传 `min_score=0` 看全部的能力,仅工作流主链路用配置阈值。阈值比较对齐 §6.7「<0.5 无据」语义(即 `>=` 地板)。
+采用 **B**(用户拍板):RAG 分数只判「有没有据」—— retriever 工作流主链路 `min_score` 接回 `rag_dense_min_score`(0.5),低于地板的 hit 被过滤;过滤后为空 → 现有 `not rag_items` 路径 → `PENDING_HUMAN`(§6.7,不触发 fallback)。L2 fallback 触发改为**仅 `confidence < CONFIDENCE_THRESHOLD(0.85)`** —— 即从 `l1_requires_l2` 移除 `best_rag_score < rag_low_score` 分支。此举**修订 ADR-013**:其 `l1_requires_l2` 的「RAG 低分触发 L2」语义部分 superseded(fallback 状态机结构与 L2/L3 链不变,仅触发条件由「分数+置信」收敛为「置信」)。`best_rag_score` 因此 orphan,随之删除;`rag_low_score` 在 `scripts/eval_rag.py` 的 `triggers_l1_to_l2` 口径同步更新。retriever 调试 API(`/rag/search`)保留传 `min_score=0` 看全部的能力,仅工作流主链路用配置阈值。阈值比较对齐 §6.7「<地板 无据」语义(即 `>=` 地板)。
+
+**地板值校准(2026-06-22 修订,实测驱动)**:实测 hash 占位嵌入(`HashEmbeddingFunction`)下**正确命中规则分数仅 0.35–0.43、正交基线≈0.33**,架构 §6.7 的 0.5 是**真实语义嵌入口径**,直接套用会误杀全部有据、使主链路一概转人工(SSE `_has_readable_decision_and_evidence` 断言已正确暴露该退化)。故 `rag_dense_min_score` 默认值由 0.5 **校准**到 hash 嵌入实际判别值(有据最低分与正交基线之间,约 0.34,RH.6 评测兜底),0.5 留作真实嵌入参考。**不改 SSE 断言**(校准后有据场景 evidence 非空自然通过;改断言去接受空 evidence 等于掩盖「全转人工」退化,已否决)。
 
 ### Consequences
-- 负向(B):触及 ADR-007/013 的 fallback 触发逻辑,属跨 ADR 演进,须 superseded 标注 + 全量回归;选 A 则多一个需校准的阈值。
-- 正向:「无据不判定」在默认基础 RAG 路径真正生效,低据场景转人工而非拿弱证据硬判;`representative_score`/`best_rag_score` 语义(ADR-013)与 §6.7 边界被显式厘清,消除静默冲突。
-- 阈值有效性以 ADR-RH.6 的评测兜底。
+- 负向:触及 ADR-007/013 的 fallback 触发逻辑,属跨 ADR 演进,须 superseded 标注 + 全量回归。
+- 负向(嵌入局限,实测暴露):hash 占位嵌入(MVP-0 避免下载模型的实现)无语义、分数压在 0.33–0.43 窄带,「无据地板」区分度有限,只能挡近正交的完全无关,无法干净区分「弱相关」与「无关」。**完整语义级「无据不判定」依赖真实嵌入(增强 RAG,ADR-009 默认关)**;本 stage 在默认基础 RAG 上做到「接回机制 + 校准地板挡完全无关 + 评测兜底」,并诚实记录此边界。
+- 正向:「无据不判定」在默认路径从「形同虚设(min_score=0,hash 伪嵌入几乎总返回非零分)」恢复为「挡完全无关」;§6.7 与 ADR-007/013 的低分语义冲突被显式厘清。
+- 阈值有效性与校准值以 ADR-RH.6 评测兜底。
 
 ---
 
