@@ -76,6 +76,7 @@ class ReconciliationMatchResult(NamedTuple):
     clear_amount: Decimal | None
     amount_diff: Decimal | None
     t1_candidate: dict[str, str] | None = None
+    fuzzy_candidate: dict[str, str] | None = None
 
 
 class ReconciliationWriteBundle(NamedTuple):
@@ -374,6 +375,7 @@ class ReconciliationService:
             clear_amount=result.clear_amount,
             amount_diff=result.amount_diff,
             t1_candidate=result.t1_candidate,
+            fuzzy_candidate=result.fuzzy_candidate,
         )
 
     def _summarize_match_results(
@@ -963,6 +965,7 @@ class ReconciliationService:
             "stream_seq": stream_seq_start,
             "rag_query": rag_query,
             "t1_candidate": result.t1_candidate,
+            "fuzzy_candidate": result.fuzzy_candidate,
         }
         if emitter is None:
             return run_item(state)
@@ -1027,6 +1030,7 @@ class ReconciliationService:
             ],
             "fallback_path": "AI_ERROR->HUMAN",
             "t1_candidate": result.t1_candidate,
+            "fuzzy_candidate": result.fuzzy_candidate,
         }
 
     def _ledger_discrepancy_amount(self, result: ReconciliationMatchResult) -> Decimal:

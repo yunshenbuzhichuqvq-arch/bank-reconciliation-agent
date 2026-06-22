@@ -64,6 +64,7 @@ class ReconciliationState(TypedDict):
     fallback_path: NotRequired[str]
     fallback_cases: NotRequired[list[dict[str, Any]]]
     t1_candidate: NotRequired[dict[str, str] | None]
+    fuzzy_candidate: NotRequired[dict[str, str] | None]
     long_term_memory: NotRequired[list[dict[str, Any]]]
     short_term_memory: NotRequired[list[dict[str, Any]]]
     summary_buffer: NotRequired[dict[str, Any] | None]
@@ -158,6 +159,14 @@ def run_item(
         emitter,
         StreamEventType.RAG_RETRIEVED,
     )
+
+    if state.get("error_type") == "FUZZY_MATCH_CANDIDATE":
+        return _run_fuzzy_candidate_confirmation(
+            state=state,
+            audit_agent=audit_agent,
+            rag_items=rag_items,
+            emitter=emitter,
+        )
 
     audit_kwargs = {
         "flow_id": flow_id,
@@ -304,6 +313,119 @@ def run_item(
     state["fallback_level"] = audit_decision.fallback_level
     state["fallback_path"] = fallback_path
     _apply_post_hooks(state, audit_decision, emitter)
+    _emit_stream_row(
+        state,
+        {
+            "agent_name": "Workflow",
+            "step": "item_done",
+            "flow_id": flow_id,
+            "status": state["next_action"],
+            "decision": state["audit_decision"]["decision"],
+            "confidence": state["audit_decision"]["confidence"],
+        },
+        emitter,
+        StreamEventType.ITEM_DONE,
+    )
+    return state
+
+
+def _run_fuzzy_candidate_confirmation(
+    *,
+    state: ReconciliationState,
+    audit_agent: AuditAgent,
+    rag_items: list[RagSearchItem],
+    emitter: StreamEmitter,
+) -> ReconciliationState:
+    flow_id = _flow_id(state)
+    math_result = state.get("math_result", {})
+    candidate = state.get("fuzzy_candidate") or {}
+    audit_kwargs = {
+        "flow_id": flow_id,
+        "error_type": "FUZZY_MATCH_CANDIDATE",
+        "exception_branch": "BE-R007",
+        "bank_amount": _optional_string(math_result.get("bank_amount")),
+        "clear_amount": _optional_string(math_result.get("clear_amount")),
+        "amount_diff": _optional_string(math_result.get("amount_diff")),
+        "evidence": rag_items,
+        "match_candidate_context": candidate,
+    }
+    decision = _audit_with_schema_retry(
+        state=state,
+        audit_agent=audit_agent,
+        audit_kwargs=audit_kwargs,
+        emitter=emitter,
+    )
+    _append_agent_log(state, {
+        "agent_name": "AuditAgent",
+        "step": "confirm_match",
+        "flow_id": flow_id,
+        "fallback_level": 0,
+        "output_payload": decision.model_dump(mode="json"),
+        "prompt_version": getattr(audit_agent, "prompt_version", None),
+        **_llm_usage(audit_agent),
+    }, emitter)
+
+    current_amount = _to_decimal(math_result.get("bank_amount")) or _to_decimal(
+        math_result.get("clear_amount")
+    )
+    candidate_amount = _to_decimal(candidate.get("amount"))
+    fallback_path = "L1"
+    if not rag_items or confidence_is_low(decision.confidence):
+        decision.decision = "PENDING_HUMAN"
+        decision.ai_suggestion = "PENDING_HUMAN"
+        decision.next_action = "PENDING_HUMAN"
+        decision.fallback_level = 0
+        fallback_path = "HUMAN"
+    elif decision.decision == "AUTO_FIXED" and current_amount != candidate_amount:
+        state["error_type"] = "AMOUNT_MISMATCH"
+        state["exception_branch"] = "BE-R002"
+        difference = None
+        if current_amount is not None and candidate_amount is not None:
+            difference = abs(current_amount - candidate_amount)
+        state["math_result"] = {
+            "bank_amount": _optional_string(current_amount),
+            "clear_amount": _optional_string(candidate_amount),
+            "amount_diff": _optional_string(difference),
+        }
+        decision = _audit_with_schema_retry(
+            state=state,
+            audit_agent=audit_agent,
+            audit_kwargs={
+                "flow_id": flow_id,
+                "error_type": "AMOUNT_MISMATCH",
+                "exception_branch": "BE-R002",
+                "bank_amount": _optional_string(current_amount),
+                "clear_amount": _optional_string(candidate_amount),
+                "amount_diff": _optional_string(difference),
+                "evidence": rag_items,
+            },
+            emitter=emitter,
+        )
+        _append_agent_log(state, {
+            "agent_name": "AuditAgent",
+            "step": "decide_with_llm",
+            "flow_id": flow_id,
+            "fallback_level": 0,
+            "output_payload": decision.model_dump(mode="json"),
+            "prompt_version": getattr(audit_agent, "prompt_version", None),
+            **_llm_usage(audit_agent),
+        }, emitter)
+    elif decision.decision == "UNRESOLVED":
+        if math_result.get("bank_amount") is not None:
+            state["error_type"] = "BOOK_UNRECORDED"
+            state["exception_branch"] = "BE-R006"
+        else:
+            state["error_type"] = "BANK_UNARRIVED"
+            state["exception_branch"] = "BE-R005"
+        decision.decision = "PENDING_HUMAN"
+        decision.ai_suggestion = "PENDING_HUMAN"
+        decision.next_action = "PENDING_HUMAN"
+
+    state["audit_decision"] = decision.model_dump(mode="json")
+    state["confidence"] = decision.confidence
+    state["fallback_level"] = decision.fallback_level
+    state["fallback_path"] = fallback_path
+    _apply_post_hooks(state, decision, emitter)
     _emit_stream_row(
         state,
         {
