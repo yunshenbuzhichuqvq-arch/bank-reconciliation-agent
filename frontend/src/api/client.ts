@@ -1,30 +1,42 @@
 import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 
+import { clearToken, getToken } from "../composables/useAuth";
+
 export interface ApiResponse<T>{ code:number; message:string; data:T|null; error_code:string|null }
 export interface ApiError{ status:number; message:string; detail?:unknown }
-
-const DEFAULT_HEADERS = { "X-User-ID": "demo_user" };
+export interface TokenData{ access_token:string; token_type:string; username:string }
 
 const http = axios.create({
   baseURL: "/api/v1",
-  headers: DEFAULT_HEADERS,
 });
 
 http.interceptors.request.use((config) => {
   config.headers = config.headers ?? {};
-  config.headers["X-User-ID"] = DEFAULT_HEADERS["X-User-ID"];
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   return config;
 });
 
 http.interceptors.response.use(
   (response) => response.data.data,
   (error: AxiosError) => {
+    if (error.response?.status === 401 && error.config?.url !== "/auth/login") {
+      clearToken();
+      void import("../router").then(({ router }) => router.push("/login"));
+    }
     throw normalizeError(error);
   },
 );
 
 export function getDefaultHeaders(): Record<string, string> {
-  return { ...DEFAULT_HEADERS };
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export function login(username: string, password: string): Promise<TokenData> {
+  return apiPost<TokenData>("/auth/login", { username, password });
 }
 
 export function apiGet<T>(url:string, params?:Record<string,unknown>):Promise<T> {

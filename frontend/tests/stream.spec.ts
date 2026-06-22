@@ -2,6 +2,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { streamReconcile } from "../src/api/stream";
 import type { AgentStreamEvent } from "../src/types/api";
+import { setToken } from "../src/composables/useAuth";
+
+const localStorage = createStorage();
+
+Object.defineProperty(window, "localStorage", { configurable: true, value: localStorage });
+
+function createStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value),
+  };
+}
 
 function event(event_type: AgentStreamEvent["event_type"], seq: number): AgentStreamEvent {
   return {
@@ -52,6 +69,7 @@ function params() {
 describe("streamReconcile", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
   });
 
   it("parses a single SSE frame split across two chunks", async () => {
@@ -101,7 +119,8 @@ describe("streamReconcile", () => {
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
   });
 
-  it("sends stream form fields with default user header", async () => {
+  it("sends stream form fields with the Bearer token", async () => {
+    setToken("signed-token");
     const fetchMock = vi.fn(async () => new Response(streamFrom([])));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -110,7 +129,7 @@ describe("streamReconcile", () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const form = init.body as FormData;
     expect(url).toBe("/api/v1/reconcile/stream");
-    expect(init.headers).toMatchObject({ "X-User-ID": "demo_user" });
+    expect(init.headers).toMatchObject({ Authorization: "Bearer signed-token" });
     expect(form.get("bank_file")).toBeInstanceOf(File);
     expect(form.get("clear_file")).toBeInstanceOf(File);
     expect(form.get("scenario_type")).toBe("BANK_ENTERPRISE");
