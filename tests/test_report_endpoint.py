@@ -9,10 +9,11 @@ from bank_reconciliation_agent.services.ledger import error_ledger_table
 from bank_reconciliation_agent.services.rag_log import rag_retrieval_log_table
 from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def test_report_endpoint_returns_task_report_with_real_metrics() -> None:
@@ -37,11 +38,11 @@ def test_report_endpoint_returns_task_report_with_real_metrics() -> None:
     assert "差异金额合计：5.25" in body["data"]["markdown"]
 
 
-def test_report_endpoint_requires_user_header() -> None:
+def test_report_endpoint_requires_bearer_token() -> None:
     response = client.get("/api/v1/reconcile/TASK_REPORT/report")
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "X-User-ID header is required"
+    assert response.json()["detail"] == "Bearer token is required"
 
 
 def test_report_endpoint_returns_404_for_task_owned_by_other_user() -> None:

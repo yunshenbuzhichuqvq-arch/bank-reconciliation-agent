@@ -5,15 +5,21 @@ import uuid
 from fastapi import FastAPI, Request
 from sqlalchemy import text
 
+from bank_reconciliation_agent.api.v1.auth import router as auth_router
 from bank_reconciliation_agent.api.v1.router import api_router
 from bank_reconciliation_agent.core.config import settings
-from bank_reconciliation_agent.core.logging import configure_logging
+from bank_reconciliation_agent.core.logging import configure_logging, log
 from bank_reconciliation_agent.db.session import get_engine
 
 
 def create_app() -> FastAPI:
     configure_logging()
+    if settings.jwt_secret_key == "dev-insecure-secret-change-me-please-set-env":
+        log.warning("default_jwt_secret_in_use")
+    if settings.demo_user_password == "demo12345":
+        log.warning("default_demo_user_password_in_use")
     app = FastAPI(title=settings.app_name)
+    app.include_router(auth_router, prefix=settings.api_v1_prefix)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
     @app.middleware("http")

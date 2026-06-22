@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { Moon, Sunny } from "@element-plus/icons-vue";
-import { useRoute } from "vue-router";
+import { Moon, Sunny, SwitchButton } from "@element-plus/icons-vue";
+import { computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
+import { clearToken, currentUsername } from "../composables/useAuth";
 import { useTheme } from "../composables/useTheme";
 import BaseButton from "./ui/BaseButton.vue";
 
 const route = useRoute();
+const router = useRouter();
 const { isDark, toggleTheme } = useTheme();
+const username = computed(() => {
+  route.path;
+  return currentUsername() ?? "未登录";
+});
+
+function logout(): void {
+  clearToken();
+  void router.push("/login");
+}
 
 const navItems = [
   { label: "上传对账单", to: "/upload" },
@@ -19,7 +31,10 @@ const navItems = [
 </script>
 
 <template>
-  <div class="app-shell">
+  <div v-if="route.path === '/login'" class="app-shell__login">
+    <slot />
+  </div>
+  <div v-else class="app-shell">
     <aside class="app-shell__sidebar">
       <div class="app-shell__brand">
         <span class="app-shell__brand-mark">账</span>
@@ -44,13 +59,17 @@ const navItems = [
 
     <div class="app-shell__main">
       <div class="app-shell__topbar">
-        <span class="app-shell__context">X-User-ID: demo_user</span>
+        <span class="app-shell__context">当前用户 / {{ username }}</span>
         <BaseButton variant="ghost" size="sm" @click="toggleTheme">
           <el-icon aria-hidden="true">
             <Moon v-if="!isDark" />
             <Sunny v-else />
           </el-icon>
           {{ isDark ? "浅色" : "深色" }}
+        </BaseButton>
+        <BaseButton variant="ghost" size="sm" @click="logout">
+          <el-icon aria-hidden="true"><SwitchButton /></el-icon>
+          退出
         </BaseButton>
       </div>
 
@@ -65,6 +84,10 @@ const navItems = [
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.app-shell__login {
   min-height: 100vh;
 }
 

@@ -12,6 +12,7 @@ from bank_reconciliation_agent.services.reconciliation import (
 )
 from bank_reconciliation_agent.services.task import task_service
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
@@ -113,7 +114,7 @@ def test_write_ledger_entries_persists_hybrid_fields_from_rag_response(monkeypat
 def test_rag_search_api_accepts_new_request_fields_and_returns_hybrid_fields() -> None:
     response = client.post(
         "/api/v1/rag/search",
-        headers={"X-User-ID": "demo_user"},
+        headers=demo_bearer_headers(),
         json={
             "query": "金额差异 对账不平",
             "top_k": 3,

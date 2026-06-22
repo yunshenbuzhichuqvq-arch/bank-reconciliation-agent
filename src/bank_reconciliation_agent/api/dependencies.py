@@ -1,22 +1,31 @@
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request
+from jwt import InvalidTokenError
+
+from bank_reconciliation_agent.core.security import decode_token
 
 
-DEMO_USER_ID = "demo_user"
-
-
-def require_demo_user(
+def verify_jwt(
     request: Request,
-    x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> str:
-    """MVP-0 演示鉴权：所有业务 API 必须携带固定演示用户。"""
-    if x_user_id is None:
-        raise HTTPException(status_code=401, detail="X-User-ID header is required")
-    if x_user_id != DEMO_USER_ID:
-        raise HTTPException(status_code=403, detail="invalid X-User-ID")
-    request.state.user_id = x_user_id
-    return x_user_id
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="Bearer token is required")
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+    try:
+        sub = decode_token(token).get("sub")
+    except InvalidTokenError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+    request.state.user_id = sub
+    return sub
 
 
 def get_current_user_id(request: Request) -> str:

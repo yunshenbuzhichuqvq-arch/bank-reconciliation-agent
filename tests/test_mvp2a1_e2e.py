@@ -7,10 +7,11 @@ from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService
 from scripts.generate_mock_excel import EXPECTED_BRANCHES, generate_mvp1_mock_excel
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def test_mvp2a1_upload_to_ledger_covers_five_bank_enterprise_branches(

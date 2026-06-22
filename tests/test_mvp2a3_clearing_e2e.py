@@ -14,10 +14,11 @@ from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
     generate_mvp2a3_mock_excel,
 )
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def test_mvp2a3_bank_clearing_upload_start_and_exceptions_match_expected_branches(
