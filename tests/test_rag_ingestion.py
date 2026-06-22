@@ -7,6 +7,7 @@ from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.rag.retriever import RuleRetriever
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest
 from scripts.build_rule_chunks import build_rule_chunks, build_sources_manifest
+from tests.auth_helpers import demo_bearer_headers
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,7 +107,7 @@ def test_rag_search_api_returns_traceable_rule_chunks() -> None:
 
     response = client.post(
         "/api/v1/rag/search",
-        headers={"X-User-ID": "demo_user"},
+        headers=demo_bearer_headers(),
         json={"query": "单边缺失 查询查复", "top_k": 3},
     )
 

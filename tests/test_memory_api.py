@@ -8,10 +8,11 @@ from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.memory.long_term import LongTermMemoryService
 from bank_reconciliation_agent.services.memory.short_term import ShortTermMemoryService
 from bank_reconciliation_agent.services.memory.summary import SummaryMemoryService
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def test_get_memory_context_returns_aggregated_layers() -> None:

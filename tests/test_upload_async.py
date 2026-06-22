@@ -8,10 +8,11 @@ from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.task import task_service
 from scripts.generate_mock_excel import generate_mvp1_mock_excel
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def _post_upload_async(bank_path: Path, clear_path: Path, *, headers: dict[str, str]):
@@ -64,7 +65,7 @@ def test_upload_async_enforces_authentication(tmp_path: Path) -> None:
     bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
 
     missing = _post_upload_async(bank_path, clear_path, headers={})
-    invalid = _post_upload_async(bank_path, clear_path, headers={"X-User-ID": "other_user"})
+    invalid = _post_upload_async(bank_path, clear_path, headers={"Authorization": "Bearer invalid"})
 
     assert missing.status_code == 401
-    assert invalid.status_code == 403
+    assert invalid.status_code == 401

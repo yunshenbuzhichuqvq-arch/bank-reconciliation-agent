@@ -1,41 +1,82 @@
 import logging
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
+import jwt
 from fastapi.testclient import TestClient
 
 from bank_reconciliation_agent.core.config import settings
-from bank_reconciliation_agent.core.security import decode_token
-from bank_reconciliation_agent.main import app
+from bank_reconciliation_agent.core.security import create_access_token, decode_token
+from bank_reconciliation_agent.main import app, create_app
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
 
 
-def test_api_v1_requires_user_id_header() -> None:
+def test_api_v1_requires_bearer_token() -> None:
     response = client.post("/api/v1/rag/search", json={"query": "金额差异", "top_k": 1})
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "X-User-ID header is required"
 
 
-def test_api_v1_rejects_non_demo_user() -> None:
+def test_api_v1_rejects_non_bearer_authorization() -> None:
     response = client.post(
         "/api/v1/rag/search",
-        headers={"X-User-ID": "other_user"},
+        headers={"Authorization": "Basic credentials"},
         json={"query": "金额差异", "top_k": 1},
     )
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "invalid X-User-ID"
+    assert response.status_code == 401
 
 
-def test_api_v1_accepts_demo_user_header() -> None:
+def test_api_v1_rejects_expired_token() -> None:
+    token = jwt.encode(
+        {"sub": "demo_user", "exp": datetime.now(UTC) - timedelta(seconds=1)},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
     response = client.post(
         "/api/v1/rag/search",
-        headers={"X-User-ID": "demo_user"},
+        headers={"Authorization": f"Bearer {token}"},
+        json={"query": "金额差异", "top_k": 1},
+    )
+
+    assert response.status_code == 401
+
+
+def test_api_v1_rejects_tampered_token() -> None:
+    token = create_access_token("demo_user")
+    response = client.post(
+        "/api/v1/rag/search",
+        headers={"Authorization": f"Bearer {token}tampered"},
+        json={"query": "金额差异", "top_k": 1},
+    )
+
+    assert response.status_code == 401
+
+
+def test_api_v1_accepts_valid_bearer_token() -> None:
+    response = client.post(
+        "/api/v1/rag/search",
+        headers=demo_bearer_headers(),
         json={"query": "金额差异", "top_k": 1},
     )
 
     assert response.status_code == 200
+
+
+def test_health_does_not_require_token() -> None:
+    response = client.get("/health")
+
+    assert response.status_code == 200
+
+
+def test_create_app_warns_for_default_credentials() -> None:
+    with patch("bank_reconciliation_agent.main.log.warning") as warning:
+        create_app()
+
+    assert warning.call_count == 2
 
 
 def test_login_without_auth_header_returns_decodable_token() -> None:

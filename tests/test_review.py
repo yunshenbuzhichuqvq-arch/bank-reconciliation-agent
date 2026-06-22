@@ -20,10 +20,11 @@ from bank_reconciliation_agent.services.review_graph import get_review_graph
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 from bank_reconciliation_agent.core.config import settings
 from scripts.generate_mock_excel import generate_mvp1_mock_excel
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def _upload_task(tmp_path: Path) -> str:

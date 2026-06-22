@@ -13,10 +13,11 @@ from bank_reconciliation_agent.services.agent_log import (
 )
 from bank_reconciliation_agent.services.trace import trace_writer
 from scripts.generate_mock_excel import EXPECTED_BRANCHES, generate_mvp1_mock_excel
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def _upload_task(tmp_path: Path) -> str:

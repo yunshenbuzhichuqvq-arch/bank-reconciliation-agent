@@ -13,10 +13,11 @@ from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEve
 from bank_reconciliation_agent.services.live_registry import get_emitter, register, unregister
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.task import task_service
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def test_start_live_endpoint_starts_background_driver() -> None:

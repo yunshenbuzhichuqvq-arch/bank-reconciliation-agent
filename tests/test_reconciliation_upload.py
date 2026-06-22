@@ -34,10 +34,11 @@ from scripts.generate_mock_excel import (
     generate_mock_excel,
     generate_mvp1_mock_excel,
 )
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def _cost_test_result(flow_id: str) -> ReconciliationMatchResult:

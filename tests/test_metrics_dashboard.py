@@ -16,6 +16,7 @@ from bank_reconciliation_agent.services.ledger import error_ledger_table
 from bank_reconciliation_agent.services.metrics import MetricsService, metrics_service
 from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
@@ -182,7 +183,7 @@ def test_dashboard_metrics_aggregates_online_rows_for_current_user(tmp_path: Pat
     _insert_review(user_id="demo_user", task_id="TASK_METRICS_A", queue_id=1)
     _insert_review(user_id="other_user", task_id="TASK_OTHER", queue_id=2)
 
-    response = client.get("/api/v1/metrics/dashboard", headers={"X-User-ID": "demo_user"})
+    response = client.get("/api/v1/metrics/dashboard", headers=demo_bearer_headers())
 
     assert response.status_code == 200
     body = response.json()["data"]
@@ -226,7 +227,7 @@ def test_dashboard_metrics_filters_other_users_and_handles_empty_data() -> None:
         ai_confidence=Decimal("0.9900"),
     )
 
-    response = client.get("/api/v1/metrics/dashboard", headers={"X-User-ID": "demo_user"})
+    response = client.get("/api/v1/metrics/dashboard", headers=demo_bearer_headers())
 
     assert response.status_code == 200
     assert response.json()["data"]["online"] == {

@@ -19,10 +19,11 @@ from scripts.generate_mock_excel import (
     generate_mvp1_mock_excel,
     generate_mvp2a3_mock_excel,
 )
+from tests.auth_helpers import demo_bearer_headers
 
 
 client = TestClient(app)
-DEMO_HEADERS = {"X-User-ID": "demo_user"}
+DEMO_HEADERS = demo_bearer_headers()
 
 
 def test_mvp2b1_bank_enterprise_e2e_keeps_baseline_and_exposes_hook_results(
