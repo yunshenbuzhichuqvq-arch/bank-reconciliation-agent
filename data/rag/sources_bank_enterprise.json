@@ -1,5 +1,17 @@
 [
   {
+    "source_id": "bank_enterprise_amount_mismatch_advanced",
+    "source_name": "银企对账金额差异进阶与边界场景（演示）",
+    "source_url": "https://example.com/bank-enterprise/amount-mismatch-advanced",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_amount_mismatch_advanced.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "amount_mismatch",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
     "source_id": "bank_enterprise_amount_mismatch_playbook",
     "source_name": "银企对账金额差异处理公开规则摘要",
     "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",
@@ -7,6 +19,18 @@
     "source_type": "policy_summary",
     "business_tags": [
       "amount_mismatch",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_bank_unarrived_advanced",
+    "source_name": "银企对账银行未到账进阶场景（演示）",
+    "source_url": "https://example.com/bank-enterprise/bank-unarrived-advanced",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_bank_unarrived_advanced.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "bank_unarrived",
       "bank_enterprise",
       "audit_trail"
     ]
@@ -24,6 +48,18 @@
     ]
   },
   {
+    "source_id": "bank_enterprise_book_unrecorded_advanced",
+    "source_name": "银企对账企业未入账进阶场景（演示）",
+    "source_url": "https://example.com/bank-enterprise/book-unrecorded-advanced",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_book_unrecorded_advanced.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "book_unrecorded",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
     "source_id": "bank_enterprise_book_unrecorded_playbook",
     "source_name": "企业未记账处理公开规则摘要",
     "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",
@@ -36,6 +72,30 @@
     ]
   },
   {
+    "source_id": "bank_enterprise_cross_period_playbook",
+    "source_name": "银企对账跨期入账处理规则（演示）",
+    "source_url": "https://example.com/bank-enterprise/cross-period-posting",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_cross_period_playbook.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "cross_period_posting",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_duplicate_booking_advanced",
+    "source_name": "银企对账重复记账进阶与边界场景（演示）",
+    "source_url": "https://example.com/bank-enterprise/duplicate-booking-advanced",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_duplicate_booking_advanced.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "duplicate_booking",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
     "source_id": "bank_enterprise_duplicate_booking_playbook",
     "source_name": "银企重复记账处理公开规则摘要",
     "source_url": "https://www.gov.cn/gongbao/content/2006/content_375800.htm",
@@ -43,6 +103,54 @@
     "source_type": "policy_summary",
     "business_tags": [
       "duplicate_booking",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_exact_match_playbook",
+    "source_name": "银企对账精确匹配与自动平账规则（演示）",
+    "source_url": "https://example.com/bank-enterprise/exact-match",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_exact_match_playbook.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "exact_match",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_fee_tax_diff_playbook",
+    "source_name": "银企对账手续费与税费差异处理规则（演示）",
+    "source_url": "https://example.com/bank-enterprise/fee-tax-diff",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_fee_tax_diff_playbook.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "fee_tax_diff",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_fuzzy_match_playbook",
+    "source_name": "银企对账跨流水候选匹配规则（演示）",
+    "source_url": "https://example.com/bank-enterprise/fuzzy-match",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_fuzzy_match_playbook.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "fuzzy_match",
+      "bank_enterprise",
+      "audit_trail"
+    ]
+  },
+  {
+    "source_id": "bank_enterprise_narrative_mismatch_advanced",
+    "source_name": "银企对账摘要与户名不一致进阶场景（演示）",
+    "source_url": "https://example.com/bank-enterprise/narrative-mismatch-advanced",
+    "source_file": "data/rag/raw_sources/bank_enterprise/bank_enterprise_narrative_mismatch_advanced.md",
+    "source_type": "demo_rule",
+    "business_tags": [
+      "narrative_name_mismatch",
       "bank_enterprise",
       "audit_trail"
     ]
