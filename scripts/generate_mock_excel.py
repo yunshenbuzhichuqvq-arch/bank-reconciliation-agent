@@ -720,7 +720,11 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
     return bank_path, clear_path
 
 
-def generate_mvp1_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Path]:
+def generate_mvp1_mock_excel(
+    output_dir: str | Path = "mock_data",
+    *,
+    include_fuzzy_sample: bool = False,
+) -> tuple[Path, Path]:
     """生成覆盖 MVP-1 五分支的银企对账 mock，返回 (bank_path, clear_path)。"""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -936,6 +940,44 @@ def generate_mvp1_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path
             remark="MVP-1 疑似重复入账样例",
         ),
     ]
+
+    if include_fuzzy_sample:
+        bank_rows.append(
+            _bank_source_row(
+                flow_id="F2009-BANK",
+                serial="B202606010009",
+                accounting_time="16:00:00",
+                transaction_type="TRANSFER_OUT",
+                debit_amount=55.55,
+                credit_amount=0.00,
+                balance_after=10795.53,
+                counterparty_account="6214********2009",
+                counterparty_name="无锡远帆设备有限公司",
+                channel="网上银行",
+                summary="网银付款",
+                purpose="设备款",
+                remark="MVP-1 flow_id 不一致候选匹配样例",
+            )
+        )
+        clear_rows.append(
+            _clear_source_row(
+                flow_id="F2009-CLEAR",
+                serial="C202606010009",
+                terminal_id="T2009",
+                trade_time="16:00:05",
+                transaction_amount=55.55,
+                batch_no="BAT2026060105",
+                voucher_no="VCH2009",
+                reference_no="REF202606010009",
+                order_no="ORD202606010009",
+                payer_account="6222********0001",
+                payer_name="上海晨星贸易有限公司",
+                payee_account="6214********2009",
+                payee_name="无锡远帆设备有限公司",
+                description="网银付款",
+                remark="MVP-1 flow_id 不一致候选匹配样例",
+            )
+        )
 
     bank_path = output_path / "mvp1_bank.xlsx"
     clear_path = output_path / "mvp1_clear.xlsx"

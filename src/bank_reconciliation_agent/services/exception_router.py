@@ -22,6 +22,7 @@ class BranchResult(NamedTuple):
     clear_amount: Decimal | None
     amount_diff: Decimal | None
     t1_candidate: dict[str, str] | None = None
+    fuzzy_candidate: dict[str, str] | None = None
 
 
 class ExceptionRouter:
@@ -88,7 +89,133 @@ class ExceptionRouter:
                 )
             )
 
-        return results
+        return self._apply_fuzzy_match(
+            results,
+            bank_by_flow_id,
+            clear_by_flow_id,
+            scenario_type=scenario_type,
+        )
+
+    def _apply_fuzzy_match(
+        self,
+        results: list[BranchResult],
+        bank_by_flow_id: dict[str, dict[str, object]],
+        clear_by_flow_id: dict[str, dict[str, object]],
+        *,
+        scenario_type: str,
+    ) -> list[BranchResult]:
+        if scenario_type != "BANK_ENTERPRISE":
+            return results
+
+        results_by_flow_id = {result.flow_id: result for result in results}
+        bank_only = [
+            flow_id
+            for flow_id, result in results_by_flow_id.items()
+            if result.error_type == "BOOK_UNRECORDED"
+        ]
+        clear_only = [
+            flow_id
+            for flow_id, result in results_by_flow_id.items()
+            if result.error_type == "BANK_UNARRIVED"
+        ]
+        candidates_by_bank = {
+            bank_flow_id: [
+                clear_flow_id
+                for clear_flow_id in clear_only
+                if self._is_fuzzy_match(
+                    bank_by_flow_id[bank_flow_id],
+                    clear_by_flow_id[clear_flow_id],
+                    scenario_type=scenario_type,
+                )
+            ]
+            for bank_flow_id in bank_only
+        }
+        candidates_by_clear = {
+            clear_flow_id: [
+                bank_flow_id
+                for bank_flow_id in bank_only
+                if clear_flow_id in candidates_by_bank[bank_flow_id]
+            ]
+            for clear_flow_id in clear_only
+        }
+
+        for bank_flow_id, clear_candidates in candidates_by_bank.items():
+            if len(clear_candidates) != 1:
+                continue
+            clear_flow_id = clear_candidates[0]
+            if len(candidates_by_clear[clear_flow_id]) != 1:
+                continue
+            bank_row = bank_by_flow_id[bank_flow_id]
+            clear_row = clear_by_flow_id[clear_flow_id]
+            results_by_flow_id[bank_flow_id] = results_by_flow_id[bank_flow_id]._replace(
+                error_type="FUZZY_MATCH_CANDIDATE",
+                exception_branch="BE-R007",
+                fuzzy_candidate=self._fuzzy_candidate(
+                    clear_row,
+                    party_column=self._clear_party_column(scenario_type),
+                ),
+            )
+            results_by_flow_id[clear_flow_id] = results_by_flow_id[clear_flow_id]._replace(
+                error_type="FUZZY_MATCH_CANDIDATE",
+                exception_branch="BE-R007",
+                fuzzy_candidate=self._fuzzy_candidate(
+                    bank_row,
+                    party_column=self._bank_party_column(scenario_type),
+                ),
+            )
+
+        return [results_by_flow_id[result.flow_id] for result in results]
+
+    def _is_fuzzy_match(
+        self,
+        bank_row: dict[str, object],
+        clear_row: dict[str, object],
+        *,
+        scenario_type: str,
+    ) -> bool:
+        bank_party = self._normalize_summary(
+            bank_row.get(self._bank_party_column(scenario_type))
+        )
+        clear_party = self._normalize_summary(
+            clear_row.get(self._clear_party_column(scenario_type))
+        )
+        return (
+            self._amount_from_row(bank_row) == self._amount_from_row(clear_row)
+            and self._trade_date(bank_row) == self._trade_date(clear_row)
+            and bool(bank_party)
+            and bool(clear_party)
+            and (bank_party in clear_party or clear_party in bank_party)
+        )
+
+    def _fuzzy_candidate(
+        self,
+        row: dict[str, object],
+        *,
+        party_column: str,
+    ) -> dict[str, str]:
+        amount = self._amount_from_row(row)
+        trade_date = self._trade_date(row)
+        return {
+            "flow_id": str(row["flow_id"]),
+            "amount": str(amount),
+            "trade_date": trade_date.isoformat() if trade_date is not None else "",
+            "counterparty": self._normalize_summary(row.get(party_column)),
+        }
+
+    def _trade_date(self, row: dict[str, object]) -> date | None:
+        for key in ("trade_time", "trade_date", "accounting_date"):
+            value = row.get(key)
+            if self._is_empty(value):
+                continue
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            try:
+                return datetime.fromisoformat(str(value).strip()).date()
+            except ValueError:
+                continue
+        return None
 
     def _bank_party_column(self, scenario_type: str) -> str:
         if scenario_type == "BANK_CLEARING":

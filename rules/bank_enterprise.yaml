@@ -1,4 +1,11 @@
 # scenario_type: BANK_ENTERPRISE
+fuzzy_match:
+  id: BE-R007
+  name: Cross-flow candidate match
+  priority: between exact match and single-sided rules
+  action: EXCEPTION
+  error_type: FUZZY_MATCH_CANDIDATE
+  exception_branch: BE-R007
 rules:
   - id: BE-R008
     name: Duplicate booking suspected
