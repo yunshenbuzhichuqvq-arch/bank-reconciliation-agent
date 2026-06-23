@@ -24,6 +24,8 @@ def test_eval_rag_cli_writes_markdown_report_for_both_scenarios(
             str(report_path),
             "--json-report",
             str(json_report_path),
+            "--embedding-backend",
+            "hash",
         ]
     )
 
