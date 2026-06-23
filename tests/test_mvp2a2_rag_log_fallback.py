@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, inspect, select
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision
 from bank_reconciliation_agent.rag.scoring import representative_score
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
-from bank_reconciliation_agent.services.fallback import best_rag_score, l1_requires_l2
+from bank_reconciliation_agent.services.fallback import l1_requires_l2
 from bank_reconciliation_agent.services.rag_log import RagLogService, rag_retrieval_log_table
 
 
@@ -84,13 +84,9 @@ def test_representative_score_prefers_reranker_then_dense_when_hybrid_missing() 
     assert representative_score(empty) == 0.4
 
 
-def test_fallback_uses_representative_score_and_config_threshold(monkeypatch) -> None:
-    monkeypatch.setattr("bank_reconciliation_agent.services.fallback.settings.rag_low_score", 0.5)
-    item = _item(score=0.20, dense_score=Decimal("0.80"), reranker_score=Decimal("0.60"))
-
-    assert best_rag_score([item]) == 0.6
-    assert l1_requires_l2(_decision(confidence=0.90), [item]) is False
-    assert l1_requires_l2(_decision(confidence=0.40), [item]) is True
+def test_fallback_uses_only_audit_confidence() -> None:
+    assert l1_requires_l2(_decision(confidence=0.90)) is False
+    assert l1_requires_l2(_decision(confidence=0.40)) is True
 
 
 def _decision(*, confidence: float) -> AuditDecision:

@@ -42,7 +42,8 @@ class Settings(BaseSettings):
     rag_bm25_top_n: int = 20
     rag_rerank_top_k: int = 5
     rag_rrf_k: int = 60
-    rag_dense_min_score: float = 0.5
+    # Hash embedding calibration; use 0.5 when a real semantic embedding is enabled.
+    rag_dense_min_score: float = 0.341
     rag_reranker_min_score: float = 0.3
     rag_low_score: float = 0.5
     rag_breaker_fail_threshold: int = 5

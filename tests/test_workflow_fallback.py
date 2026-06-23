@@ -114,8 +114,8 @@ def test_rag_miss_short_circuits_to_human_without_fallback() -> None:
     assert result["audit_decision"]["confidence"] == 0.0
 
 
-def test_low_rag_score_triggers_l2_even_when_l1_confidence_is_high() -> None:
-    audit_agent = SequenceAuditAgent([0.9, 0.9])
+def test_low_rag_score_does_not_trigger_l2_when_l1_confidence_is_high() -> None:
+    audit_agent = SequenceAuditAgent([0.9])
     fallback_cases = [
         {
             "flow_id": "FLOW-OLD-002",
@@ -134,11 +134,10 @@ def test_low_rag_score_triggers_l2_even_when_l1_confidence_is_high() -> None:
         fallback_case_provider=StaticFallbackCaseProvider(fallback_cases),
     )
 
-    assert audit_agent.calls == [1, 2]
-    assert audit_agent.call_args[1]["few_shot_cases"] == fallback_cases
-    assert result["fallback_level"] == 2
-    assert result["fallback_path"] == "L1->L2"
-    assert result["audit_decision"]["fallback_applied"] is True
+    assert audit_agent.calls == [1]
+    assert result["fallback_level"] == 0
+    assert result["fallback_path"] == "L1"
+    assert result["audit_decision"]["fallback_applied"] is False
 
 
 def test_l2_handles_empty_fallback_cases_without_error() -> None:

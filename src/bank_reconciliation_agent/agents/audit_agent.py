@@ -146,6 +146,7 @@ class AuditAgent:
         few_shot_cases: list[dict[str, object]] | None = None,
         trace_context: dict[str, object] | None = None,
         memory_context: str | None = None,
+        match_candidate_context: dict[str, object] | None = None,
     ) -> AuditDecision:
         """LLM audit path; missing evidence still short-circuits to manual review."""
         if not evidence:
@@ -169,6 +170,15 @@ class AuditAgent:
             "amount_diff": amount_diff,
             "evidence": [item.model_dump(mode="json") for item in evidence],
         }
+        if error_type == "FUZZY_MATCH_CANDIDATE" and match_candidate_context is not None:
+            user_payload["task"] = "confirm_match"
+            user_payload["current_transaction"] = {
+                "flow_id": flow_id,
+                "bank_amount": bank_amount,
+                "clear_amount": clear_amount,
+                "amount_diff": amount_diff,
+            }
+            user_payload["match_candidate"] = match_candidate_context
         if few_shot_cases is not None:
             user_payload["few_shot_cases"] = few_shot_cases
         if trace_context is not None:

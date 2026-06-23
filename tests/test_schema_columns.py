@@ -136,6 +136,14 @@ def test_task_101_branch_indexes_are_present() -> None:
     assert "idx_branch_status" in index_names(inspector, "t_error_ledger")
 
 
+def test_fuzzy_candidate_fits_existing_error_type_columns() -> None:
+    value = "FUZZY_MATCH_CANDIDATE"
+
+    assert len(value) <= reconciliation_queue_table.c.error_type.type.length
+    assert len(value) <= error_ledger_table.c.error_type.type.length
+    assert "error_type VARCHAR(32)" in read_schema_sql()
+
+
 def assert_columns(inspector, table_name: str, expected_columns: set[str]) -> None:
     actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
     assert expected_columns <= actual_columns

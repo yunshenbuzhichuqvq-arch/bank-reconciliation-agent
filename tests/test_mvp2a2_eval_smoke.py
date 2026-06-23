@@ -43,4 +43,4 @@ def test_eval_script_main_prints_comparison_report(tmp_path: Path, capsys) -> No
     assert "mode\thit_count" in output
     assert "dense" in output
     assert "hybrid_rerank" in output
-    assert "l1_to_l2_trigger_rate" in output
+    assert "avg_reranker_score" in output
