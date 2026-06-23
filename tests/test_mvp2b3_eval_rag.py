@@ -1,3 +1,4 @@
+from collections import Counter
 import json
 from pathlib import Path
 import re
@@ -135,3 +136,15 @@ def test_eval_set_queries_are_semantic_questions_without_error_code_stuffing() -
         grouped.setdefault(key, set()).add(case.query[:8])
 
     assert all(len(prefixes) >= 4 for prefixes in grouped.values())
+
+
+def test_bank_enterprise_eval_set_has_no_single_chunk_stuffing() -> None:
+    cases = eval_rag.load_eval_set(PROJECT_ROOT / "data/rag_eval_set.json")
+
+    sole_expected_counts = Counter(
+        case.expected_chunk_ids[0]
+        for case in cases
+        if case.scenario_type == "BANK_ENTERPRISE" and len(case.expected_chunk_ids) == 1
+    )
+
+    assert all(count <= 3 for count in sole_expected_counts.values())

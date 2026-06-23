@@ -124,7 +124,6 @@ def test_eval_rag_uses_zero_min_score_for_ranking_quality() -> None:
             )
         ],
         retriever=retriever,
-        embedding_backend="bge_small",
     )
 
     assert retriever.requests[0].min_score == 0.0
@@ -134,12 +133,10 @@ def test_eval_rag_legacy_requests_use_zero_min_score() -> None:
     dense_request = eval_rag._request_for_mode(
         "q1",
         mode="dense",
-        embedding_backend="bge_small",
     )
     hybrid_request = eval_rag._request_for_mode(
         "q1",
         mode="hybrid_rerank",
-        embedding_backend="bge_m3",
     )
 
     assert dense_request.min_score == 0.0

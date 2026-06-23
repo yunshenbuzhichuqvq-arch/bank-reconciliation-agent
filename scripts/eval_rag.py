@@ -104,7 +104,6 @@ def evaluate_eval_set(
     *,
     retriever: RuleRetriever | Any = rule_retriever,
     top_k: int = 5,
-    embedding_backend: str | None = None,
 ) -> dict[str, Any]:
     results = [
         _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0)
@@ -163,7 +162,6 @@ def main(argv: list[str] | None = None) -> None:
         load_eval_set(args.eval_set),
         retriever=retriever,
         top_k=args.top_k,
-        embedding_backend=args.embedding_backend,
     )
     write_markdown_report(report, args.report)
     write_json_metrics_snapshot(report, args.json_report)
@@ -334,7 +332,6 @@ def evaluate_cases(
                 retriever,
                 case,
                 mode=mode,
-                embedding_backend=embedding_backend,
             )
             for case in SMOKE_CASES
         ],
@@ -346,13 +343,11 @@ def _evaluate_smoke_case(
     case: SmokeCase,
     *,
     mode: str,
-    embedding_backend: str | None,
 ) -> LegacyCaseResult:
     response = retriever.search(
         _request_for_mode(
             case.query,
             mode=mode,
-            embedding_backend=_effective_embedding_backend(retriever, embedding_backend),
         )
     )
     matched_item = _find_hit(response.items, expected_tag=case.expected_tag)
@@ -371,7 +366,6 @@ def _request_for_mode(
     query: str,
     *,
     mode: str,
-    embedding_backend: str | None,
 ) -> RagSearchRequest:
     if mode == "dense":
         return RagSearchRequest(query=query, top_k=settings.rag_rerank_top_k, min_score=0.0)
@@ -384,14 +378,6 @@ def _request_for_mode(
             enable_reranker=True,
         )
     raise ValueError(f"unsupported mode: {mode}")
-
-
-def _effective_embedding_backend(retriever: RuleRetriever | Any, requested_backend: str | None) -> str:
-    if requested_backend is not None:
-        return requested_backend
-    store = getattr(retriever, "store", None)
-    backend = getattr(store, "embedding_backend", None)
-    return backend if isinstance(backend, str) else "hash"
 
 
 def _find_hit(items: list[RagSearchItem], *, expected_tag: str) -> RagSearchItem | None:

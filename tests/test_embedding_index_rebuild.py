@@ -139,7 +139,7 @@ def test_eval_rag_cli_passes_embedding_backend_to_retriever(
     monkeypatch.setattr(
         eval_rag,
         "evaluate_eval_set",
-        lambda cases, *, retriever, top_k, embedding_backend: {
+        lambda cases, *, retriever, top_k: {
             "case_count": 0,
             "notes": [],
             "summaries": [],
