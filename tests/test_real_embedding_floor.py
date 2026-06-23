@@ -110,7 +110,7 @@ def test_workflow_uses_dense_floor_for_effective_store_backend() -> None:
     assert retriever.requests[0].min_score == 0.341
 
 
-def test_eval_rag_uses_dense_floor_for_embedding_backend() -> None:
+def test_eval_rag_uses_zero_min_score_for_ranking_quality() -> None:
     retriever = EvalRetriever()
 
     eval_rag.evaluate_eval_set(
@@ -127,4 +127,20 @@ def test_eval_rag_uses_dense_floor_for_embedding_backend() -> None:
         embedding_backend="bge_small",
     )
 
-    assert retriever.requests[0].min_score == 0.5
+    assert retriever.requests[0].min_score == 0.0
+
+
+def test_eval_rag_legacy_requests_use_zero_min_score() -> None:
+    dense_request = eval_rag._request_for_mode(
+        "q1",
+        mode="dense",
+        embedding_backend="bge_small",
+    )
+    hybrid_request = eval_rag._request_for_mode(
+        "q1",
+        mode="hybrid_rerank",
+        embedding_backend="bge_m3",
+    )
+
+    assert dense_request.min_score == 0.0
+    assert hybrid_request.min_score == 0.0

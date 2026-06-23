@@ -106,11 +106,8 @@ def evaluate_eval_set(
     top_k: int = 5,
     embedding_backend: str | None = None,
 ) -> dict[str, Any]:
-    min_score = settings.rag_dense_min_score_for_backend(
-        _effective_embedding_backend(retriever, embedding_backend)
-    )
     results = [
-        _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=min_score)
+        _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0)
         for case in cases
     ]
     scenario_types = sorted({case.scenario_type for case in cases})
@@ -376,14 +373,13 @@ def _request_for_mode(
     mode: str,
     embedding_backend: str | None,
 ) -> RagSearchRequest:
-    min_score = settings.rag_dense_min_score_for_backend(embedding_backend)
     if mode == "dense":
-        return RagSearchRequest(query=query, top_k=settings.rag_rerank_top_k, min_score=min_score)
+        return RagSearchRequest(query=query, top_k=settings.rag_rerank_top_k, min_score=0.0)
     if mode == "hybrid_rerank":
         return RagSearchRequest(
             query=query,
             top_k=settings.rag_rerank_top_k,
-            min_score=min_score,
+            min_score=0.0,
             enable_hybrid=True,
             enable_reranker=True,
         )
