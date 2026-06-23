@@ -72,7 +72,7 @@ def test_evaluate_eval_set_computes_recall_mrr_and_ndcg() -> None:
             }
         )
     ]
-    assert [request.enable_hybrid for request in retriever.requests] == [True, True]
+    assert [request.enable_hybrid for request in retriever.requests] == [False, False]
 
 
 def test_eval_rag_cli_prints_metric_fields(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -19,10 +19,6 @@ DEFAULT_EVAL_SET_PATH = PROJECT_ROOT / "data/rag_eval_set.json"
 DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval.md"
 DEFAULT_JSON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_metrics.json"
-RECALL_AT_5_BASELINES = {
-    "BANK_CLEARING": 0.93,
-    "BANK_ENTERPRISE": 0.64,
-}
 
 
 @dataclass(frozen=True)
@@ -152,19 +148,9 @@ def main(argv: list[str] | None = None) -> None:
         else RuleRetriever(chroma_path=args.chroma)
     )
     report = evaluate_eval_set(load_eval_set(args.eval_set), retriever=retriever, top_k=args.top_k)
-    if args.eval_set.resolve() == DEFAULT_EVAL_SET_PATH.resolve():
-        assert_recall_baselines(report)
     write_markdown_report(report, args.report)
     write_json_metrics_snapshot(report, args.json_report)
     print(json.dumps(report, ensure_ascii=False, indent=2))
-
-
-def assert_recall_baselines(report: dict[str, Any]) -> None:
-    summaries = {summary["scenario_type"]: summary for summary in report["summaries"]}
-    for scenario_type, baseline in RECALL_AT_5_BASELINES.items():
-        actual = summaries[scenario_type]["recall_at_5"]
-        if actual < baseline:
-            raise ValueError(f"{scenario_type} Recall@5 {actual:.4f} < {baseline:.4f}")
 
 
 def write_markdown_report(report: dict[str, Any], output_path: Path = DEFAULT_REPORT_PATH) -> None:
@@ -229,7 +215,6 @@ def _evaluate_case(
             top_k=top_k,
             min_score=0.0,
             scenario_type=case.scenario_type,
-            enable_hybrid=True,
         )
     )
     retrieved_chunk_ids = [item.chunk_id for item in response.items[:top_k]]

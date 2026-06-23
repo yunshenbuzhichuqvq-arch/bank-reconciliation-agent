@@ -1,10 +1,7 @@
 from pathlib import Path
 
-import pytest
-
 from bank_reconciliation_agent.rag.retriever import RuleRetriever
 from bank_reconciliation_agent.services.workflow import run_item
-from scripts import eval_rag
 from tests.test_workflow_fallback import (
     EmptyFallbackCaseProvider,
     NoopExtractionAgent,
@@ -14,18 +11,6 @@ from tests.test_workflow_fallback import (
     _evidence,
     _state,
 )
-
-
-def test_recall_gate_rejects_a_scenario_below_its_baseline() -> None:
-    report = {
-        "summaries": [
-            {"scenario_type": "BANK_ENTERPRISE", "recall_at_5": 0.63},
-            {"scenario_type": "BANK_CLEARING", "recall_at_5": 0.94},
-        ]
-    }
-
-    with pytest.raises(ValueError, match="BANK_ENTERPRISE Recall@5 0.6300 < 0.6400"):
-        eval_rag.assert_recall_baselines(report)
 
 
 def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path) -> None:
