@@ -35,6 +35,11 @@ dev = [
     "ruff>=0.5.0",
     "fakeredis>=2.36.2",
 ]
+embedding = [
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "sentence-transformers>=3.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]

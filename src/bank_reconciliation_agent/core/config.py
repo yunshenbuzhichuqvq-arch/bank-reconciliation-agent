@@ -3,6 +3,10 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+BGE_M3_MODEL_NAME = "BAAI/bge-m3"
+BGE_SMALL_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+
+
 class Settings(BaseSettings):
     app_name: str = "Bank Reconciliation Agent"
     app_env: str = "local"
@@ -38,6 +42,7 @@ class Settings(BaseSettings):
     enable_rag_rewrite: bool = False
     enable_rag_hybrid: bool = False
     enable_rag_reranker: bool = False
+    embedding_backend: Literal["hash", "bge_small", "bge_m3"] = "bge_m3"
     rag_dense_top_n: int = 20
     rag_bm25_top_n: int = 20
     rag_rerank_top_k: int = 5

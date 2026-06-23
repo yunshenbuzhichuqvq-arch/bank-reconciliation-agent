@@ -11,7 +11,7 @@ import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import EmbeddingFunction
 
-from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.core.config import BGE_M3_MODEL_NAME, BGE_SMALL_MODEL_NAME, settings
 from bank_reconciliation_agent.core.logging import log
 from bank_reconciliation_agent.rag.fusion import FusedHit, fuse_rrf
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest, RagSearchResponse
@@ -21,6 +21,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
 TOKEN_PATTERN = re.compile(r"[\w\u4e00-\u9fff]+")
 EMBEDDING_DIMENSIONS = 128
+BGE_SMALL_EMBEDDING_DIMENSIONS = 512
+BGE_M3_EMBEDDING_DIMENSIONS = 1024
+EMBEDDING_BACKEND_MODELS = {
+    "bge_small": (BGE_SMALL_MODEL_NAME, BGE_SMALL_EMBEDDING_DIMENSIONS),
+    "bge_m3": (BGE_M3_MODEL_NAME, BGE_M3_EMBEDDING_DIMENSIONS),
+}
 
 
 class HashEmbeddingFunction(EmbeddingFunction[list[str]]):
@@ -44,6 +50,70 @@ class HashEmbeddingFunction(EmbeddingFunction[list[str]]):
         return {"dimensions": EMBEDDING_DIMENSIONS}
 
 
+class SentenceTransformerEmbeddingFunction(EmbeddingFunction[list[str]]):
+    def __init__(self, model_name: str, *, dimensions: int) -> None:
+        self.model_name = model_name
+        self.dimensions = dimensions
+        self._model: Any | None = None
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        model = self._model
+        if model is None:
+            model_class = self._load_sentence_transformer_class()
+            model = model_class(self.model_name)
+            self._model = model
+        embeddings = model.encode(input, normalize_embeddings=True)
+        return [
+            embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+            for embedding in embeddings
+        ]
+
+    @staticmethod
+    def name() -> str:
+        return "bank_reconciliation_sentence_transformer_embedding"
+
+    @staticmethod
+    def build_from_config(config: dict[str, Any]) -> "SentenceTransformerEmbeddingFunction":
+        return SentenceTransformerEmbeddingFunction(
+            str(config["model_name"]),
+            dimensions=int(config["dimensions"]),
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {"model_name": self.model_name, "dimensions": self.dimensions}
+
+    @staticmethod
+    def _load_sentence_transformer_class() -> Any:
+        from sentence_transformers import SentenceTransformer
+
+        return SentenceTransformer
+
+
+def build_embedding_function(backend: str) -> EmbeddingFunction[list[str]]:
+    if backend == "hash":
+        return HashEmbeddingFunction()
+    if backend not in EMBEDDING_BACKEND_MODELS:
+        raise ValueError(f"Unsupported embedding backend: {backend}")
+
+    fallback_chain = ["bge_small", "hash"] if backend == "bge_m3" else ["hash"]
+    for candidate in [backend, *fallback_chain]:
+        if candidate == "hash":
+            return HashEmbeddingFunction()
+        model_name, dimensions = EMBEDDING_BACKEND_MODELS[candidate]
+        embedding_function = SentenceTransformerEmbeddingFunction(model_name, dimensions=dimensions)
+        try:
+            embedding_function([""])
+            return embedding_function
+        except Exception as exc:  # pragma: no cover - exact failures depend on local model setup
+            log.warning(
+                "rag_embedding_backend_fallback",
+                backend=candidate,
+                next_backend=fallback_chain[0] if candidate == backend else "hash",
+                reason=str(exc),
+            )
+    return HashEmbeddingFunction()
+
+
 class ChromaRuleStore:
     def __init__(
         self,
@@ -51,11 +121,13 @@ class ChromaRuleStore:
         chroma_path: Path | None = None,
         scenario_type: str = "BANK_ENTERPRISE",
         collection_name: str | None = None,
+        embedding_backend: str | None = None,
     ) -> None:
         self.chunks_path = chunks_path
         self.chroma_path = chroma_path or Path(settings.chroma_path)
         self.collection_name = collection_name or self._collection_name_for_scenario(scenario_type)
-        self.embedding_function = HashEmbeddingFunction()
+        self.embedding_backend = embedding_backend or settings.embedding_backend
+        self.embedding_function = build_embedding_function(self.embedding_backend)
         self._collections: dict[str, Collection] = {}
 
     def collection(self, scenario_type: str = "BANK_ENTERPRISE") -> Collection:
