@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_chroma_rule_store_defaults_to_bank_enterprise_collection_name() -> None:
-    store = ChromaRuleStore()
+    store = ChromaRuleStore(embedding_backend="hash")
 
-    assert store.collection_name == "rule_chunks_bank_enterprise"
+    assert store.collection_name == "rule_chunks_bank_enterprise_hash"
 
 
 def test_rule_retriever_search_returns_hits_for_bank_clearing_scenario(tmp_path: Path) -> None:

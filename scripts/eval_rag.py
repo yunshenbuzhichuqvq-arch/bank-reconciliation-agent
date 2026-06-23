@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from bank_reconciliation_agent.core.config import settings
-from bank_reconciliation_agent.rag.retriever import RuleRetriever, rule_retriever
+from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever, rule_retriever
 from bank_reconciliation_agent.rag.scoring import representative_score
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
 
@@ -126,6 +126,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT_PATH)
+    parser.add_argument("--embedding-backend", default=settings.embedding_backend)
     args = parser.parse_args(argv)
 
     if args.chunks is not None:
@@ -133,19 +134,26 @@ def main(argv: list[str] | None = None) -> None:
             chunks_path=args.chunks,
             chroma_path=(args.chroma or PROJECT_ROOT / "chroma_eval") / "dense",
             mode="dense",
+            embedding_backend=args.embedding_backend,
         )
         hybrid_summary = evaluate_cases(
             chunks_path=args.chunks,
             chroma_path=(args.chroma or PROJECT_ROOT / "chroma_eval") / "hybrid_rerank",
             mode="hybrid_rerank",
+            embedding_backend=args.embedding_backend,
         )
         _print_legacy_report(dense_summary, hybrid_summary)
         return
 
     retriever = (
         rule_retriever
-        if args.chroma is None
-        else RuleRetriever(chroma_path=args.chroma)
+        if args.chroma is None and args.embedding_backend == settings.embedding_backend
+        else RuleRetriever(
+            store=ChromaRuleStore(
+                chroma_path=args.chroma,
+                embedding_backend=args.embedding_backend,
+            )
+        )
     )
     report = evaluate_eval_set(load_eval_set(args.eval_set), retriever=retriever, top_k=args.top_k)
     write_markdown_report(report, args.report)
@@ -300,8 +308,15 @@ def evaluate_cases(
     chunks_path: Path = DEFAULT_CHUNKS_PATH,
     chroma_path: Path = PROJECT_ROOT / "chroma_eval",
     mode: str,
+    embedding_backend: str | None = None,
 ) -> LegacyEvalSummary:
-    retriever = RuleRetriever(chunks_path=chunks_path, chroma_path=chroma_path)
+    retriever = RuleRetriever(
+        store=ChromaRuleStore(
+            chunks_path=chunks_path,
+            chroma_path=chroma_path,
+            embedding_backend=embedding_backend,
+        )
+    )
     return LegacyEvalSummary(
         mode=mode,
         case_results=[_evaluate_smoke_case(retriever, case, mode=mode) for case in SMOKE_CASES],

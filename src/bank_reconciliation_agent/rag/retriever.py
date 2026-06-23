@@ -10,6 +10,7 @@ from typing import Any
 import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import EmbeddingFunction
+from chromadb.errors import NotFoundError
 
 from bank_reconciliation_agent.core.config import BGE_M3_MODEL_NAME, BGE_SMALL_MODEL_NAME, settings
 from bank_reconciliation_agent.core.logging import log
@@ -125,13 +126,19 @@ class ChromaRuleStore:
     ) -> None:
         self.chunks_path = chunks_path
         self.chroma_path = chroma_path or Path(settings.chroma_path)
-        self.collection_name = collection_name or self._collection_name_for_scenario(scenario_type)
         self.embedding_backend = embedding_backend or settings.embedding_backend
+        self.collection_name = collection_name or self._collection_name_for_scenario(
+            scenario_type,
+            self.embedding_backend,
+        )
         self.embedding_function = build_embedding_function(self.embedding_backend)
         self._collections: dict[str, Collection] = {}
 
     def collection(self, scenario_type: str = "BANK_ENTERPRISE") -> Collection:
-        collection_name = self._collection_name_for_scenario(scenario_type)
+        collection_name = self._collection_name_for_scenario(
+            scenario_type,
+            self.embedding_backend,
+        )
         collection = self._collections.get(collection_name)
         if collection is None:
             self.chroma_path.mkdir(parents=True, exist_ok=True)
@@ -143,6 +150,39 @@ class ChromaRuleStore:
             self._collections[collection_name] = collection
             self._sync_chunks(scenario_type)
         return collection
+
+    def rebuild_indexes(
+        self,
+        *,
+        scenarios: tuple[str, ...] = ("BANK_ENTERPRISE", "BANK_CLEARING"),
+    ) -> dict[str, int]:
+        self.chroma_path.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(self.chroma_path))
+        rebuilt_counts: dict[str, int] = {}
+        for scenario_type in scenarios:
+            collection_name = self._collection_name_for_scenario(
+                scenario_type,
+                self.embedding_backend,
+            )
+            try:
+                client.delete_collection(collection_name)
+            except (NotFoundError, ValueError):
+                pass
+            self._collections.pop(collection_name, None)
+            collection = client.get_or_create_collection(
+                name=collection_name,
+                embedding_function=self.embedding_function,
+            )
+            self._collections[collection_name] = collection
+            chunks = self._load_chunks(scenario_type)
+            if chunks:
+                collection.upsert(
+                    ids=[chunk["chunk_id"] for chunk in chunks],
+                    documents=[chunk["content"] for chunk in chunks],
+                    metadatas=[self._to_metadata(chunk) for chunk in chunks],
+                )
+            rebuilt_counts[scenario_type] = collection.count()
+        return rebuilt_counts
 
     def count(self) -> int:
         return self.collection().count()
@@ -220,8 +260,8 @@ class ChromaRuleStore:
         }
 
     @staticmethod
-    def _collection_name_for_scenario(scenario_type: str) -> str:
-        return f"rule_chunks_{scenario_type.lower()}"
+    def _collection_name_for_scenario(scenario_type: str, backend: str) -> str:
+        return f"rule_chunks_{scenario_type.lower()}_{backend}"
 
     def _chunks_path_for_scenario(self, scenario_type: str) -> Path:
         scenario_suffix = f"_{scenario_type.lower()}"
