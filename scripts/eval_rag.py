@@ -104,8 +104,13 @@ def evaluate_eval_set(
     *,
     retriever: RuleRetriever | Any = rule_retriever,
     top_k: int = 5,
+    embedding_backend: str | None = None,
 ) -> dict[str, Any]:
-    results = [_evaluate_case(case, retriever=retriever, top_k=top_k) for case in cases]
+    min_score = settings.rag_dense_min_score_for_backend(embedding_backend)
+    results = [
+        _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=min_score)
+        for case in cases
+    ]
     scenario_types = sorted({case.scenario_type for case in cases})
     summaries = [_summarize_scenario(results, scenario_type) for scenario_type in scenario_types]
     return {
@@ -155,7 +160,12 @@ def main(argv: list[str] | None = None) -> None:
             )
         )
     )
-    report = evaluate_eval_set(load_eval_set(args.eval_set), retriever=retriever, top_k=args.top_k)
+    report = evaluate_eval_set(
+        load_eval_set(args.eval_set),
+        retriever=retriever,
+        top_k=args.top_k,
+        embedding_backend=args.embedding_backend,
+    )
     write_markdown_report(report, args.report)
     write_json_metrics_snapshot(report, args.json_report)
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -216,12 +226,13 @@ def _evaluate_case(
     *,
     retriever: RuleRetriever | Any,
     top_k: int,
+    min_score: float,
 ) -> EvalCaseResult:
     response = retriever.search(
         RagSearchRequest(
             query=case.query,
             top_k=top_k,
-            min_score=0.0,
+            min_score=min_score,
             scenario_type=case.scenario_type,
         )
     )
@@ -319,12 +330,28 @@ def evaluate_cases(
     )
     return LegacyEvalSummary(
         mode=mode,
-        case_results=[_evaluate_smoke_case(retriever, case, mode=mode) for case in SMOKE_CASES],
+        case_results=[
+            _evaluate_smoke_case(
+                retriever,
+                case,
+                mode=mode,
+                embedding_backend=embedding_backend,
+            )
+            for case in SMOKE_CASES
+        ],
     )
 
 
-def _evaluate_smoke_case(retriever: RuleRetriever, case: SmokeCase, *, mode: str) -> LegacyCaseResult:
-    response = retriever.search(_request_for_mode(case.query, mode=mode))
+def _evaluate_smoke_case(
+    retriever: RuleRetriever,
+    case: SmokeCase,
+    *,
+    mode: str,
+    embedding_backend: str | None,
+) -> LegacyCaseResult:
+    response = retriever.search(
+        _request_for_mode(case.query, mode=mode, embedding_backend=embedding_backend)
+    )
     matched_item = _find_hit(response.items, expected_tag=case.expected_tag)
     score = representative_score(matched_item) if matched_item is not None else None
     return LegacyCaseResult(
@@ -337,14 +364,20 @@ def _evaluate_smoke_case(retriever: RuleRetriever, case: SmokeCase, *, mode: str
     )
 
 
-def _request_for_mode(query: str, *, mode: str) -> RagSearchRequest:
+def _request_for_mode(
+    query: str,
+    *,
+    mode: str,
+    embedding_backend: str | None,
+) -> RagSearchRequest:
+    min_score = settings.rag_dense_min_score_for_backend(embedding_backend)
     if mode == "dense":
-        return RagSearchRequest(query=query, top_k=settings.rag_rerank_top_k, min_score=0.0)
+        return RagSearchRequest(query=query, top_k=settings.rag_rerank_top_k, min_score=min_score)
     if mode == "hybrid_rerank":
         return RagSearchRequest(
             query=query,
             top_k=settings.rag_rerank_top_k,
-            min_score=0.0,
+            min_score=min_score,
             enable_hybrid=True,
             enable_reranker=True,
         )

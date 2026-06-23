@@ -17,6 +17,9 @@ def test_settings_include_mvp2a2_rag_flags_and_thresholds() -> None:
     assert settings.rag_rerank_top_k == 5
     assert settings.rag_rrf_k == 60
     assert settings.rag_dense_min_score == 0.341
+    assert settings.rag_dense_min_score_for_backend("hash") == 0.341
+    assert settings.rag_dense_min_score_for_backend("bge_small") == 0.5
+    assert settings.rag_dense_min_score_for_backend("bge_m3") == 0.5
     assert settings.rag_reranker_min_score == 0.3
     assert settings.rag_low_score == 0.5
 
