@@ -47,8 +47,10 @@ class Settings(BaseSettings):
     rag_bm25_top_n: int = 20
     rag_rerank_top_k: int = 5
     rag_rrf_k: int = 60
-    # Hash embedding calibration; use 0.5 when a real semantic embedding is enabled.
+    # Dense floor values are calibrated per embedding backend.
     rag_dense_min_score: float = 0.341
+    rag_dense_min_score_bge_small: float = 0.507
+    rag_dense_min_score_bge_m3: float = 0.510
     rag_reranker_min_score: float = 0.3
     rag_low_score: float = 0.5
     rag_breaker_fail_threshold: int = 5
@@ -61,8 +63,10 @@ class Settings(BaseSettings):
         selected_backend = backend or self.embedding_backend
         if selected_backend == "hash":
             return self.rag_dense_min_score
-        if selected_backend in {"bge_small", "bge_m3"}:
-            return 0.5
+        if selected_backend == "bge_small":
+            return self.rag_dense_min_score_bge_small
+        if selected_backend == "bge_m3":
+            return self.rag_dense_min_score_bge_m3
         raise ValueError(f"Unsupported embedding backend: {selected_backend}")
 
 

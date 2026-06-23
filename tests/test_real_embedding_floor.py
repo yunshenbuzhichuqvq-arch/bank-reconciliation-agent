@@ -90,7 +90,7 @@ def test_workflow_uses_dense_floor_for_configured_embedding_backend(monkeypatch)
         retriever=retriever,
     )
 
-    assert retriever.requests[0].min_score == 0.5
+    assert retriever.requests[0].min_score == 0.510
     assert result["next_action"] == "PENDING_HUMAN"
     assert result["fallback_level"] == 0
 
