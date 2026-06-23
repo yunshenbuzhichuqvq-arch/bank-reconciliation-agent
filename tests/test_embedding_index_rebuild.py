@@ -1,14 +1,34 @@
 from pathlib import Path
 
 import chromadb
+from chromadb.api.types import EmbeddingFunction
 
 from bank_reconciliation_agent.rag import retriever
-from bank_reconciliation_agent.rag.retriever import ChromaRuleStore
+from bank_reconciliation_agent.rag.retriever import BuiltEmbeddingFunction, ChromaRuleStore
 from scripts import eval_rag
 from scripts.build_rule_chunks import build_rule_chunks
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class FakeDimensionalEmbeddingFunction(EmbeddingFunction[list[str]]):
+    def __init__(self, dimensions: int) -> None:
+        self.dimensions = dimensions
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        return [[1.0, *([0.0] * (self.dimensions - 1))] for _ in input]
+
+    @staticmethod
+    def name() -> str:
+        return "fake_dimensional_embedding"
+
+    @staticmethod
+    def build_from_config(config: dict) -> "FakeDimensionalEmbeddingFunction":
+        return FakeDimensionalEmbeddingFunction(int(config["dimensions"]))
+
+    def get_config(self) -> dict:
+        return {"dimensions": self.dimensions}
 
 
 def _build_scenario_chunks(tmp_path: Path) -> Path:
@@ -63,11 +83,15 @@ def test_different_backends_use_independent_collections(
 ) -> None:
     chunks_path = _build_scenario_chunks(tmp_path)
     chroma_path = tmp_path / "chroma"
-    monkeypatch.setattr(
-        retriever,
-        "build_embedding_function",
-        lambda backend: retriever.HashEmbeddingFunction(),
-    )
+    dimensions_by_backend = {"hash": 2, "bge_small": 3, "bge_m3": 4}
+
+    def build_fake_embedding_function(backend: str) -> BuiltEmbeddingFunction:
+        return BuiltEmbeddingFunction(
+            FakeDimensionalEmbeddingFunction(dimensions_by_backend[backend]),
+            backend,
+        )
+
+    monkeypatch.setattr(retriever, "build_embedding_function", build_fake_embedding_function)
 
     for backend in ("hash", "bge_small", "bge_m3"):
         ChromaRuleStore(
@@ -84,6 +108,15 @@ def test_different_backends_use_independent_collections(
         "rule_chunks_bank_enterprise_bge_small",
         "rule_chunks_bank_enterprise_bge_m3",
     } <= collection_names
+
+    assert {
+        collection.name: list(collection.peek(1)["embeddings"][0])
+        for collection in client.list_collections()
+    } == {
+        "rule_chunks_bank_enterprise_hash": [1.0, 0.0],
+        "rule_chunks_bank_enterprise_bge_small": [1.0, 0.0, 0.0],
+        "rule_chunks_bank_enterprise_bge_m3": [1.0, 0.0, 0.0, 0.0],
+    }
 
 
 def test_eval_rag_cli_passes_embedding_backend_to_retriever(

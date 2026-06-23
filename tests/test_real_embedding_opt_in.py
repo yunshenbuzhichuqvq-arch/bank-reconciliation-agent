@@ -78,8 +78,9 @@ def test_real_backend_load_failure_logs_fallback_warning(
         lambda event, **kwargs: warnings.append({"event": event, **kwargs}),
     )
 
-    embedding_function = retriever.build_embedding_function("bge_m3")
+    built_embedding = retriever.build_embedding_function("bge_m3")
 
-    assert isinstance(embedding_function, HashEmbeddingFunction)
+    assert built_embedding.effective_backend == "hash"
+    assert isinstance(built_embedding.embedding_function, HashEmbeddingFunction)
     assert [warning["backend"] for warning in warnings] == ["bge_m3", "bge_small"]
     assert all(warning["event"] == "rag_embedding_backend_fallback" for warning in warnings)

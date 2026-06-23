@@ -1,4 +1,3 @@
-import importlib.util
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -60,17 +59,11 @@ class Settings(BaseSettings):
 
     def rag_dense_min_score_for_backend(self, backend: str | None = None) -> float:
         selected_backend = backend or self.embedding_backend
-        if backend is None and selected_backend != "hash" and not _real_embedding_dependency_available():
-            selected_backend = "hash"
         if selected_backend == "hash":
             return self.rag_dense_min_score
         if selected_backend in {"bge_small", "bge_m3"}:
             return 0.5
         raise ValueError(f"Unsupported embedding backend: {selected_backend}")
-
-
-def _real_embedding_dependency_available() -> bool:
-    return importlib.util.find_spec("sentence_transformers") is not None
 
 
 settings = Settings()

@@ -106,7 +106,9 @@ def evaluate_eval_set(
     top_k: int = 5,
     embedding_backend: str | None = None,
 ) -> dict[str, Any]:
-    min_score = settings.rag_dense_min_score_for_backend(embedding_backend)
+    min_score = settings.rag_dense_min_score_for_backend(
+        _effective_embedding_backend(retriever, embedding_backend)
+    )
     results = [
         _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=min_score)
         for case in cases
@@ -350,7 +352,11 @@ def _evaluate_smoke_case(
     embedding_backend: str | None,
 ) -> LegacyCaseResult:
     response = retriever.search(
-        _request_for_mode(case.query, mode=mode, embedding_backend=embedding_backend)
+        _request_for_mode(
+            case.query,
+            mode=mode,
+            embedding_backend=_effective_embedding_backend(retriever, embedding_backend),
+        )
     )
     matched_item = _find_hit(response.items, expected_tag=case.expected_tag)
     score = representative_score(matched_item) if matched_item is not None else None
@@ -382,6 +388,14 @@ def _request_for_mode(
             enable_reranker=True,
         )
     raise ValueError(f"unsupported mode: {mode}")
+
+
+def _effective_embedding_backend(retriever: RuleRetriever | Any, requested_backend: str | None) -> str:
+    if requested_backend is not None:
+        return requested_backend
+    store = getattr(retriever, "store", None)
+    backend = getattr(store, "embedding_backend", None)
+    return backend if isinstance(backend, str) else "hash"
 
 
 def _find_hit(items: list[RagSearchItem], *, expected_tag: str) -> RagSearchItem | None:

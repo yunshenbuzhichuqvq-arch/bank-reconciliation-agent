@@ -6,6 +6,7 @@ from bank_reconciliation_agent.rag import retriever
 from bank_reconciliation_agent.rag.retriever import (
     BGE_M3_EMBEDDING_DIMENSIONS,
     BGE_SMALL_EMBEDDING_DIMENSIONS,
+    BuiltEmbeddingFunction,
     HashEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
     build_embedding_function,
@@ -15,10 +16,11 @@ from bank_reconciliation_agent.rag.retriever import (
 def test_hash_backend_preserves_existing_embedding_vector() -> None:
     old_vector = retriever._embed_text("金额差异 对账不平")
 
-    embedding_function = build_embedding_function("hash")
+    built_embedding = build_embedding_function("hash")
 
-    assert isinstance(embedding_function, HashEmbeddingFunction)
-    assert list(embedding_function(["金额差异 对账不平"])[0]) == old_vector
+    assert built_embedding.effective_backend == "hash"
+    assert isinstance(built_embedding.embedding_function, HashEmbeddingFunction)
+    assert list(built_embedding.embedding_function(["金额差异 对账不平"])[0]) == old_vector
 
 
 @pytest.mark.parametrize(
@@ -47,8 +49,10 @@ def test_real_backend_factory_returns_configured_sentence_transformer(
         staticmethod(lambda: FakeModel),
     )
 
-    embedding_function = build_embedding_function(backend)
+    built_embedding = build_embedding_function(backend)
+    embedding_function = built_embedding.embedding_function
 
+    assert built_embedding.effective_backend == backend
     assert isinstance(embedding_function, SentenceTransformerEmbeddingFunction)
     assert embedding_function.model_name == model_name
     assert embedding_function.get_config() == {
@@ -110,9 +114,10 @@ def test_bge_m3_load_failure_falls_back_to_hash(monkeypatch: pytest.MonkeyPatch)
         lambda event, **kwargs: warnings.append({"event": event, **kwargs}),
     )
 
-    embedding_function = build_embedding_function("bge_m3")
+    built_embedding = build_embedding_function("bge_m3")
 
-    assert isinstance(embedding_function, HashEmbeddingFunction)
+    assert built_embedding.effective_backend == "hash"
+    assert isinstance(built_embedding.embedding_function, HashEmbeddingFunction)
     assert [warning["backend"] for warning in warnings] == ["bge_m3", "bge_small"]
     assert all(warning["event"] == "rag_embedding_backend_fallback" for warning in warnings)
 
@@ -125,3 +130,24 @@ def test_chroma_rule_store_uses_configured_backend(tmp_path: Path) -> None:
     )
 
     assert isinstance(store.embedding_function, HashEmbeddingFunction)
+    assert store.embedding_backend == "hash"
+
+
+def test_chroma_rule_store_uses_effective_backend_after_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        retriever,
+        "build_embedding_function",
+        lambda backend: BuiltEmbeddingFunction(HashEmbeddingFunction(), "hash"),
+    )
+
+    store = retriever.ChromaRuleStore(
+        chunks_path=tmp_path / "rule_chunks.jsonl",
+        chroma_path=tmp_path / "chroma",
+        embedding_backend="bge_m3",
+    )
+
+    assert store.embedding_backend == "hash"
+    assert store.collection_name == "rule_chunks_bank_enterprise_hash"

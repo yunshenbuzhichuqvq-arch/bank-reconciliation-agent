@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,12 @@ EMBEDDING_BACKEND_MODELS = {
     "bge_small": (BGE_SMALL_MODEL_NAME, BGE_SMALL_EMBEDDING_DIMENSIONS),
     "bge_m3": (BGE_M3_MODEL_NAME, BGE_M3_EMBEDDING_DIMENSIONS),
 }
+
+
+@dataclass(frozen=True)
+class BuiltEmbeddingFunction:
+    embedding_function: EmbeddingFunction[list[str]]
+    effective_backend: str
 
 
 class HashEmbeddingFunction(EmbeddingFunction[list[str]]):
@@ -90,21 +97,21 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[list[str]]):
         return SentenceTransformer
 
 
-def build_embedding_function(backend: str) -> EmbeddingFunction[list[str]]:
+def build_embedding_function(backend: str) -> BuiltEmbeddingFunction:
     if backend == "hash":
-        return HashEmbeddingFunction()
+        return BuiltEmbeddingFunction(HashEmbeddingFunction(), "hash")
     if backend not in EMBEDDING_BACKEND_MODELS:
         raise ValueError(f"Unsupported embedding backend: {backend}")
 
     fallback_chain = ["bge_small", "hash"] if backend == "bge_m3" else ["hash"]
     for candidate in [backend, *fallback_chain]:
         if candidate == "hash":
-            return HashEmbeddingFunction()
+            return BuiltEmbeddingFunction(HashEmbeddingFunction(), "hash")
         model_name, dimensions = EMBEDDING_BACKEND_MODELS[candidate]
         embedding_function = SentenceTransformerEmbeddingFunction(model_name, dimensions=dimensions)
         try:
             embedding_function([""])
-            return embedding_function
+            return BuiltEmbeddingFunction(embedding_function, candidate)
         except Exception as exc:  # pragma: no cover - exact failures depend on local model setup
             log.warning(
                 "rag_embedding_backend_fallback",
@@ -112,7 +119,7 @@ def build_embedding_function(backend: str) -> EmbeddingFunction[list[str]]:
                 next_backend=fallback_chain[0] if candidate == backend else "hash",
                 reason=str(exc),
             )
-    return HashEmbeddingFunction()
+    return BuiltEmbeddingFunction(HashEmbeddingFunction(), "hash")
 
 
 class ChromaRuleStore:
@@ -126,12 +133,14 @@ class ChromaRuleStore:
     ) -> None:
         self.chunks_path = chunks_path
         self.chroma_path = chroma_path or Path(settings.chroma_path)
-        self.embedding_backend = embedding_backend or settings.embedding_backend
+        requested_backend = embedding_backend or settings.embedding_backend
+        built_embedding = build_embedding_function(requested_backend)
+        self.embedding_backend = built_embedding.effective_backend
         self.collection_name = collection_name or self._collection_name_for_scenario(
             scenario_type,
             self.embedding_backend,
         )
-        self.embedding_function = build_embedding_function(self.embedding_backend)
+        self.embedding_function = built_embedding.embedding_function
         self._collections: dict[str, Collection] = {}
 
     def collection(self, scenario_type: str = "BANK_ENTERPRISE") -> Collection:

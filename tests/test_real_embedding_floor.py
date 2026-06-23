@@ -76,10 +76,7 @@ class EvalRetriever:
 
 def test_workflow_uses_dense_floor_for_configured_embedding_backend(monkeypatch) -> None:
     retriever = RecordingRetriever()
-    monkeypatch.setattr(
-        "bank_reconciliation_agent.core.config._real_embedding_dependency_available",
-        lambda: True,
-    )
+    retriever.store = type("Store", (), {"embedding_backend": "bge_m3"})()
     monkeypatch.setattr(
         "bank_reconciliation_agent.services.workflow.settings.embedding_backend",
         "bge_m3",
@@ -96,6 +93,21 @@ def test_workflow_uses_dense_floor_for_configured_embedding_backend(monkeypatch)
     assert retriever.requests[0].min_score == 0.5
     assert result["next_action"] == "PENDING_HUMAN"
     assert result["fallback_level"] == 0
+
+
+def test_workflow_uses_dense_floor_for_effective_store_backend() -> None:
+    retriever = RecordingRetriever()
+    retriever.store = type("Store", (), {"embedding_backend": "hash"})()
+
+    run_item(
+        _state(),
+        extraction_agent=NoopAgent(),
+        trace_agent=NoopAgent(),
+        audit_agent=RecordingAuditAgent(),
+        retriever=retriever,
+    )
+
+    assert retriever.requests[0].min_score == 0.341
 
 
 def test_eval_rag_uses_dense_floor_for_embedding_backend() -> None:
