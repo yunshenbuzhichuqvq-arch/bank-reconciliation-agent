@@ -25,8 +25,10 @@ def _item(chunk_id: str) -> RagSearchItem:
 class StubRetriever:
     def __init__(self, responses: dict[str, list[str]]) -> None:
         self.responses = responses
+        self.requests = []
 
     def search(self, request) -> RagSearchResponse:
+        self.requests.append(request)
         return RagSearchResponse(items=[_item(chunk_id) for chunk_id in self.responses[request.query]])
 
 
@@ -48,15 +50,14 @@ def test_evaluate_eval_set_computes_recall_mrr_and_ndcg() -> None:
         ),
     ]
 
-    report = eval_rag.evaluate_eval_set(
-        cases,
-        retriever=StubRetriever(
-            {
-                "q1": ["c1", "x", "c2"],
-                "q2": ["x", "c3"],
-            }
-        ),
+    retriever = StubRetriever(
+        {
+            "q1": ["c1", "x", "c2"],
+            "q2": ["x", "c3"],
+        }
     )
+
+    report = eval_rag.evaluate_eval_set(cases, retriever=retriever)
 
     assert report["case_count"] == 2
     assert report["summaries"] == [
@@ -71,6 +72,7 @@ def test_evaluate_eval_set_computes_recall_mrr_and_ndcg() -> None:
             }
         )
     ]
+    assert [request.enable_hybrid for request in retriever.requests] == [True, True]
 
 
 def test_eval_rag_cli_prints_metric_fields(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -229,6 +229,7 @@ def _evaluate_case(
             top_k=top_k,
             min_score=0.0,
             scenario_type=case.scenario_type,
+            enable_hybrid=True,
         )
     )
     retrieved_chunk_ids = [item.chunk_id for item in response.items[:top_k]]

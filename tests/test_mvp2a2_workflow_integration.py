@@ -37,7 +37,7 @@ def test_run_item_passes_scenario_and_feature_flags_to_retriever(monkeypatch) ->
         RagSearchRequest(
             query=_state()["rag_query"],
             top_k=5,
-            min_score=0.34,
+            min_score=0.341,
             scenario_type="BANK_CLEARING",
             enable_rewrite=True,
             enable_hybrid=True,

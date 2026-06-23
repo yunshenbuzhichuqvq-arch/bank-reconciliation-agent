@@ -86,7 +86,7 @@ def test_workflow_uses_dense_floor_and_rag_miss_defers_without_fallback() -> Non
         retriever=retriever,
     )
 
-    assert retriever.requests[0].min_score == 0.34
+    assert retriever.requests[0].min_score == 0.341
     assert audit_agent.calls == 1
     assert result["rag_context"] == []
     assert result["next_action"] == "PENDING_HUMAN"
