@@ -162,6 +162,16 @@ uv run python -m scripts.generate_mock_excel
 uv run python -m scripts.reset_db --yes
 ```
 
+真实 embedding 测试默认不跑，CI 默认使用 hash 后端。需要手工验证本地模型路径时：
+
+```bash
+uv sync --extra dev --extra embedding
+export HF_HOME=/path/to/hf-cache
+uv run pytest -m embedding_real -v
+```
+
+`embedding_real` 测试只读取本地 Hugging Face / sentence-transformers 缓存；模型或依赖不可用时会 skip，不会在测试中下载模型。首次下载请在测试外完成，后续复用同一个 `HF_HOME`。
+
 前端：
 
 ```bash

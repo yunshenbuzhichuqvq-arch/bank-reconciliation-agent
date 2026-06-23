@@ -53,6 +53,7 @@ testpaths = ["tests"]
 pythonpath = [".", "src"]
 markers = [
     "live: opt-in tests that call external live services",
+    "embedding_real: opt-in tests that load local sentence-transformers embedding models",
 ]
 
 [tool.ruff]
