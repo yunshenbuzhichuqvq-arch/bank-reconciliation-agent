@@ -5,6 +5,7 @@ import pandas as pd
 from scripts.generate_mock_excel import (
     BANK_COLUMNS,
     CLEAR_COLUMNS,
+    DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS,
     EXPECTED_BRANCHES,
     generate_mock_excel,
     generate_mvp1_mock_excel,
@@ -82,15 +83,18 @@ def test_generate_mock_excel_writes_small_reconciliation_dataset(tmp_path: Path)
         "order_description",
         "remark",
     ]
-    assert len(bank_df) == 10
-    assert len(clear_df) == 10
-    assert set(bank_df["flow_id"]) - set(clear_df["flow_id"]) == {"F1005"}
-    assert set(clear_df["flow_id"]) - set(bank_df["flow_id"]) == {"F1006"}
-    assert bank_df.loc[bank_df["flow_id"] == "F1001", "amount"].iloc[0] == 100.00
-    assert bank_df.loc[bank_df["flow_id"] == "F1008", "transaction_direction"].iloc[0] == "DEBIT"
-    assert bank_df.loc[bank_df["flow_id"] == "F1001", "trade_time"].iloc[0] == "2026-05-21 09:10:00"
-    assert clear_df.loc[clear_df["flow_id"] == "F1001", "trade_time"].iloc[0] == "2026-05-21 09:10:05"
-    assert clear_df.loc[clear_df["flow_id"] == "F1001", "summary"].iloc[0] == "网银转账"
+    assert len(bank_df) == DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS + 6
+    assert len(clear_df) == DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS + 5
+    assert bank_df["counterparty_name_masked"].nunique() > 1
+    assert bank_df["summary"].nunique() > 1
+    assert set(bank_df["flow_id"]) - set(clear_df["flow_id"]) == {"F12006", "F12008"}
+    assert set(clear_df["flow_id"]) - set(bank_df["flow_id"]) == {"F12005"}
+    normal_flow_ids = set(bank_df["flow_id"]) & set(clear_df["flow_id"]) - {
+        "F12003",
+        "F12004",
+        "F12007",
+    }
+    assert len(normal_flow_ids) >= DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS
 
 
 def test_generate_mock_excel_includes_amount_mismatch_case(tmp_path: Path) -> None:
@@ -99,8 +103,8 @@ def test_generate_mock_excel_includes_amount_mismatch_case(tmp_path: Path) -> No
     bank_df = pd.read_excel(bank_path)
     clear_df = pd.read_excel(clear_path)
 
-    bank_amount = bank_df.loc[bank_df["flow_id"] == "F1004", "credit_amount"].iloc[0]
-    clear_amount = clear_df.loc[clear_df["flow_id"] == "F1004", "transaction_amount"].iloc[0]
+    bank_amount = bank_df.loc[bank_df["flow_id"] == "F12003", "credit_amount"].iloc[0]
+    clear_amount = clear_df.loc[clear_df["flow_id"] == "F12003", "transaction_amount"].iloc[0]
 
     assert bank_amount == 300.00
     assert clear_amount == 295.00
@@ -117,7 +121,8 @@ def test_generate_mvp1_mock_excel_writes_branch_fixture(tmp_path: Path) -> None:
     assert clear_path.name == "mvp1_clear.xlsx"
     assert list(bank_df.columns) == BANK_COLUMNS
     assert list(clear_df.columns) == CLEAR_COLUMNS
-    assert set(EXPECTED_BRANCHES) == all_flow_ids
+    assert set(EXPECTED_BRANCHES) <= all_flow_ids
+    assert len(all_flow_ids - set(EXPECTED_BRANCHES)) == DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS
     assert bank_df["flow_id"].is_unique
     assert clear_df["flow_id"].is_unique
 

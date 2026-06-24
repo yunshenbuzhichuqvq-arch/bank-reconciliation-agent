@@ -106,7 +106,7 @@ def _approve(
         (
             "BANK_ENTERPRISE",
             "BE-R002",
-            {"auto_fixed_rows": 2, "pending_human_rows": 6},
+            {"auto_fixed_rows": 13, "pending_human_rows": 6},
         ),
         (
             "BANK_CLEARING",

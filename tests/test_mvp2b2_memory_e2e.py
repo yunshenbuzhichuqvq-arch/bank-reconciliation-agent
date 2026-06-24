@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from bank_reconciliation_agent.core.llm.provider import LLMResult
@@ -22,6 +23,7 @@ from bank_reconciliation_agent.services import workflow as workflow_module
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
+    EXPECTED_BRANCHES,
     generate_mvp1_mock_excel,
     generate_mvp2a3_mock_excel,
 )
@@ -78,13 +80,23 @@ def test_bank_enterprise_memory_round_trip_query_api_and_reinjection(
     monkeypatch.setattr(ReconciliationService, "_generate_task_id", lambda self, content: task_id)
 
     bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+    bank_df = pd.read_excel(bank_path)
+    clear_df = pd.read_excel(clear_path)
+    expected_pending = {
+        flow_id: branch
+        for flow_id, branch in EXPECTED_BRANCHES.items()
+        if branch[2] == "PENDING_HUMAN"
+    }
+    expected_auto_fixed = len(set(bank_df["flow_id"]) | set(clear_df["flow_id"])) - len(
+        expected_pending
+    )
     first_upload = _upload_excel_pair(bank_path, clear_path)
 
     assert first_upload.status_code == 200
     first_body = first_upload.json()["data"]
     assert first_body["task_id"] == task_id
-    assert first_body["auto_fixed_rows"] == 2
-    assert first_body["pending_human_rows"] == 6
+    assert first_body["auto_fixed_rows"] == expected_auto_fixed
+    assert first_body["pending_human_rows"] == len(expected_pending)
     assert all(len(messages) == 2 for messages in provider.calls)
 
     queue_id = _pending_queue_id(task_id)
@@ -118,8 +130,8 @@ def test_bank_enterprise_memory_round_trip_query_api_and_reinjection(
     assert second_upload.status_code == 200
     second_body = second_upload.json()["data"]
     assert second_body["task_id"] == task_id
-    assert second_body["auto_fixed_rows"] == 2
-    assert second_body["pending_human_rows"] == 6
+    assert second_body["auto_fixed_rows"] == expected_auto_fixed
+    assert second_body["pending_human_rows"] == len(expected_pending)
     assert any(
         len(messages) == 3
         and "Long-term memory:" in messages[1]["content"]
@@ -289,8 +301,16 @@ def test_rag_breaker_open_routes_upload_to_human_without_changing_baseline_count
     assert response.status_code == 200
     body = response.json()["data"]
     assert body["task_id"] == task_id
-    assert body["auto_fixed_rows"] == 2
-    assert body["pending_human_rows"] == 6
+    expected_pending = {
+        flow_id: branch
+        for flow_id, branch in EXPECTED_BRANCHES.items()
+        if branch[2] == "PENDING_HUMAN"
+    }
+    expected_auto_fixed = len(
+        set(pd.read_excel(bank_path)["flow_id"]) | set(pd.read_excel(clear_path)["flow_id"])
+    ) - len(expected_pending)
+    assert body["auto_fixed_rows"] == expected_auto_fixed
+    assert body["pending_human_rows"] == len(expected_pending)
     assert "rag_circuit_breaker_failure" in caplog.text
     assert "rag_circuit_breaker_open" in caplog.text
 
