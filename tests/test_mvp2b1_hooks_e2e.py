@@ -16,6 +16,7 @@ from bank_reconciliation_agent.services.reconciliation import ReconciliationServ
 from bank_reconciliation_agent.services.task import TaskService
 from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
+    DEFAULT_BANK_CLEARING_NORMAL_ROWS,
     EXPECTED_BRANCHES,
     generate_mvp1_mock_excel,
     generate_mvp2a3_mock_excel,
@@ -109,10 +110,11 @@ def test_mvp2b1_bank_clearing_e2e_keeps_baseline_and_exposes_hook_results(
         for flow_id, branch in BANK_CLEARING_EXPECTED_BRANCHES.items()
         if branch[2] == "PENDING_HUMAN"
     }
+    expected_auto_fixed = DEFAULT_BANK_CLEARING_NORMAL_ROWS + 1
     persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
     assert persisted_task is not None
     assert persisted_task.scenario_type == "BANK_CLEARING"
-    assert persisted_task.auto_fixed_rows == 1
+    assert persisted_task.auto_fixed_rows == expected_auto_fixed
     assert persisted_task.pending_ai_rows == 0
     assert persisted_task.pending_human_rows == len(expected_pending)
     assert persisted_task.ai_processed_rows == len(expected_pending)

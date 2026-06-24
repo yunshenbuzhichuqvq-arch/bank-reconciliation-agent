@@ -12,6 +12,7 @@ from bank_reconciliation_agent.services.queue import QueueService
 from bank_reconciliation_agent.services.task import TaskService
 from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
+    DEFAULT_BANK_CLEARING_NORMAL_ROWS,
     generate_mvp2a3_mock_excel,
 )
 from tests.auth_helpers import demo_bearer_headers
@@ -55,11 +56,12 @@ def test_mvp2a3_bank_clearing_upload_start_and_exceptions_match_expected_branche
         for flow_id, branch in BANK_CLEARING_EXPECTED_BRANCHES.items()
         if branch[2] == "PENDING_HUMAN"
     }
+    expected_auto_fixed = DEFAULT_BANK_CLEARING_NORMAL_ROWS + 1
 
     assert upload_body["status"] == "UPLOADED"
     assert upload_body["total_bank_rows"] == len(bank_df)
     assert upload_body["total_clear_rows"] == len(clear_df)
-    assert upload_body["auto_fixed_rows"] == 1
+    assert upload_body["auto_fixed_rows"] == expected_auto_fixed
     assert upload_body["pending_ai_rows"] == 0
     assert upload_body["pending_human_rows"] == len(expected_pending)
 
@@ -75,7 +77,7 @@ def test_mvp2a3_bank_clearing_upload_start_and_exceptions_match_expected_branche
     assert status_response.status_code == 200
     status_body = status_response.json()["data"]
     assert status_body["status"] == "AI_RUNNING"
-    assert status_body["auto_fixed_rows"] == 1
+    assert status_body["auto_fixed_rows"] == expected_auto_fixed
     assert status_body["pending_human_rows"] == len(expected_pending)
     assert status_body["unresolved_rows"] == len(expected_pending)
 

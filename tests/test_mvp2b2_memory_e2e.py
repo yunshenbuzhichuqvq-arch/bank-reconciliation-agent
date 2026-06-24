@@ -23,6 +23,7 @@ from bank_reconciliation_agent.services import workflow as workflow_module
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
+    DEFAULT_BANK_CLEARING_NORMAL_ROWS,
     EXPECTED_BRANCHES,
     generate_mvp1_mock_excel,
     generate_mvp2a3_mock_excel,
@@ -146,7 +147,12 @@ def test_bank_clearing_memory_round_trip_reinjects_context_without_regression(
 ) -> None:
     provider = RecordingProvider()
     task_id = f"TASK_MEMORY_CLEARING_{uuid4().hex[:8]}"
-    expected_pending = sum(1 for _, _, disposition in BANK_CLEARING_EXPECTED_BRANCHES.values() if disposition == "PENDING_HUMAN")
+    expected_pending = sum(
+        1
+        for _, _, disposition in BANK_CLEARING_EXPECTED_BRANCHES.values()
+        if disposition == "PENDING_HUMAN"
+    )
+    expected_auto_fixed = DEFAULT_BANK_CLEARING_NORMAL_ROWS + 1
     _reset_memory_tables()
     monkeypatch.setattr(workflow_module.audit_agent, "provider", provider)
     monkeypatch.setattr(ReconciliationService, "_generate_task_id", lambda self, content: task_id)
@@ -157,7 +163,7 @@ def test_bank_clearing_memory_round_trip_reinjects_context_without_regression(
     assert first_upload.status_code == 200
     first_body = first_upload.json()["data"]
     assert first_body["task_id"] == task_id
-    assert first_body["auto_fixed_rows"] == 1
+    assert first_body["auto_fixed_rows"] == expected_auto_fixed
     assert first_body["pending_human_rows"] == expected_pending
     assert all(len(messages) == 2 for messages in provider.calls)
 
@@ -180,7 +186,7 @@ def test_bank_clearing_memory_round_trip_reinjects_context_without_regression(
     assert second_upload.status_code == 200
     second_body = second_upload.json()["data"]
     assert second_body["task_id"] == task_id
-    assert second_body["auto_fixed_rows"] == 1
+    assert second_body["auto_fixed_rows"] == expected_auto_fixed
     assert second_body["pending_human_rows"] == expected_pending
     assert any(
         len(messages) == 3
