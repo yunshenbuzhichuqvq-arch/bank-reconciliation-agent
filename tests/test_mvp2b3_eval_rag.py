@@ -1,10 +1,15 @@
+from collections import Counter
 import json
 from pathlib import Path
+import re
 
 import pytest
 
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from scripts import eval_rag
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _item(chunk_id: str) -> RagSearchItem:
@@ -103,6 +108,8 @@ def test_eval_rag_cli_prints_metric_fields(tmp_path: Path, capsys: pytest.Captur
             str(tmp_path / "chroma"),
             "--report",
             str(tmp_path / "rag_eval.md"),
+            "--embedding-backend",
+            "hash",
         ]
     )
 
@@ -114,3 +121,30 @@ def test_eval_rag_cli_prints_metric_fields(tmp_path: Path, capsys: pytest.Captur
     assert "mrr" in payload["summaries"][0]
     assert "ndcg_at_5" in payload["summaries"][0]
     assert "Recall@5 is evaluated" in payload["notes"][0]
+
+
+def test_eval_set_queries_are_semantic_questions_without_error_code_stuffing() -> None:
+    cases = eval_rag.load_eval_set(PROJECT_ROOT / "data/rag_eval_set.json")
+
+    assert len(cases) >= 120
+    assert all("?" not in case.query for case in cases)
+    assert not any(re.search(r"\b[A-Z_]{4,}\b", case.query) for case in cases)
+
+    grouped: dict[tuple[str, str], set[str]] = {}
+    for case in cases:
+        key = (case.scenario_type, case.error_type)
+        grouped.setdefault(key, set()).add(case.query[:8])
+
+    assert all(len(prefixes) >= 4 for prefixes in grouped.values())
+
+
+def test_bank_enterprise_eval_set_has_no_single_chunk_stuffing() -> None:
+    cases = eval_rag.load_eval_set(PROJECT_ROOT / "data/rag_eval_set.json")
+
+    sole_expected_counts = Counter(
+        case.expected_chunk_ids[0]
+        for case in cases
+        if case.scenario_type == "BANK_ENTERPRISE" and len(case.expected_chunk_ids) == 1
+    )
+
+    assert all(count <= 3 for count in sole_expected_counts.values())

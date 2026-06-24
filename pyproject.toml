@@ -35,6 +35,11 @@ dev = [
     "ruff>=0.5.0",
     "fakeredis>=2.36.2",
 ]
+embedding = [
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "sentence-transformers>=3.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -48,6 +53,7 @@ testpaths = ["tests"]
 pythonpath = [".", "src"]
 markers = [
     "live: opt-in tests that call external live services",
+    "embedding_real: opt-in tests that load local sentence-transformers embedding models",
 ]
 
 [tool.ruff]

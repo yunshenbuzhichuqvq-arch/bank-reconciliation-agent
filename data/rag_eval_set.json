@@ -3,161 +3,169 @@
     "id": "be-r002-01",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "银企对账金额不一致 差异金额 需要保留银行端和企业端金额",
+    "query": "银行流水和企业账簿都能找到同一笔交易，但两个金额不一样，审核时应该优先查什么依据",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_playbook_001"
     ]
   },
   {
     "id": "be-r002-02",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "对账不平 金额差异 银行端金额 清算端金额 差额处理",
+    "query": "客户付款在两边都有记录，只是银行入账金额比企业登记金额少了一部分，这类差额怎么判断",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_playbook_001",
+      "bank_enterprise_amount_mismatch_playbook_004"
     ]
   },
   {
     "id": "be-r002-03",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "AMOUNT_MISMATCH 需要记录差异金额 和双边金额 进入AI审计",
+    "query": "一笔收款被企业按发票合并登记，银行侧显示的到账金额对不上，应该参考哪些规则",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_advanced_003",
+      "bank_enterprise_amount_mismatch_playbook_004"
     ]
   },
   {
     "id": "be-r002-04",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "银行端与企业端都有流水 但标准金额不一致 怎么处理",
+    "query": "退款或冲正抵减以后净额和原交易金额有差异，能不能直接平账",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_advanced_002"
     ]
   },
   {
     "id": "be-r002-05",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "清算文件流水与资金核对不平 金额不一致 规则依据",
+    "query": "外币业务因为汇率重估导致账面金额和银行金额不一致，复核时要留哪些证据",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_advanced_004",
+      "bank_enterprise_amount_mismatch_playbook_005"
     ]
   },
   {
     "id": "be-r002-06",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "金额不一致 对账文件异常 保留银行金额 清算金额 差异金额",
+    "query": "银行扣了手续费后到账净额小于企业应收金额，怎么区分普通金额差异和手续费差异",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_playbook_002",
+      "bank_enterprise_amount_mismatch_advanced_005"
     ]
   },
   {
     "id": "be-r002-07",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "银企异常 金额差异 不能直接平账 需要AI审计",
+    "query": "同一笔资金两边日期和对手方一致但金额不相等，系统应给出什么处理路径",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_playbook_001"
     ]
   },
   {
     "id": "be-r002-08",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "对账金额差 账不平 双边流水都在 如何留痕",
+    "query": "多笔发票对应一笔回款时总额差一点，是否需要拆分核对后再判断",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_advanced_003",
+      "bank_enterprise_amount_mismatch_playbook_004"
     ]
   },
   {
     "id": "be-r002-09",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "银行企业金额不一致 差额说明 进入待AI审计",
+    "query": "企业说差额是四舍五入造成的，银行流水金额仍不一致时如何处理",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_playbook_005"
     ]
   },
   {
     "id": "be-r002-10",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "金额对不上 清算异常 需要保存金额差和来源依据",
+    "query": "金额差异超过人工复核阈值时，自动审核应如何升级并保留来源",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_001"
+      "bank_enterprise_amount_mismatch_advanced_001",
+      "bank_enterprise_amount_mismatch_advanced_006"
     ]
   },
   {
     "id": "be-r004-01",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "摘要不一致 户名不一致 需要绑定原始交易和处理依据",
+    "query": "金额和日期能对应上，但银行摘要里的付款方名称和企业账簿里的客户名称不一致，怎么核验",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_002"
+      "bank_enterprise_narrative_mismatch_playbook_001"
     ]
   },
   {
     "id": "be-r004-02",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "只看摘要相似不能下结论 需要原始凭证和交易要素",
+    "query": "客户使用简称付款，企业账上是全称，摘要相似时能不能自动确认匹配",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_002"
+      "bank_enterprise_narrative_mismatch_playbook_002"
     ]
   },
   {
     "id": "be-r004-03",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "客户名不一致 交易备注不一致 不能直接自动平账",
+    "query": "同名关联公司之间发生付款，户名看起来接近但主体不同，应查哪些原始资料",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_002"
+      "bank_enterprise_narrative_mismatch_advanced_001"
     ]
   },
   {
     "id": "be-r004-04",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "摘要户名异常 需要关联异常类型 原始交易 和处理依据",
+    "query": "银行流水里有经办人姓名，企业凭证里是公司名称，审核时如何判断摘要户名不符",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_002"
+      "bank_enterprise_narrative_mismatch_advanced_003"
     ]
   },
   {
     "id": "be-r004-05",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "银行摘要和企业摘要不一致 如何做审计留痕",
+    "query": "付款用途字段和合同编号对不上，但金额相同，是否可以直接平账",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_narrative_mismatch_playbook_004"
     ]
   },
   {
     "id": "be-r004-06",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "户名不一致 不能只凭单侧金额判断 需要原始业务要素",
+    "query": "银行摘要包含特殊字符和英文缩写，企业名称是中文全称，规范化后还要保留什么证据",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_002"
+      "bank_enterprise_narrative_mismatch_advanced_002",
+      "bank_enterprise_narrative_mismatch_playbook_005"
     ]
   },
   {
     "id": "be-r004-07",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "摘要不同 客户名不同 处理过程要保留规则来源",
+    "query": "退款冲正的备注和原交易摘要不同，系统应该怎样避免误判为普通户名不符",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_narrative_mismatch_playbook_003"
     ]
   },
   {
     "id": "be-r004-08",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "相似摘要不能当作平账依据 需要查原始记录",
+    "query": "只凭摘要里几个关键词相似就匹配两笔流水，会有什么审计风险",
     "expected_chunk_ids": [
+      "bank_enterprise_narrative_mismatch_playbook_002",
       "pbc_small_payment_query_reply_002"
     ]
   },
@@ -165,319 +173,328 @@
     "id": "be-r004-09",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "名称摘要不符 异常处理结果要能关联flow_id和task_id",
+    "query": "户名不一致同时疑似重复提交，应先参考摘要规则还是重复记账规则",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_002"
+      "bank_enterprise_narrative_mismatch_advanced_004"
     ]
   },
   {
     "id": "be-r004-10",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "备注不一致 审计建议需要留原始异常和处理结论",
+    "query": "客户名称和备注都不一致但流水号相同，复核闭环要记录哪些处理依据",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_narrative_mismatch_advanced_005",
+      "pbc_epayment_guideline_002"
     ]
   },
   {
     "id": "be-r005-01",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "企业已记账 银行未到账 单边缺失 需要查询查复",
+    "query": "企业已经入账并有凭证，但银行流水暂时没有到账记录，下一步应该怎么查",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001",
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_bank_unarrived_playbook_001"
     ]
   },
   {
     "id": "be-r005-02",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "银行端缺失 只有企业侧流水 不能直接平账",
+    "query": "客户说款项已经汇出，企业账上也登记了，银行侧未达时能不能先自动平账",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_bank_unarrived_playbook_001",
+      "bank_enterprise_bank_unarrived_playbook_003"
     ]
   },
   {
     "id": "be-r005-03",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "单边缺失 查询查复 回复内容详细明确",
+    "query": "跨行转账在途导致银行未到账，规则要求保留哪些查询查复材料",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001"
+      "bank_enterprise_bank_unarrived_advanced_002",
+      "bank_enterprise_bank_unarrived_playbook_004"
     ]
   },
   {
     "id": "be-r005-04",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "企业有账 银行没有到账 流水缺失 后续追溯",
+    "query": "票据或汇票还没有兑付，企业已记收款时应按什么路径处理",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_bank_unarrived_advanced_001"
     ]
   },
   {
     "id": "be-r005-05",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "单侧存在流水 需要输出缺失方向 已有侧金额 和来源文件",
+    "query": "跨境清算延迟造成银行端缺流水，系统应如何判断是否仍在正常时间窗口内",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_bank_unarrived_advanced_002"
     ]
   },
   {
     "id": "be-r005-06",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "银行未到账 查询查复 原始流水号 金额 交易时间",
+    "query": "长期挂账的银行未达款项超过预警期限，应该怎样升级复核",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_002"
+      "bank_enterprise_bank_unarrived_advanced_004",
+      "bank_enterprise_bank_unarrived_advanced_005"
     ]
   },
   {
     "id": "be-r005-07",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "只有企业流水 银行侧缺失 进入人工复核",
+    "query": "只有企业账簿记录，没有银行回单，审核结论应要求补哪些字段",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001",
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_bank_unarrived_playbook_003",
+      "bank_enterprise_bank_unarrived_playbook_005"
     ]
   },
   {
     "id": "be-r005-08",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "缺失银行侧 来源文件 和处理路径 需要保留",
+    "query": "银行未到账和跨期入账看起来都发生在月末，应该如何区分",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_bank_unarrived_advanced_003",
+      "bank_enterprise_cross_period_playbook_002"
     ]
   },
   {
     "id": "be-r005-09",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "银行未到账 不能自动平账 查询应回复 回复应明确",
+    "query": "企业凭证真实性需要核验时，单边未达规则对证据有什么要求",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001"
+      "bank_enterprise_bank_unarrived_playbook_003"
     ]
   },
   {
     "id": "be-r005-10",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "单边异常 流水缺失 查询查复 人工跟进",
+    "query": "后续银行到账后需要闭环这笔未达项，任务里应保存哪些追踪信息",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001",
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_bank_unarrived_playbook_005"
     ]
   },
   {
     "id": "be-r006-01",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "银行已到账 企业未入账 单边缺失 需要原始凭证核对",
+    "query": "银行流水已经入账，但企业账簿没有对应记录，这种企业未记账应怎么处理",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_002",
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_book_unrecorded_playbook_001"
     ]
   },
   {
     "id": "be-r006-02",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "企业未记账 只有银行侧流水 不能直接确认平账",
+    "query": "账户管理费被银行自动扣收，企业没有做费用凭证，审核时应该参考哪条规则",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_book_unrecorded_advanced_001"
     ]
   },
   {
     "id": "be-r006-03",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "银行到账 企业漏记 查询查复 和后续追溯",
+    "query": "银行结息已经到账，企业账上还没有确认利息收入，需要补哪些凭证",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001"
+      "bank_enterprise_book_unrecorded_advanced_002"
     ]
   },
   {
     "id": "be-r006-04",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "单边缺失 需要保留交易时间 渠道 来源文件",
+    "query": "代收款项先进入银行账户但业务系统未确认收入，能不能直接自动补记",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_002"
+      "bank_enterprise_book_unrecorded_advanced_003"
     ]
   },
   {
     "id": "be-r006-05",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "银行有流水 企业没有入账 缺失方向 和金额依据",
+    "query": "银行有回单企业漏导入流水时，系统应怎样区分漏记和文件重复下载",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_book_unrecorded_playbook_004"
     ]
   },
   {
     "id": "be-r006-06",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "企业未入账 原始交易记录 支付业务要素 为准",
+    "query": "银行已扣短信费，企业账面没有费用记录，这类小额扣费怎么闭环",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_002"
+      "bank_enterprise_book_unrecorded_advanced_001"
     ]
   },
   {
     "id": "be-r006-07",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "只有银行侧存在流水 需要查询查复 回复明确",
+    "query": "企业未入账和银行未到账方向相反，审核说明里应如何写清楚",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001"
+      "bank_enterprise_book_unrecorded_advanced_004"
     ]
   },
   {
     "id": "be-r006-08",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "银行到账未入账 单侧数据不能直接确认结论",
+    "query": "银行端出现一笔收入，企业凭证还没生成，应该要求业务部门补什么材料",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002",
-      "pbc_small_payment_query_reply_002"
+      "bank_enterprise_book_unrecorded_advanced_003",
+      "bank_enterprise_book_unrecorded_playbook_001"
     ]
   },
   {
     "id": "be-r006-09",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "企业漏记账 单边异常 人工复核 查询查复",
+    "query": "月末银行已入账但企业下月才记账，应按企业未入账还是跨期处理",
     "expected_chunk_ids": [
-      "pbc_small_payment_query_reply_001"
+      "bank_enterprise_book_unrecorded_advanced_004",
+      "bank_enterprise_cross_period_playbook_003"
     ]
   },
   {
     "id": "be-r006-10",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "单边缺失 后续可进入T+1追溯或人工复核",
+    "query": "补记账完成后，审计台账需要记录哪些结果字段",
     "expected_chunk_ids": [
-      "unionpay_reconciliation_faq_002"
+      "bank_enterprise_book_unrecorded_playbook_005"
     ]
   },
   {
     "id": "be-r008-01",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "重复记账 需要保留原始异常 处理过程 处理结论 和规则来源",
+    "query": "企业账簿里同一客户同日同金额出现两条记录，银行只有一笔到账，怎么识别重复记账",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_duplicate_booking_advanced_001",
+      "bank_enterprise_duplicate_booking_playbook_001"
     ]
   },
   {
     "id": "be-r008-02",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "疑似重复入账 审计留痕 要覆盖差错内容 原因 处理结果",
+    "query": "同一笔收款被批量导入了两次，审核时应该查流水号还是凭证号",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_duplicate_booking_playbook_002",
+      "bank_enterprise_duplicate_booking_playbook_003"
     ]
   },
   {
     "id": "be-r008-03",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "重复记账 异常处理结果 需要关联原始交易 异常类型 和依据",
+    "query": "隔日再次提交了相同金额和相同对手方的付款，是否属于重复入账",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_002"
+      "bank_enterprise_duplicate_booking_advanced_002"
     ]
   },
   {
     "id": "be-r008-04",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "双重记账 挂账核实 需要可追溯处理记录",
+    "query": "一笔冲正和一笔重复记账金额相同，系统应如何区分两种情况",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_duplicate_booking_playbook_004"
     ]
   },
   {
     "id": "be-r008-05",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "重复流水 排查依据 需要绑定task_id和flow_id",
+    "query": "同日同额同对手的两条企业记录都没有独立银行流水，应按什么规则处理",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_002"
+      "bank_enterprise_duplicate_booking_advanced_001",
+      "bank_enterprise_duplicate_booking_playbook_002"
     ]
   },
   {
     "id": "be-r008-06",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "疑似一端重复记账 不能无依据自动结论 需保留来源",
+    "query": "重复确认后需要冲销其中一笔，审计证据应该保留哪些内容",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_duplicate_booking_advanced_005",
+      "bank_enterprise_duplicate_booking_playbook_005"
     ]
   },
   {
     "id": "be-r008-07",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "重复记账 异常处理结果 要能追溯到原始交易",
+    "query": "跨期入账和重复记账都出现两条相似记录，如何判断不是正常跨期",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_002"
+      "bank_enterprise_duplicate_booking_advanced_003",
+      "bank_enterprise_cross_period_playbook_001"
     ]
   },
   {
     "id": "be-r008-08",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "挂账核实 审计留痕 差错原因 处理部门 处理结果",
+    "query": "批量导入失败后重新上传导致凭证重复，处理闭环有什么要求",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_duplicate_booking_playbook_003"
     ]
   },
   {
     "id": "be-r008-09",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "重复记账 需要保存安全校验记录 和处理依据",
+    "query": "企业账上两条记录流水号相同但摘要略有不同，能不能自动认定重复",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_002"
+      "bank_enterprise_duplicate_booking_playbook_002"
     ]
   },
   {
     "id": "be-r008-10",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "疑似重复入账 风险较高 审计建议 不能脱离来源依据",
+    "query": "候选匹配和重复记账都涉及相似流水，规则边界在哪里",
     "expected_chunk_ids": [
-      "pbc_epayment_guideline_001"
+      "bank_enterprise_duplicate_booking_advanced_004",
+      "bank_enterprise_fuzzy_match_playbook_004"
     ]
   },
   {
     "id": "be-r002-11",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "银企金额不平 手续费净额差异 需要核对银行金额 企业金额 差额和规则依据",
+    "query": "收款金额方向记反后看起来差额很大，应该按金额不平还是重复记账处理",
     "expected_chunk_ids": [
-      "bank_enterprise_amount_mismatch_playbook_001",
-      "bank_enterprise_amount_mismatch_playbook_002"
+      "bank_enterprise_amount_mismatch_playbook_003"
     ]
   },
   {
     "id": "be-r002-12",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "银行回单金额 企业账金额 不一致 需要记录差额 不能自动平账",
+    "query": "双方都有流水但差额原因暂时说不清，审计结论需要包含哪些字段",
     "expected_chunk_ids": [
-      "bank_enterprise_amount_mismatch_playbook_003"
+      "bank_enterprise_amount_mismatch_advanced_006",
+      "bank_enterprise_amount_mismatch_playbook_001"
     ]
   },
   {
     "id": "be-r004-11",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "银企摘要户名不一致 收付款方名称简称 需要人工确认和审计留痕",
+    "query": "银行端摘要缺少合同信息，企业端凭证有合同号，应该如何补充核对",
     "expected_chunk_ids": [
       "bank_enterprise_narrative_mismatch_playbook_001",
       "bank_enterprise_narrative_mismatch_playbook_002"
@@ -487,7 +504,7 @@
     "id": "be-r004-12",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "NARRATIVE_NAME_MISMATCH",
-    "query": "付款摘要相似但户名不同 不能仅凭金额日期自动匹配",
+    "query": "代付代收场景下实际付款人和账面客户不同，是否需要转人工确认",
     "expected_chunk_ids": [
       "bank_enterprise_narrative_mismatch_playbook_003"
     ]
@@ -496,9 +513,9 @@
     "id": "be-r005-11",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "企业账已登记 银行流水未到 查询查复 银行未达账项",
+    "query": "付款渠道返回处理中，企业已做账但银行未落账，是否可以等待 T+1 再确认",
     "expected_chunk_ids": [
-      "bank_enterprise_bank_unarrived_playbook_001",
+      "bank_enterprise_bank_unarrived_playbook_002",
       "bank_enterprise_bank_unarrived_playbook_004"
     ]
   },
@@ -506,16 +523,17 @@
     "id": "be-r005-12",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BANK_UNARRIVED",
-    "query": "企业已付款 银行端缺少入账流水 需要保留凭证和待查动作",
+    "query": "银行端缺失的流水如果无法查复，最终应转入哪类人工处理",
     "expected_chunk_ids": [
-      "bank_enterprise_bank_unarrived_playbook_002"
+      "bank_enterprise_bank_unarrived_advanced_005",
+      "bank_enterprise_bank_unarrived_playbook_004"
     ]
   },
   {
     "id": "be-r006-11",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "银行流水存在 企业账未登记 未入账 待补记 人工复核",
+    "query": "银行流水存在但企业系统漏导入批次文件，怎样避免误判为清算文件异常",
     "expected_chunk_ids": [
       "bank_enterprise_book_unrecorded_playbook_001",
       "bank_enterprise_book_unrecorded_playbook_004"
@@ -525,8 +543,9 @@
     "id": "be-r006-12",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "BOOK_UNRECORDED",
-    "query": "银行到账但企业账缺失 需要补记凭证和来源依据",
+    "query": "长期未补记的银行已入账项目，什么时候需要升级人工复核",
     "expected_chunk_ids": [
+      "bank_enterprise_book_unrecorded_advanced_005",
       "bank_enterprise_book_unrecorded_playbook_003"
     ]
   },
@@ -534,26 +553,26 @@
     "id": "be-r008-11",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "企业账疑似重复记账 相同金额相同摘要 需要识别重复流水",
+    "query": "发现重复记账后，自动建议应指向冲销还是转人工复核",
     "expected_chunk_ids": [
-      "bank_enterprise_duplicate_booking_playbook_001",
-      "bank_enterprise_duplicate_booking_playbook_002"
+      "bank_enterprise_duplicate_booking_advanced_005",
+      "bank_enterprise_duplicate_booking_playbook_005"
     ]
   },
   {
     "id": "be-r008-12",
     "scenario_type": "BANK_ENTERPRISE",
     "error_type": "DUPLICATE_BOOKING",
-    "query": "银行或企业重复入账 风险较高 需要隔离重复凭证并留痕",
+    "query": "银行只有一笔资金，企业有两笔同额应收确认，系统要怎么给出解释",
     "expected_chunk_ids": [
-      "bank_enterprise_duplicate_booking_playbook_004"
+      "bank_enterprise_duplicate_booking_advanced_004"
     ]
   },
   {
     "id": "bc-r002-01",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "清算金额与核心入账金额不一致 手续费净额 差额处理",
+    "query": "清算文件金额和核心系统入账金额不一致，运营人员应该先核对哪些字段",
     "expected_chunk_ids": [
       "clearing_amount_mismatch_playbook_001",
       "clearing_amount_mismatch_playbook_002"
@@ -563,7 +582,7 @@
     "id": "bc-r002-02",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "渠道清算金额 核心金额 不平 需要输出清算金额核心金额和差额",
+    "query": "清算批次总额能对上，但单笔明细金额和核心流水不一致，怎么穿透检查",
     "expected_chunk_ids": [
       "clearing_amount_mismatch_playbook_001"
     ]
@@ -572,25 +591,25 @@
     "id": "bc-r002-03",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "退款冲正造成清算金额偏差 需要合并正向和反向流水",
+    "query": "手续费按净额入账后造成清算金额差异，应如何区分手续费原因",
     "expected_chunk_ids": [
-      "clearing_amount_mismatch_playbook_003"
+      "clearing_amount_mismatch_playbook_002"
     ]
   },
   {
     "id": "bc-r002-04",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "清算批次汇总金额与单笔明细不一致 需要穿透批次明细",
+    "query": "退款冲正已经发生但清算明细仍显示原金额，如何判断金额偏差",
     "expected_chunk_ids": [
-      "clearing_amount_mismatch_playbook_004"
+      "clearing_amount_mismatch_playbook_003"
     ]
   },
   {
     "id": "bc-r002-05",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "手续费分录导致净额差异 需要保留费率 批次号 分录证据",
+    "query": "一个批次里多笔交易汇总后差额不平，评估报告应列出哪些证据",
     "expected_chunk_ids": [
       "clearing_amount_mismatch_playbook_002"
     ]
@@ -599,7 +618,7 @@
     "id": "bc-r002-06",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "金额相同但参考号不一致 清算不能直接配对",
+    "query": "清算对账时发现渠道金额比核心入账少，是否可以直接改核心账",
     "expected_chunk_ids": [
       "clearing_reference_match_playbook_001",
       "clearing_amount_mismatch_playbook_001"
@@ -609,7 +628,7 @@
     "id": "bc-r002-07",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "清算短款长款 判断前需要核对退款撤销冲正链路",
+    "query": "文件字段口径不同导致金额不一致，应参考清算对账字段还是自动结论边界",
     "expected_chunk_ids": [
       "clearing_amount_mismatch_playbook_003"
     ]
@@ -618,25 +637,26 @@
     "id": "bc-r002-08",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "清算文件只给批次总额 缺少单笔明细 必须人工复核",
+    "query": "核心入账金额和清算应收金额差几分钱，舍入差异要不要人工复核",
     "expected_chunk_ids": [
-      "clearing_amount_mismatch_playbook_004"
+      "clearing_amount_mismatch_playbook_001"
     ]
   },
   {
     "id": "bc-r002-09",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "核心入账净额与清算本金金额不同 疑似手续费口径差异",
+    "query": "清算金额不平同时存在文件异常迹象，应该先定位金额规则还是文件完整性",
     "expected_chunk_ids": [
-      "clearing_amount_mismatch_playbook_002"
+      "clearing_amount_mismatch_playbook_004",
+      "clearing_file_exception_playbook_001"
     ]
   },
   {
     "id": "bc-r002-10",
     "scenario_type": "BANK_CLEARING",
     "error_type": "AMOUNT_MISMATCH",
-    "query": "清算金额不平 证据不完整 不能自动生成平账建议",
+    "query": "清算差额无法通过手续费解释时，系统应该怎样输出审计建议",
     "expected_chunk_ids": [
       "clearing_reconciliation_scope_002",
       "clearing_amount_mismatch_playbook_001"
@@ -646,7 +666,7 @@
     "id": "bc-r001-01",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "清算侧有流水 核心侧缺失 非日切窗口 单边差错 查询查复",
+    "query": "清算系统有一笔交易，但核心系统没有对应入账记录，非日切窗口下怎么核查",
     "expected_chunk_ids": [
       "clearing_single_side_playbook_001"
     ]
@@ -655,7 +675,7 @@
     "id": "bc-r001-02",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "核心有入账 清算文件缺少对应交易 单边缺失 人工复核",
+    "query": "核心有流水而清算文件缺少明细，单边缺失时应保留哪些证据",
     "expected_chunk_ids": [
       "clearing_single_side_playbook_001",
       "clearing_query_reply_playbook_001"
@@ -665,16 +685,17 @@
     "id": "bc-r001-03",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "清算单边差错 需要保留来源系统 参考号 金额 交易时间",
+    "query": "渠道侧返回成功但清算批次里没有这笔记录，是否需要发起查询",
     "expected_chunk_ids": [
-      "clearing_single_side_playbook_002"
+      "clearing_single_side_playbook_001",
+      "clearing_query_reply_playbook_001"
     ]
   },
   {
     "id": "bc-r001-04",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "非日切单边不能直接平账 需要进入查询查复流程",
+    "query": "清算单边发生在普通工作日，不能用日切解释时下一步怎么处理",
     "expected_chunk_ids": [
       "clearing_single_side_playbook_001",
       "clearing_query_reply_playbook_001"
@@ -684,7 +705,7 @@
     "id": "bc-r001-05",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "单边缺失 查复字段需要渠道机构号 清算日期 参考号 金额",
+    "query": "只有一侧有参考号，另一侧查不到记录，人工复核前要收集什么材料",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_002"
     ]
@@ -693,16 +714,17 @@
     "id": "bc-r001-06",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "清算侧单边 核心候选为空 evidence 不得伪造核心流水",
+    "query": "清算单边和文件缺失都可能导致少一笔，怎样区分交易缺失和文件异常",
     "expected_chunk_ids": [
-      "clearing_t1_supplement_playbook_003"
+      "clearing_single_side_playbook_001",
+      "clearing_file_exception_playbook_001"
     ]
   },
   {
     "id": "bc-r001-07",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "核心侧单边 现有侧金额 来源文件 建议动作 需要输出",
+    "query": "核心入账已完成但渠道清算未出现，应如何判断是否在正常延迟范围内",
     "expected_chunk_ids": [
       "clearing_single_side_playbook_001"
     ]
@@ -711,7 +733,7 @@
     "id": "bc-r001-08",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "单边异常复核记录 需要交易流水号 处置结论 可追溯",
+    "query": "非日切窗口内出现单边交易，系统结论应避免自动平账还是直接挂起",
     "expected_chunk_ids": [
       "clearing_single_side_playbook_002"
     ]
@@ -720,7 +742,7 @@
     "id": "bc-r001-09",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "查询查复未回执 不能把状态写成已确认",
+    "query": "单边缺失需要查复时，规则要求记录哪些处理节点",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_003"
     ]
@@ -729,7 +751,7 @@
     "id": "bc-r001-10",
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
-    "query": "查复超时 单边异常升级人工跟进 保留催办记录",
+    "query": "清算侧少记一笔退款，后续闭环需要哪些追踪字段",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_004"
     ]
@@ -738,7 +760,7 @@
     "id": "bc-r003-01",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "日切窗口内清算单边 需要判断核心 T+1 补记可能",
+    "query": "交易发生在日切前后，清算当天只有一侧记录，应该怎样判断是否等 T+1",
     "expected_chunk_ids": [
       "clearing_cutoff_t1_guideline_001"
     ]
@@ -747,7 +769,7 @@
     "id": "bc-r003-02",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "跨日切追溯 核查金额 参考号 商户订单号 核心记账日期",
+    "query": "日切窗口内的单边清算交易，什么时候可以等待次日补记",
     "expected_chunk_ids": [
       "clearing_cutoff_t1_guideline_002"
     ]
@@ -756,34 +778,35 @@
     "id": "bc-r003-03",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "接近日切交易 交易发生时间 清算日期 核心记账日期 都要输出",
+    "query": "T+1 已经补记到核心系统后，原来的日切单边应如何确认闭环",
     "expected_chunk_ids": [
-      "clearing_t1_supplement_playbook_001"
+      "clearing_t1_supplement_playbook_002"
     ]
   },
   {
     "id": "bc-r003-04",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "核心次日同金额同参考号流水 可提示 T+1 已补记",
+    "query": "日切后仍没有补齐清算记录，系统应给出什么待补齐结论",
     "expected_chunk_ids": [
-      "clearing_t1_supplement_playbook_002"
+      "clearing_t1_supplement_playbook_003"
     ]
   },
   {
     "id": "bc-r003-05",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "清算侧已有交易 核心侧次日没有候选流水 标记待补齐",
+    "query": "跨日切交易归属不清时，需要核对交易时间还是清算日期",
     "expected_chunk_ids": [
-      "clearing_t1_supplement_playbook_003"
+      "clearing_cutoff_t1_guideline_002",
+      "clearing_t1_supplement_playbook_001"
     ]
   },
   {
     "id": "bc-r003-06",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "补账任务失败 应回退为清算单边异常 重新查询查复",
+    "query": "补账失败后回退到人工处理，审计说明应包含哪些证据",
     "expected_chunk_ids": [
       "clearing_t1_supplement_playbook_004"
     ]
@@ -792,7 +815,7 @@
     "id": "bc-r003-07",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "日切边界不能按自然日判断 需要渠道清算日期",
+    "query": "清算日期和核心入账日期跨了一天，如何区分正常 T+1 和异常缺失",
     "expected_chunk_ids": [
       "clearing_t1_supplement_playbook_001",
       "clearing_cutoff_t1_guideline_001"
@@ -802,16 +825,17 @@
     "id": "bc-r003-08",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "T+1 已配对 需要记录候选核心流水号和记账日期",
+    "query": "日切窗口内金额一致但日期不同，自动审核能否直接判定通过",
     "expected_chunk_ids": [
-      "clearing_t1_supplement_playbook_002"
+      "clearing_cutoff_t1_guideline_002",
+      "clearing_reconciliation_scope_002"
     ]
   },
   {
     "id": "bc-r003-09",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "候选为空时必须人工补查 evidence 不能编造",
+    "query": "次日补记只补了部分字段，T+1 核查要素还缺什么",
     "expected_chunk_ids": [
       "clearing_t1_supplement_playbook_003",
       "clearing_cutoff_t1_guideline_002"
@@ -821,16 +845,17 @@
     "id": "bc-r003-10",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CUTOFF_T1",
-    "query": "跨日切证据不足 不能确认补记完成",
+    "query": "夜间批处理延迟导致清算单边，系统应如何记录追溯结果",
     "expected_chunk_ids": [
-      "clearing_cutoff_t1_guideline_002"
+      "clearing_cutoff_t1_guideline_001",
+      "clearing_t1_supplement_playbook_001"
     ]
   },
   {
     "id": "bc-r004-01",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "清算文件缺失 核对传输状态 渠道通知 批次日期 重传窗口",
+    "query": "某个清算文件没有按时到达，导致批次无法对账，应该按什么规则处理",
     "expected_chunk_ids": [
       "clearing_file_exception_playbook_001"
     ]
@@ -839,34 +864,34 @@
     "id": "bc-r004-02",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "文件未到达 不能用上一批次文件代替本批次清算依据",
+    "query": "同一个清算文件被重复导入两次，系统如何识别文件异常",
     "expected_chunk_ids": [
-      "clearing_file_exception_playbook_001"
+      "clearing_file_exception_playbook_002"
     ]
   },
   {
     "id": "bc-r004-03",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "同一清算批次文件重复导入 比较文件名 批次号 记录总数",
+    "query": "清算文件格式不对，关键字段缺失，能不能继续做自动结论",
     "expected_chunk_ids": [
-      "clearing_file_exception_playbook_002"
+      "clearing_file_exception_playbook_003"
     ]
   },
   {
     "id": "bc-r004-04",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "文件格式异常 关键字段为空 编码错误 应拒绝自动对账",
+    "query": "文件日期和实际清算日期不一致，审核时应核对哪些口径",
     "expected_chunk_ids": [
-      "clearing_file_exception_playbook_003"
+      "clearing_file_exception_playbook_004"
     ]
   },
   {
     "id": "bc-r004-05",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "缺少交易参考号 金额或交易时间 TraceAgent 不得构造候选",
+    "query": "清算文件校验失败后，报告需要说明是文件问题还是交易问题",
     "expected_chunk_ids": [
       "clearing_file_exception_playbook_003"
     ]
@@ -875,8 +900,9 @@
     "id": "bc-r004-06",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "文件名日期 文件内清算日期 业务交易日期 不一致",
+    "query": "渠道上传的文件少了明细行，和单边缺失的边界怎么区分",
     "expected_chunk_ids": [
+      "clearing_file_exception_playbook_001",
       "clearing_file_exception_playbook_004"
     ]
   },
@@ -884,16 +910,17 @@
     "id": "bc-r004-07",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "补发文件 日期口径冲突 需要人工确认日期字段",
+    "query": "重复文件导入造成金额翻倍，应先按文件异常还是金额差异处理",
     "expected_chunk_ids": [
-      "clearing_file_exception_playbook_004"
+      "clearing_file_exception_playbook_002",
+      "clearing_amount_mismatch_playbook_004"
     ]
   },
   {
     "id": "bc-r004-08",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "重复导入证据闭环 应撤销重复批次或隔离重复数据",
+    "query": "字段缺损导致参考号无法匹配，系统应怎样提示补充文件",
     "expected_chunk_ids": [
       "clearing_file_exception_playbook_002"
     ]
@@ -902,7 +929,7 @@
     "id": "bc-r004-09",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "清算文件缺失 只能输出待补文件或人工追踪动作",
+    "query": "清算文件完整性不过关时，自动结论边界有什么限制",
     "expected_chunk_ids": [
       "clearing_file_exception_playbook_001",
       "clearing_reconciliation_scope_002"
@@ -912,16 +939,17 @@
     "id": "bc-r004-10",
     "scenario_type": "BANK_CLEARING",
     "error_type": "CLEARING_FILE_EXCEPTION",
-    "query": "原始文件 解析错误 缺失字段清单 需要作为证据留存",
+    "query": "收到补发文件后，原异常批次如何做证据归档",
     "expected_chunk_ids": [
-      "clearing_file_exception_playbook_003"
+      "clearing_file_exception_playbook_004",
+      "clearing_query_reply_playbook_003"
     ]
   },
   {
     "id": "bc-r005-01",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "清算单边 经本地证据无法闭环 向渠道发起查询查复",
+    "query": "清算单边需要向渠道发起查询时，满足什么条件才能发起",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_001"
     ]
@@ -930,7 +958,7 @@
     "id": "bc-r005-02",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "金额不平 参考号不一致 需要查询查复 等待回执",
+    "query": "查复回执回来后，审核人员要检查哪些字段是否完整",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_001",
       "clearing_query_reply_playbook_003"
@@ -940,35 +968,36 @@
     "id": "bc-r005-03",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "查复字段 包含渠道机构号 清算日期 交易参考号 金额",
+    "query": "渠道回复说交易成功但核心没有入账，查复材料应如何归档",
     "expected_chunk_ids": [
-      "clearing_query_reply_playbook_002"
+      "clearing_query_reply_playbook_003"
     ]
   },
   {
     "id": "bc-r005-04",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "缺少查复字段 AuditAgent 应说明缺失字段",
+    "query": "查询超时没有收到回复，系统下一步应该怎么处理",
     "expected_chunk_ids": [
-      "clearing_query_reply_playbook_002"
+      "clearing_query_reply_playbook_004"
     ]
   },
   {
     "id": "bc-r005-05",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "查复回执 关联原始异常 任务号 处置结论",
+    "query": "发起清算查询时，必须带上哪些交易要素",
     "expected_chunk_ids": [
-      "clearing_query_reply_playbook_003"
+      "clearing_query_reply_playbook_002"
     ]
   },
   {
     "id": "bc-r005-06",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "回执确认对方已清算 本方未入账 进入核心补账",
+    "query": "查复内容不明确，只说处理中，能不能作为自动平账依据",
     "expected_chunk_ids": [
+      "clearing_query_reply_playbook_001",
       "clearing_query_reply_playbook_003"
     ]
   },
@@ -976,7 +1005,7 @@
     "id": "bc-r005-07",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "未收到回执 不能写成已确认",
+    "query": "单边缺失已经发起查询，如何在台账里记录查复状态",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_003"
     ]
@@ -985,16 +1014,17 @@
     "id": "bc-r005-08",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "超过约定时限未收到查复 升级人工跟进",
+    "query": "渠道回执与原交易金额不一致，应转到金额差异还是继续查询查复",
     "expected_chunk_ids": [
-      "clearing_query_reply_playbook_004"
+      "clearing_query_reply_playbook_003",
+      "clearing_amount_mismatch_playbook_001"
     ]
   },
   {
     "id": "bc-r005-09",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "查复超时 不改变原异常类型 只改变 next_action 风险提示",
+    "query": "多次查询仍未复，规则要求什么时候升级人工",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_004"
     ]
@@ -1003,7 +1033,7 @@
     "id": "bc-r005-10",
     "scenario_type": "BANK_CLEARING",
     "error_type": "QUERY_REPLY",
-    "query": "RAG 命中查询查复 next_action 指向人工发起查复",
+    "query": "查复回执归档后，审计报告需要引用哪些来源信息",
     "expected_chunk_ids": [
       "clearing_query_reply_playbook_001"
     ]
@@ -1012,7 +1042,7 @@
     "id": "bc-r006-01",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "清算流水与核心流水 匹配优先使用交易参考号 商户订单号",
+    "query": "清算参考号和核心参考号一致时，是否应优先用它做匹配依据",
     "expected_chunk_ids": [
       "clearing_reference_match_playbook_001"
     ]
@@ -1021,53 +1051,54 @@
     "id": "bc-r006-02",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "金额相同但参考号不一致 不能直接配对",
+    "query": "渠道参考号被截断，核心系统里多了前导零，怎样判断仍是同一笔",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_001"
+      "clearing_reference_match_playbook_002"
     ]
   },
   {
     "id": "bc-r006-03",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "参考号截断 补零 前缀转换 需要记录转换规则",
+    "query": "一笔清算记录对应多笔核心入账，参考号匹配应该如何处理",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_002"
+      "clearing_reference_match_playbook_003"
     ]
   },
   {
     "id": "bc-r006-04",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "转换规则可解释 才允许输出候选匹配",
+    "query": "多笔清算明细合并成一笔核心流水，参考号一致但金额拆分不同怎么办",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_002"
+      "clearing_reference_match_playbook_003"
     ]
   },
   {
     "id": "bc-r006-05",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "清算汇总或拆分入账 一对多 多对一 匹配",
+    "query": "参考号相似但不是完全一致时，弱匹配有什么风险",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_003"
+      "clearing_reference_match_playbook_004"
     ]
   },
   {
     "id": "bc-r006-06",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "拆分汇总匹配 需要列出全部候选明细",
+    "query": "清算参考号缺失，只能靠金额和时间匹配，是否需要人工确认",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_003"
+      "clearing_reference_match_playbook_004"
     ]
   },
   {
     "id": "bc-r006-07",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "只有金额日期相近 缺少参考号 属于弱匹配",
+    "query": "补零后的参考号能匹配上，但对手信息不一致，应如何复核",
     "expected_chunk_ids": [
+      "clearing_reference_match_playbook_002",
       "clearing_reference_match_playbook_004"
     ]
   },
@@ -1075,27 +1106,28 @@
     "id": "bc-r006-08",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "弱匹配不得提升 confidence 到高置信区间",
+    "query": "参考号一致而日期跨日，是否需要结合 T+1 规则判断",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_004"
+      "clearing_reference_match_playbook_001",
+      "clearing_cutoff_t1_guideline_001"
     ]
   },
   {
     "id": "bc-r006-09",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "TraceAgent 候选匹配 必须展示使用的参考字段",
+    "query": "一对多匹配后仍有尾差，应该转金额差异还是保留参考号匹配结论",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_001"
+      "clearing_reference_match_playbook_003",
+      "clearing_amount_mismatch_playbook_001"
     ]
   },
   {
     "id": "bc-r006-10",
     "scenario_type": "BANK_CLEARING",
     "error_type": "REFERENCE_MATCH",
-    "query": "规则缺失时 清算参考号转换 应转人工确认",
+    "query": "弱匹配确认后，台账需要保存哪些匹配依据",
     "expected_chunk_ids": [
-      "clearing_reference_match_playbook_002",
       "clearing_reference_match_playbook_004"
     ]
   }

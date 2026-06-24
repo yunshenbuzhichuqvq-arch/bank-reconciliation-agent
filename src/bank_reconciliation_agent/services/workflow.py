@@ -516,7 +516,7 @@ def _retrieve_rag_response(
     request = RagSearchRequest(
         query=query,
         top_k=settings.rag_rerank_top_k,
-        min_score=settings.rag_dense_min_score,
+        min_score=settings.rag_dense_min_score_for_backend(_effective_embedding_backend(retriever)),
         scenario_type=state["scenario_type"],
         enable_rewrite=settings.enable_rag_rewrite,
         enable_hybrid=settings.enable_rag_hybrid,
@@ -558,6 +558,12 @@ def _retrieve_rag_response(
             query=query,
         )
     return response
+
+
+def _effective_embedding_backend(retriever: Retriever) -> str | None:
+    store = getattr(retriever, "store", None)
+    backend = getattr(store, "embedding_backend", None)
+    return backend if isinstance(backend, str) else "hash"
 
 
 def _append_rag_breaker_log(

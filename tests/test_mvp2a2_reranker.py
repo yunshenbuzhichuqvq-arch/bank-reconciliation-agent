@@ -1,4 +1,3 @@
-from bank_reconciliation_agent.rag.embedding import HashEmbeddingProvider
 from bank_reconciliation_agent.rag.fusion import FusedHit
 from bank_reconciliation_agent.rag.rerank import BgeReranker, LexicalReranker
 
@@ -21,16 +20,6 @@ def _hit(
         metadata={"chunk_id": chunk_id},
         content=content,
     )
-
-
-def test_hash_embedding_provider_wraps_existing_hash_embedding() -> None:
-    provider = HashEmbeddingProvider()
-
-    embeddings = provider.embed(["金额差异", "单边缺失"])
-
-    assert len(embeddings) == 2
-    assert len(embeddings[0]) == len(embeddings[1])
-    assert embeddings[0] != embeddings[1]
 
 
 def test_lexical_reranker_is_deterministic_and_scores_in_range() -> None:

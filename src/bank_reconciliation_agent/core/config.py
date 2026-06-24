@@ -3,6 +3,10 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+BGE_M3_MODEL_NAME = "BAAI/bge-m3"
+BGE_SMALL_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+
+
 class Settings(BaseSettings):
     app_name: str = "Bank Reconciliation Agent"
     app_env: str = "local"
@@ -38,12 +42,15 @@ class Settings(BaseSettings):
     enable_rag_rewrite: bool = False
     enable_rag_hybrid: bool = False
     enable_rag_reranker: bool = False
+    embedding_backend: Literal["hash", "bge_small", "bge_m3"] = "bge_m3"
     rag_dense_top_n: int = 20
     rag_bm25_top_n: int = 20
     rag_rerank_top_k: int = 5
     rag_rrf_k: int = 60
-    # Hash embedding calibration; use 0.5 when a real semantic embedding is enabled.
+    # Dense floor values are calibrated per embedding backend.
     rag_dense_min_score: float = 0.341
+    rag_dense_min_score_bge_small: float = 0.507
+    rag_dense_min_score_bge_m3: float = 0.510
     rag_reranker_min_score: float = 0.3
     rag_low_score: float = 0.5
     rag_breaker_fail_threshold: int = 5
@@ -51,6 +58,16 @@ class Settings(BaseSettings):
     cutoff_window: str = "22:00-24:00"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    def rag_dense_min_score_for_backend(self, backend: str | None = None) -> float:
+        selected_backend = backend or self.embedding_backend
+        if selected_backend == "hash":
+            return self.rag_dense_min_score
+        if selected_backend == "bge_small":
+            return self.rag_dense_min_score_bge_small
+        if selected_backend == "bge_m3":
+            return self.rag_dense_min_score_bge_m3
+        raise ValueError(f"Unsupported embedding backend: {selected_backend}")
 
 
 settings = Settings()

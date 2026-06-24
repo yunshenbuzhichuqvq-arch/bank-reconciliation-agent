@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from bank_reconciliation_agent.core.config import settings
-from bank_reconciliation_agent.rag.retriever import RuleRetriever, rule_retriever
+from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever, rule_retriever
 from bank_reconciliation_agent.rag.scoring import representative_score
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
 
@@ -105,7 +105,10 @@ def evaluate_eval_set(
     retriever: RuleRetriever | Any = rule_retriever,
     top_k: int = 5,
 ) -> dict[str, Any]:
-    results = [_evaluate_case(case, retriever=retriever, top_k=top_k) for case in cases]
+    results = [
+        _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0)
+        for case in cases
+    ]
     scenario_types = sorted({case.scenario_type for case in cases})
     summaries = [_summarize_scenario(results, scenario_type) for scenario_type in scenario_types]
     return {
@@ -126,6 +129,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT_PATH)
+    parser.add_argument("--embedding-backend", default=settings.embedding_backend)
     args = parser.parse_args(argv)
 
     if args.chunks is not None:
@@ -133,21 +137,32 @@ def main(argv: list[str] | None = None) -> None:
             chunks_path=args.chunks,
             chroma_path=(args.chroma or PROJECT_ROOT / "chroma_eval") / "dense",
             mode="dense",
+            embedding_backend=args.embedding_backend,
         )
         hybrid_summary = evaluate_cases(
             chunks_path=args.chunks,
             chroma_path=(args.chroma or PROJECT_ROOT / "chroma_eval") / "hybrid_rerank",
             mode="hybrid_rerank",
+            embedding_backend=args.embedding_backend,
         )
         _print_legacy_report(dense_summary, hybrid_summary)
         return
 
     retriever = (
         rule_retriever
-        if args.chroma is None
-        else RuleRetriever(chroma_path=args.chroma)
+        if args.chroma is None and args.embedding_backend == settings.embedding_backend
+        else RuleRetriever(
+            store=ChromaRuleStore(
+                chroma_path=args.chroma,
+                embedding_backend=args.embedding_backend,
+            )
+        )
     )
-    report = evaluate_eval_set(load_eval_set(args.eval_set), retriever=retriever, top_k=args.top_k)
+    report = evaluate_eval_set(
+        load_eval_set(args.eval_set),
+        retriever=retriever,
+        top_k=args.top_k,
+    )
     write_markdown_report(report, args.report)
     write_json_metrics_snapshot(report, args.json_report)
     print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -208,12 +223,13 @@ def _evaluate_case(
     *,
     retriever: RuleRetriever | Any,
     top_k: int,
+    min_score: float,
 ) -> EvalCaseResult:
     response = retriever.search(
         RagSearchRequest(
             query=case.query,
             top_k=top_k,
-            min_score=0.0,
+            min_score=min_score,
             scenario_type=case.scenario_type,
         )
     )
@@ -300,16 +316,40 @@ def evaluate_cases(
     chunks_path: Path = DEFAULT_CHUNKS_PATH,
     chroma_path: Path = PROJECT_ROOT / "chroma_eval",
     mode: str,
+    embedding_backend: str | None = None,
 ) -> LegacyEvalSummary:
-    retriever = RuleRetriever(chunks_path=chunks_path, chroma_path=chroma_path)
+    retriever = RuleRetriever(
+        store=ChromaRuleStore(
+            chunks_path=chunks_path,
+            chroma_path=chroma_path,
+            embedding_backend=embedding_backend,
+        )
+    )
     return LegacyEvalSummary(
         mode=mode,
-        case_results=[_evaluate_smoke_case(retriever, case, mode=mode) for case in SMOKE_CASES],
+        case_results=[
+            _evaluate_smoke_case(
+                retriever,
+                case,
+                mode=mode,
+            )
+            for case in SMOKE_CASES
+        ],
     )
 
 
-def _evaluate_smoke_case(retriever: RuleRetriever, case: SmokeCase, *, mode: str) -> LegacyCaseResult:
-    response = retriever.search(_request_for_mode(case.query, mode=mode))
+def _evaluate_smoke_case(
+    retriever: RuleRetriever,
+    case: SmokeCase,
+    *,
+    mode: str,
+) -> LegacyCaseResult:
+    response = retriever.search(
+        _request_for_mode(
+            case.query,
+            mode=mode,
+        )
+    )
     matched_item = _find_hit(response.items, expected_tag=case.expected_tag)
     score = representative_score(matched_item) if matched_item is not None else None
     return LegacyCaseResult(
@@ -322,7 +362,11 @@ def _evaluate_smoke_case(retriever: RuleRetriever, case: SmokeCase, *, mode: str
     )
 
 
-def _request_for_mode(query: str, *, mode: str) -> RagSearchRequest:
+def _request_for_mode(
+    query: str,
+    *,
+    mode: str,
+) -> RagSearchRequest:
     if mode == "dense":
         return RagSearchRequest(query=query, top_k=settings.rag_rerank_top_k, min_score=0.0)
     if mode == "hybrid_rerank":
