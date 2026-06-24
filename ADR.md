@@ -1,74 +1,121 @@
-# Stage Faker Mock Data — Architectural Decisions
+# Stage Faker Mock Data — Architectural Decisions (rebuild)
 
 > Scratchpad(tracked,PR 前按 CLAUDE.md §4.2 删除,不进 main)。
-> 收尾拆进 `decisions/` 时按仓库实际惯例编**全局连续号**(当前最高 ADR-089 → 本 stage 为 ADR-090/091/092-<slug>.md),非 CLAUDE.md 示例里的 `<stage>.<seq>` 编号。
+> 本版**取代**初版「原地保守装饰」决策(已 commit 4d06856,见 FK.1 Options A);初版细节留 git 历史。
+> 收尾拆进 `decisions/` 编全局连续号(当前最高 ADR-089 → 本 stage 顺接)。
 
-## ADR-FK.1: 原地保守 Faker 化现有对账 mock 生成器
-**Slug**: `mock-data-in-place-conservative-faker`
-**Status**: accepted
-**Date**: 2026-06-24
-
-### Context
-`scripts/generate_mock_excel.py` 的三个生成器(`generate_mock_excel` / `generate_mvp1_mock_excel` / `generate_mvp2a3_mock_excel`)所有字段均为手写字面量,装饰字段(银行名、网点名等)重复、玩具感强。`EXPECTED_BRANCHES` / `BANK_CLEARING_EXPECTED_BRANCHES` 是人工编排的场景骨架,被 20+ 个测试文件直接 import 并断言「flow_id → 异常分支」。PRD §11.1 要求模拟数据「结果可复现,每类样本有明确预期识别结果」。目标:提升**非场景字段**真实感,同时不破坏确定性、不动场景与断言。
-
-### Options Considered
-- **A. 新增独立 Faker 生成器,旧 fixture 不动** — Pros: 现有 fixture/断言零回归;可顺带放大数据规模。Cons: 旧 fixture 玩具感原样保留;多一套并行数据资产、维护面变大;没解决「现有 e2e 数据不真实」。
-- **B. 原地保守:仅 Faker 可证无关的装饰字段,场景字段全冻结(采纳)** — Pros: 直接改善现有 e2e/demo 数据真实感;改动面小、外科手术式;以「既有断言零改全绿」做自动红线。Cons: 安全可填面小(见 FK.3),真实感提升有限。
-- **C. 原地激进:连对手方名称/摘要/账号一并 Faker** — Pros: 真实感最大。Cons: 名称/摘要/账号参与匹配与「名称不符/重复入账」判定,须把值断言改成结构式 + 逐场景核对不变量,回归面大,task 从小升中。
-
-### Decision
-采用 **B**。在三个现有生成器内,把装饰字段取值从字面量替换为 seeded Faker 输出;`flow_id`、各金额、日期/时间、摘要、对手方名称及其关系、`_enrich_*` 派生字段一律冻结。可填字段边界见 FK.3,确定性机制见 FK.2。红线由「现有 ~20 断言测试零改动全绿」自动执法。
-
-### Consequences
-- 负向:可安全 Faker 的字段仅一小撮(主要银行名/网点/终端等标签),「玩具感」只去一部分;用户已知此局限并接受。
-- 负向:Faker 误碰场景字段会让既有测试变红——这是预期的护栏行为,处置是把该字段**回收进冻结集**,而非改测试迁就。
-- 现有 e2e fixture 与 demo 数据就地变真实,无并行数据资产;列结构不变,`reconciliation` 列校验(承 ADR-019)零影响。
+## 背景(业务流,贯穿全部决策)
+银企对账真实流:企业会计带来本企业某周期(~两周)的**企业账**(Source A);对公经理从行内系统调出该企业**同期银行流水**(Source B)。确定性引擎匹配,**绝大多数自动平账、不调 LLM**;只有少数异常(金额差 / 单边 / 重复 / 名称不符 / 跨日切)进 agent → 才真正调 LLM。初版把现有 8 行异常 fixture 当「数据本体」、只给边角字段刷 Faker,既不建模这个批次结构,又让摘要等叙述字段保持模板化——而叙述字段恰是 LLM 价值所在。故重建。
 
 ---
 
-## ADR-FK.2: 确定性——每生成器入口重置 Faker 种子
-**Slug**: `mock-faker-per-generator-seed-reset`
-**Status**: accepted
+## ADR-FK.1: 模拟数据按真实对账批次重建(取代原地保守装饰)
+**Slug**: `mock-data-realistic-reconciliation-batch`
+**Status**: accepted(supersedes 初版 in-place-conservative,commit 4d06856)
 **Date**: 2026-06-24
 
 ### Context
-PRD §11.1 要求可复现。测试各自独立调用单个生成器(`generate_mvp1_mock_excel(tmp_path)` 等),也有测试在一个用例里连调多个生成器。Faker 默认实例的输出依赖累计抽取次数:若仅在模块级 seed 一次,同一生成器的输出会随「之前抽过多少次 / 调用顺序」漂移,破坏可复现与跨测试稳定。
+见上「业务流」。数据应是一个**对账批次**:正常多数 + 异常少数。
 
 ### Options Considered
-- **A. 模块级全局 seed 一次** — Pros: 最少代码。Cons: 输出依赖调用顺序与累计抽取数,单个生成器非自含可复现,跨测试不稳定,引入隐性 flaky。
-- **B. 每个生成器函数入口 `Faker.seed(<固定常量>)` 重置(采纳)** — Pros: 每个生成器自含、与调用顺序无关、逐次可复现;契合「测试独立调用单个生成器」现状。Cons: 三处各重置(可共用一个种子常量)。
-- **C. 不 seed,接受随机** — Pros: 最真实。Cons: 直接违反 PRD §11.1 可复现,任何值断言立刻 flaky。排除。
+- **A. 原地保守装饰(初版,已 superseded)** — 只给边角字段刷 Faker、冻结约 20 个场景字段。Pros: 零回归。Cons: 不建模真实批次;摘要等叙述字段仍模板化、藏住 LLM 核心价值;实测把字段多样性塌成单值(行级 seed 粒度 bug)。
+- **B. 新增独立真实生成器、旧的全保留** — Pros: 旧测试零改。Cons: 两套数据资产并存,旧 toy 数据继续误导 demo;关注点分散。
+- **C. 重建为真实对账批次(采纳)** — 三个生成器内部重写为「正常多数成对生成→自动平账 + 异常少数注入→落分支」;对外签名保留为 scenario 包装。Pros: 数据逼近真实;演示「确定性多数 + LLM 少数」分流;摘要等叙述字段成为一等真实目标。Cons: 中等重建;需改造硬编码「数据集身份」的测试断言(集合 / 计数 / 字面量)。
 
 ### Decision
-采用 **B**:每个生成器函数开头用固定种子常量重置 Faker,使输出与调用顺序/次数无关、逐次一致。
+采用 **C**。正确性模型见 FK.2、叙述真实化见 FK.3、生成器形态见 FK.4、测试改造见 FK.5。
 
 ### Consequences
-- 每个生成器输出确定、可复现,满足 PRD §11.1;新增一条「同生成器连跑两次输出逐字段相等」的确定性测试守护。
-- 负向:同进程内重复调用同一生成器会得到完全相同的装饰值(对固定 fixture 是期望行为,但意味着 Faker 不提供跨调用多样性)。
+- 负向:scope 从「小 stage」升为「中等重建」,断言改造面真实存在。
+- 正向:mock 数据贴近真实银企对账批次;demo 能呈现「N 笔零 LLM 自动平账 + M 笔异常各触发 agent」的成本分流(接 LLM 省本/指标线)。
+- 初版的 `FAKER_FILLABLE_FIELDS` 白名单冻结机制不再需要(正确性改为结构性,见 FK.2)。
 
 ---
 
-## ADR-FK.3: 引入 faker 依赖 + 显式 fillable 白名单护栏
-**Slug**: `faker-dep-and-explicit-fillable-allowlist`
+## ADR-FK.2: 正确性=结构性;EXPECTED_BRANCHES 作异常子集;确定性在生成器入口
+**Slug**: `structural-correctness-anomaly-subset-and-determinism`
+**Status**: accepted(revises 初版 FK.2 的「每生成器入口重置 seed」,扩为正确性模型)
+**Date**: 2026-06-24
+
+### Context
+重建后正确性的根基变了:不再逐字段对字面量,而是「正常对两侧按构造一致 → 自动平账;异常按构造注入 → 落预期分支」。需重新定义测试断言依据,并守住可复现(PRD §11.1)。
+
+### Options Considered
+- **正确性判据**:
+  - **A. 逐字段字面量断言(初版路径)** — Cons: 与「放开 Faker 造真实多样数据」互斥,逼出冻结一切。
+  - **B. 结构性断言(采纳)** — 正常行应全 `AUTO_FIXED` + 异常子集各落预期分支 + 异常计数。`EXPECTED_BRANCHES` / `BANK_CLEARING_EXPECTED_BRANCHES` **保留,语义=「被标注的异常子集」**,批次其余为正常多数。Pros: 允许真实多样数据;断言更具业务意义(防形式修复);多数 call-site 不变。Cons: 需改写硬编码「全集 / 计数」的断言。
+- **确定性粒度**:
+  - **A. 行级 helper 重置 seed(初版实现的 bug)** — 实测使同生成器每行抽到相同值、多样性塌成单值。排除。
+  - **B. 仅生成器入口重置(采纳)** — draw 在批次内累积 → 行间多样;整批逐次可复现。
+
+### Decision
+正确性=结构性;`EXPECTED_BRANCHES` 作异常子集;固定 seed **仅在生成器入口**重置(显式禁止在行级 helper 重置)。
+
+### Consequences
+- 负向:需逐个识别并改写硬编码全集 / 计数的断言(见 FK.5)。
+- 正向:断言贴业务语义;消除初版的多样性塌缩;批次可复现。
+
+---
+
+## ADR-FK.3: 叙述字段(摘要 / 附言 / remark)真实化 = 人工策划 seeded 三档池
+**Slug**: `narrative-fields-curated-seeded-pool`
+**Status**: accepted(replaces 初版 FK.3 的「faker 依赖 + 白名单」)
+**Date**: 2026-06-24
+
+### Context
+摘要 / 附言是自由文本,正是确定性规则啃不动、**必须 LLM 上场**的地方(模糊摘要结构化、对手方与用途的语义判断,PRD §3.2;BE-R004 名称 / 叙述不符)。模板化摘要(现状 `remark="MVP-1 自动平账样例"`)会把 LLM 价值藏起来。纯 Faker 文本是无意义中文,给不了金融语义。
+
+### Options Considered
+- **A. 纯 Faker text** — Cons: 无意义、非金融语义,达不到目的。
+- **B. LLM 生成摘要** — Pros: 最真实。Cons: 数据生成引入 LLM 成本 + 不确定性,违可复现;过度。
+- **C. 人工策划 seeded 三档摘要池 + Faker 填实体(采纳)** — 三档:正式规范 / 口语化 / 歧义缺信息。Pros: 领域真实、可复现、零运行成本;异常案例配歧义档,逼出 LLM 推理价值。Cons: 维护一份语料。
+
+### Decision
+采用 **C**。正常行从正式 / 口语档采样;异常行(尤其 NARRATIVE_NAME_MISMATCH)配歧义 / 口语摘要,与注入异常对齐。实体字段(公司名 / 账号 / 银行名)仍由 Faker 生成。
+
+### Consequences
+- 负向:新增一份策划摘要语料需维护。
+- 正向:摘要真实多样、含口语与歧义,demo 中 LLM 的「读懂模糊叙述」价值可见。
+
+---
+
+## ADR-FK.4: scenario 参数化的批次生成器 + 规模可配
+**Slug**: `scenario-parameterized-batch-generator`
 **Status**: accepted
 **Date**: 2026-06-24
 
 ### Context
-需要真实中文公司/银行名 → 选 Faker(`zh_CN`)。但字段红线极易踩错:看似无关的「ID 类」字段里,`voucher_no` / `reference_no` / `merchant_order_no` 是 BC-R003 跨日切**候选匹配键**(承 ADR-017/019,须两侧单号贯通),`*_serial_no` / 账号掩码可能参与匹配或幂等。须有可审计、可静态核对的边界,而非埋在散落赋值里。`faker` 仅服务 `scripts/` + 测试,不进运行时 `src/`。
+现有三个生成器(legacy 银企 / mvp1 银企 / mvp2a3 清算)各自硬编码全部行。重建应共享一套「批次核心」,按 scenario 决定字段映射 / 异常集 / 摘要档,承 ADR-015(单场景引擎 Source A/B 抽象)、ADR-019(列契约 `BANK/CLEAR_REQUIRED_COLUMNS` 复用,不引 scenario-keyed 校验)。
 
 ### Options Considered
-- **依赖选型**:
-  - **A. 引入 `faker`(dev/test extra,`zh_CN`)(采纳)** — Pros: 现成高质量中文语料;只进 dev/test 不污染运行时。Cons: 多一个 dev 依赖 + `uv.lock` 更新。
-  - **B. 自写极简随机生成器** — Pros: 零新依赖。Cons: 重造轮子、中文语料质量差,YAGNI。
-  - **C. 用 stdlib `random` 拼名** — Cons: 名称不真实,失去本 stage 意义。
-- **红线落地**:
-  - **D. 仅靠测试套件兜底** — Pros: 零额外代码。Cons: 红线隐式,reviewer 看不出哪些字段是「有意允许」;新增字段时易越界。
-  - **E. 显式 `FAKER_FILLABLE_FIELDS` 白名单常量 + 测试兜底(采纳)** — Pros: 可填字段在代码里集中、命名、可审计;Faker 只许写白名单内字段;测试套件 + 确定性测试做安全网。Cons: 多维护一份常量。
+- **A. 三个生成器各自全量重写** — Cons: 批次 / 平账 / 注入逻辑重复三份,易漂移。
+- **B. 共享批次核心 + scenario 参数 + 三个生成器为薄包装(采纳)** — 单一批次逻辑;`bank_enterprise` / `bank_clearing` 决定字段、异常集、摘要;保留三个对外签名 → call-site 不动。Pros: 逻辑单点;承既有场景抽象;churn 受控。Cons: 须把场景差异抽成参数。
+- **规模**:`n_normal` 参数化(默认每场景 ~50 正常 + 既有异常集);测试传小值、demo 传大值 → 真实感与测试速度解耦(现 9.6s 不被拖垮)。
 
 ### Decision
-引入 `faker`(dev/test extra,`zh_CN`);定义显式 `FAKER_FILLABLE_FIELDS` 白名单,Faker **仅允许写白名单字段**。**默认冻结**(不入白名单):`voucher_no` / `reference_no` / `merchant_order_no`(承 ADR-017/019 候选匹配键)、`bank_serial_no` / `clearing_serial_no`、各账号掩码——凡参与匹配/幂等/未经证实者一律不入白名单(保守优先)。初版白名单倾向纯标签字段(银行名、网点名、终端号等),具体成员由 Codex 在「既有测试零改全绿」约束下逐一确认入选。
+采用 **B** + `n_normal` 参数化。faker 依赖(dev/`zh_CN`)保留,用于实体字段生成。列契约 / 函数签名不变(承 ADR-019)。
 
 ### Consequences
-- 红线在代码中显式可审计;reviewer 与未来改动可一眼看出 Faker 允许的字段集。
-- 负向:`faker` 新增 dev 依赖,需更新 `pyproject.toml` + `uv.lock`;白名单随字段演进需维护。
-- 负向:为安全把多数 ID 类字段排除在外,Faker 实际覆盖面小(与 FK.1 局限一致)。
+- 负向:批次核心需吸收三场景差异,初次抽象有成本。
+- 正向:单点维护;新增场景只加参数;测试与 demo 共用一套、规模解耦。
+
+---
+
+## ADR-FK.5: 测试改造策略——保调用点,只改集合 / 计数 / 字面量断言
+**Slug**: `test-rework-keep-callsites-restructure-assertions`
+**Status**: accepted
+**Date**: 2026-06-24
+
+### Context
+~20 个测试 import 生成器 / `EXPECTED_BRANCHES`。重建后多数 call-site(取数据集 → 遍历异常子集断言分支)**不变**;但少数硬编码「数据集 == 全集 / `len == N` / `summary == 某字面量`」的断言,会因正常多数加入 + 摘要真实化而失效。
+
+### Options Considered
+- **A. 全量重写测试** — Cons: 回归面最大、丢失既有覆盖、易引入新错。
+- **B. 保调用点、定向改断言(采纳)** — 「== 全集」改「异常子集 ⊆ 结果 且其余 `AUTO_FIXED`」;字面量摘要断言改结构 / 关系断言;计数按 `n_normal + 异常数`。**新增**:正常多数自动平账断言、异常计数断言、字段多样性守护(堵初版盲区)。Pros: 保留覆盖、改动定向可审。Cons: 须逐文件识别受影响断言。
+
+### Decision
+采用 **B**。受影响断言逐处改为结构 / 子集 / 计数断言;补正常平账 + 异常计数 + 多样性守护测试。
+
+### Consequences
+- 负向:需逐文件核对受影响断言,Codex 须在 Report Back 列出所有被改测试与改法。
+- 正向:测试更贴业务语义、防形式修复、防多样性回归;调用点保稳定。
