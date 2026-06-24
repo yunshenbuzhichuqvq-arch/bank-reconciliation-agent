@@ -1,6 +1,18 @@
 from pathlib import Path
 
+from faker import Faker
 import pandas as pd
+
+MOCK_FAKER_SEED = 20260624
+MOCK_FAKER = Faker("zh_CN")
+FAKER_FILLABLE_FIELDS = frozenset(
+    {
+        "self_bank_name",
+        "counterparty_bank_name",
+        "store_name",
+        "terminal_id",
+    }
+)
 
 
 BANK_SOURCE_COLUMNS = [
@@ -140,6 +152,23 @@ BANK_CLEARING_EXPECTED_BRANCHES: dict[str, tuple[str | None, str | None, str]] =
 }
 
 
+def _reset_mock_faker() -> None:
+    Faker.seed(MOCK_FAKER_SEED)
+    MOCK_FAKER.seed_instance(MOCK_FAKER_SEED)
+
+
+def _faker_value(field: str) -> str:
+    if field not in FAKER_FILLABLE_FIELDS:
+        raise ValueError(f"{field} is not faker-fillable")
+    if field in {"self_bank_name", "counterparty_bank_name"}:
+        return f"{MOCK_FAKER.city_name()}银行{MOCK_FAKER.city_name()}分行"
+    if field == "store_name":
+        return f"{MOCK_FAKER.street_name()}门店"
+    if field == "terminal_id":
+        return MOCK_FAKER.bothify(text="T####")
+    raise ValueError(f"no faker generator for {field}")
+
+
 def _enrich_bank_dataframe(bank_df: pd.DataFrame) -> pd.DataFrame:
     """补充标准化字段和真实银行流水常见字段，保留原始字段用于审计回溯。"""
     bank_df = bank_df.copy()
@@ -199,6 +228,7 @@ def _enrich_clear_dataframe(clear_df: pd.DataFrame) -> pd.DataFrame:
 
 def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Path]:
     """生成银行端和清算端模拟 Excel，为上传解析和后续对账测试提供固定样本。"""
+    _reset_mock_faker()
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -211,7 +241,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "TRANSFER_IN",
             0.00,
@@ -219,7 +249,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10100.00,
             "6214********1001",
             "上海云杉科技有限公司",
-            "招商银行上海分行",
+            _faker_value("counterparty_bank_name"),
             "网上银行",
             "网银转账",
             "货款",
@@ -233,7 +263,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "TRANSFER_IN",
             0.00,
@@ -241,7 +271,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10350.50,
             "6214********1002",
             "杭州青禾商贸有限公司",
-            "建设银行杭州分行",
+            _faker_value("counterparty_bank_name"),
             "柜面",
             "柜面入账",
             "服务费",
@@ -255,7 +285,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "BATCH_PAYROLL",
             88.80,
@@ -263,7 +293,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10261.70,
             "6214********1003",
             "员工代发虚拟户",
-            "工商银行上海分行",
+            _faker_value("counterparty_bank_name"),
             "批量系统",
             "批量代发",
             "代发工资",
@@ -277,7 +307,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "TRANSFER_IN",
             0.00,
@@ -285,7 +315,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10561.70,
             "6214********1004",
             "南京北辰供应链有限公司",
-            "交通银行南京分行",
+            _faker_value("counterparty_bank_name"),
             "清算平台",
             "清算金额差异",
             "货款",
@@ -299,7 +329,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "TRANSFER_IN",
             0.00,
@@ -307,7 +337,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10681.70,
             "6214********1005",
             "苏州东海制造有限公司",
-            "农业银行苏州分行",
+            _faker_value("counterparty_bank_name"),
             "网上银行",
             "银行端单边账",
             "预收款",
@@ -321,7 +351,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "TRANSFER_OUT",
             35.20,
@@ -329,7 +359,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10646.50,
             "6214********1008",
             "上海浦江物流有限公司",
-            "浦发银行上海分行",
+            _faker_value("counterparty_bank_name"),
             "网上银行",
             "网银付款",
             "物流费",
@@ -343,7 +373,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "FEE",
             2.00,
@@ -351,7 +381,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10644.50,
             "6214********1009",
             "清算服务费虚拟户",
-            "中国银行上海分行",
+            _faker_value("counterparty_bank_name"),
             "清算平台",
             "手续费扣收",
             "渠道手续费",
@@ -365,7 +395,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "TRANSFER_IN",
             0.00,
@@ -373,7 +403,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             11154.50,
             "6214********1010",
             "无锡云帆材料有限公司",
-            "江苏银行无锡分行",
+            _faker_value("counterparty_bank_name"),
             "网上银行",
             "跨行转账收入",
             "材料款",
@@ -387,7 +417,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "REFUND",
             0.00,
@@ -395,7 +425,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             11173.30,
             "6214********1011",
             "上海云杉科技有限公司",
-            "招商银行上海分行",
+            _faker_value("counterparty_bank_name"),
             "清算平台",
             "退款入账",
             "订单退款",
@@ -409,7 +439,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "2026-05-21",
             "6222********0001",
             "上海晨星贸易有限公司",
-            "中国银行上海分行",
+            _faker_value("self_bank_name"),
             "CNY",
             "TRANSFER_IN",
             0.00,
@@ -417,7 +447,7 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             10748.30,
             "6214********1007",
             "宁波星河电子有限公司",
-            "宁波银行总行营业部",
+            _faker_value("counterparty_bank_name"),
             "手机银行",
             "正常转账",
             "零星收款",
@@ -430,8 +460,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210001",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0001",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "ONLINE_BANKING",
             "PAYMENT",
             "2026-05-21",
@@ -458,8 +488,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210002",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0002",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "COUNTER",
             "PAYMENT",
             "2026-05-21",
@@ -486,8 +516,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210003",
             "M1000001",
             "上海晨星贸易有限公司",
-            "批量代发虚拟门店",
-            "T0003",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "BATCH",
             "PAYROLL",
             "2026-05-21",
@@ -514,8 +544,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210004",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0004",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "CLEARING",
             "PAYMENT",
             "2026-05-21",
@@ -542,8 +572,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210006",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0006",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "CLEARING",
             "PAYMENT",
             "2026-05-21",
@@ -570,8 +600,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210008",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0008",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "ONLINE_BANKING",
             "PAYMENT",
             "2026-05-21",
@@ -598,8 +628,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210009",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0009",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "CLEARING",
             "FEE",
             "2026-05-21",
@@ -626,8 +656,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210010",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0010",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "ONLINE_BANKING",
             "PAYMENT",
             "2026-05-21",
@@ -654,8 +684,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210011",
             "M1000001",
             "上海晨星贸易有限公司",
-            "总部直营网点",
-            "T0011",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "CLEARING",
             "REFUND",
             "2026-05-21",
@@ -682,8 +712,8 @@ def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Pat
             "C202605210007",
             "M1000001",
             "上海晨星贸易有限公司",
-            "移动端门店",
-            "T0007",
+            _faker_value("store_name"),
+            _faker_value("terminal_id"),
             "MOBILE_BANKING",
             "PAYMENT",
             "2026-05-21",
@@ -726,6 +756,7 @@ def generate_mvp1_mock_excel(
     include_fuzzy_sample: bool = False,
 ) -> tuple[Path, Path]:
     """生成覆盖 MVP-1 五分支的银企对账 mock，返回 (bank_path, clear_path)。"""
+    _reset_mock_faker()
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -993,6 +1024,7 @@ def generate_mvp1_mock_excel(
 
 def generate_mvp2a3_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Path]:
     """生成覆盖清算副链路最小闭环的 mock，返回 (core_path, clearing_path)。"""
+    _reset_mock_faker()
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -1148,6 +1180,7 @@ def _bank_source_row(
     reference_no: str | None = None,
     merchant_order_no: str | None = None,
 ) -> dict[str, object]:
+    _reset_mock_faker()
     row = {
         "flow_id": flow_id,
         "bank_serial_no": serial,
@@ -1156,7 +1189,7 @@ def _bank_source_row(
         "value_date": value_date,
         "self_account_no_masked": "6222********0001",
         "self_account_name_masked": "上海晨星贸易有限公司",
-        "self_bank_name": "中国银行上海分行",
+        "self_bank_name": _faker_value("self_bank_name"),
         "currency": "CNY",
         "transaction_type": transaction_type,
         "debit_amount": debit_amount,
@@ -1164,7 +1197,7 @@ def _bank_source_row(
         "balance_after": balance_after,
         "counterparty_account_no_masked": counterparty_account,
         "counterparty_name_masked": counterparty_name,
-        "counterparty_bank_name": "招商银行上海分行",
+        "counterparty_bank_name": _faker_value("counterparty_bank_name"),
         "channel": channel,
         "summary": summary,
         "purpose": purpose,
@@ -1199,13 +1232,14 @@ def _clear_source_row(
     description: str,
     remark: str,
 ) -> dict[str, object]:
+    _reset_mock_faker()
     return {
         "flow_id": flow_id,
         "clearing_serial_no": serial,
         "merchant_id": "M1000001",
         "merchant_name": "上海晨星贸易有限公司",
-        "store_name": "总部直营网点",
-        "terminal_id": terminal_id,
+        "store_name": _faker_value("store_name"),
+        "terminal_id": _faker_value("terminal_id"),
         "channel": "ONLINE_BANKING",
         "transaction_type": "PAYMENT",
         "trade_date": trade_date,
