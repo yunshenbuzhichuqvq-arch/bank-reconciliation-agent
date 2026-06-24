@@ -6,20 +6,24 @@ All files in this folder must be manually constructed simulation data. Do not ad
 
 Current sample coverage:
 
-- Normal matched rows.
+- Normal majority matched rows.
 - Amount mismatch rows.
 - Bank-side-only rows.
 - Clearing-side-only rows.
+- Narrative/name mismatch rows.
+- Duplicate booking rows.
+- Clearing single-side rows.
+- Clearing cutoff cross-day rows.
 
 The files intentionally look closer to raw bank and clearing exports than to database tables.
 Parser code normalizes them into the PRD model.
 
-MVP-1 branch fixture:
+MVP-1 branch fixture uses a generated normal majority plus the expected
+exception subset below:
 
 | flow_id | Scenario | Expected error_type | Expected exception_branch | Disposition |
 |---------|----------|---------------------|---------------------------|-------------|
-| F2001 | Auto fixed exact match | None | None | AUTO_FIXED |
-| F2002 | Auto fixed exact match | None | None | AUTO_FIXED |
+| F2001 | Auto fixed exact match sentinel | None | None | AUTO_FIXED |
 | F2003 | Amount mismatch | AMOUNT_MISMATCH | BE-R002 | PENDING_HUMAN |
 | F2004 | Narrative/name mismatch with refund keyword | NARRATIVE_NAME_MISMATCH | BE-R004 | PENDING_HUMAN |
 | F2005 | Enterprise book exists, bank missing | BANK_UNARRIVED | BE-R005 | PENDING_HUMAN |
@@ -31,7 +35,8 @@ The authoritative mapping for the MVP-1 files is `EXPECTED_BRANCHES` in
 `scripts/generate_mock_excel.py`. The generated files are `mvp1_bank.xlsx` and
 `mvp1_clear.xlsx`.
 
-MVP-2a3 clearing fixture:
+MVP-2a3 clearing fixture uses a generated normal majority plus the expected
+exception subset below:
 
 | flow_id | Scenario | Expected error_type | Expected exception_branch | Disposition |
 |---------|----------|---------------------|---------------------------|-------------|

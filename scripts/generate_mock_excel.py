@@ -3,7 +3,10 @@ from pathlib import Path
 from faker import Faker
 import pandas as pd
 
-from scripts.mock_narratives import sample_narrative
+try:
+    from scripts.mock_narratives import sample_narrative
+except ModuleNotFoundError:
+    from mock_narratives import sample_narrative
 
 MOCK_FAKER_SEED = 20260624
 DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS = 12
