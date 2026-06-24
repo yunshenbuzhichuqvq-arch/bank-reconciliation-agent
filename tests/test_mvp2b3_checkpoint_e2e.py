@@ -16,6 +16,7 @@ from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.review_graph import get_review_graph
 from bank_reconciliation_agent.services.task import reconciliation_task_table
 from scripts.generate_mock_excel import (
+    DEFAULT_BANK_CLEARING_NORMAL_ROWS,
     generate_mvp1_mock_excel,
     generate_mvp2a3_mock_excel,
 )
@@ -106,12 +107,12 @@ def _approve(
         (
             "BANK_ENTERPRISE",
             "BE-R002",
-            {"auto_fixed_rows": 2, "pending_human_rows": 6},
+            {"auto_fixed_rows": 13, "pending_human_rows": 6},
         ),
         (
             "BANK_CLEARING",
             "BC-R001",
-            {"auto_fixed_rows": 1, "pending_human_rows": 4},
+            {"auto_fixed_rows": DEFAULT_BANK_CLEARING_NORMAL_ROWS + 1, "pending_human_rows": 4},
         ),
     ],
 )

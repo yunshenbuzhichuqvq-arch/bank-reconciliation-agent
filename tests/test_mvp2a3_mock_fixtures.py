@@ -9,6 +9,7 @@ from bank_reconciliation_agent.services.hooks import (
 )
 from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
+    build_batch,
     generate_mvp2a3_mock_excel,
 )
 
@@ -27,6 +28,29 @@ def test_generate_mvp2a3_mock_excel_writes_bank_clearing_fixture_files(tmp_path:
     assert clear_df["flow_id"].is_unique
 
 
+def test_build_batch_supports_bank_clearing_normal_rows_and_cutoff_link() -> None:
+    bank_df, clear_df, expected = build_batch(
+        scenario="bank_clearing",
+        n_normal=3,
+        seed=20260624,
+    )
+
+    expected_anomalies = BANK_CLEARING_EXPECTED_BRANCHES
+    expected_normal_count = 3
+
+    assert expected == expected_anomalies
+    assert len(bank_df) == expected_normal_count + 2
+    assert len(clear_df) == expected_normal_count + 4
+    assert set(expected_anomalies).issubset(set(bank_df["flow_id"]) | set(clear_df["flow_id"]))
+    assert set(bank_df["flow_id"]) - set(expected_anomalies)
+    assert set(clear_df["flow_id"]) - set(expected_anomalies)
+
+    matched_core = bank_df.loc[bank_df["flow_id"] == "CORE3003"].iloc[0]
+    matched_clear = clear_df.loc[clear_df["flow_id"] == "BC3003"].iloc[0]
+    assert matched_core["reference_no"] == matched_clear["reference_no"]
+    assert matched_core["merchant_order_no"] == matched_clear["merchant_order_no"]
+
+
 def test_generate_mvp2a3_mock_excel_covers_expected_branches_and_statuses(tmp_path: Path) -> None:
     bank_path, clear_path = generate_mvp2a3_mock_excel(tmp_path)
 
@@ -43,7 +67,14 @@ def test_generate_mvp2a3_mock_excel_covers_expected_branches_and_statuses(tmp_pa
 
     expected = BANK_CLEARING_EXPECTED_BRANCHES
 
-    assert set(expected) == set(results)
+    assert set(expected).issubset(results)
+    normal_results = {
+        flow_id: result
+        for flow_id, result in results.items()
+        if flow_id not in expected
+    }
+    assert normal_results
+    assert {result.action for result in normal_results.values()} == {"AUTO_FIX"}
     assert expected["BC3001"] == (None, None, "AUTO_FIXED")
     assert expected["BC3002"] == ("CLEARING_SINGLE_SIDE", "BC-R001", "PENDING_HUMAN")
     assert expected["BC3003"] == ("CUTOFF_CROSS_DAY", "BC-R003", "PENDING_HUMAN")

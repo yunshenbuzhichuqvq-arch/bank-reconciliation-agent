@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+import pandas as pd
 
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.main import app
@@ -15,6 +16,7 @@ from bank_reconciliation_agent.services.reconciliation import ReconciliationServ
 from bank_reconciliation_agent.services.task import TaskService
 from scripts.generate_mock_excel import (
     BANK_CLEARING_EXPECTED_BRANCHES,
+    DEFAULT_BANK_CLEARING_NORMAL_ROWS,
     EXPECTED_BRANCHES,
     generate_mvp1_mock_excel,
     generate_mvp2a3_mock_excel,
@@ -30,10 +32,21 @@ def test_mvp2b1_bank_enterprise_e2e_keeps_baseline_and_exposes_hook_results(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+    bank_df = pd.read_excel(bank_path)
+    clear_df = pd.read_excel(clear_path)
+    expected_pending = {
+        flow_id: branch
+        for flow_id, branch in EXPECTED_BRANCHES.items()
+        if branch[2] == "PENDING_HUMAN"
+    }
+    expected_auto_fixed = len(set(bank_df["flow_id"]) | set(clear_df["flow_id"])) - len(
+        expected_pending
+    )
     task_id = _upload_task(
         tmp_path=tmp_path,
         scenario_type="BANK_ENTERPRISE",
-        generator=generate_mvp1_mock_excel,
+        generator=lambda output_dir: (bank_path, clear_path),
     )
     start_response = client.post(f"/api/v1/reconcile/{task_id}/start", headers=DEMO_HEADERS)
 
@@ -43,19 +56,16 @@ def test_mvp2b1_bank_enterprise_e2e_keeps_baseline_and_exposes_hook_results(
     persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
     assert persisted_task is not None
     assert persisted_task.scenario_type == "BANK_ENTERPRISE"
-    assert persisted_task.auto_fixed_rows == 2
+    assert persisted_task.auto_fixed_rows == expected_auto_fixed
     assert persisted_task.pending_ai_rows == 0
-    assert persisted_task.pending_human_rows == 6
-    assert persisted_task.ai_processed_rows == 6
+    assert persisted_task.pending_human_rows == len(expected_pending)
+    assert persisted_task.ai_processed_rows == len(expected_pending)
 
-    assert QueueService().count_rows(user_id="demo_user", task_id=task_id) == 6
-    assert LedgerService().list(user_id="demo_user", query=_ledger_query(task_id)).total == 6
+    assert QueueService().count_rows(user_id="demo_user", task_id=task_id) == len(expected_pending)
+    assert LedgerService().list(user_id="demo_user", query=_ledger_query(task_id)).total == len(
+        expected_pending
+    )
 
-    expected_pending = {
-        flow_id: branch
-        for flow_id, branch in EXPECTED_BRANCHES.items()
-        if branch[2] == "PENDING_HUMAN"
-    }
     rows = _agent_log_rows(task_id)
     assert len(rows) == len(expected_pending)
     assert {_row_flow_id(row) for row in rows} == set(expected_pending)
@@ -100,10 +110,11 @@ def test_mvp2b1_bank_clearing_e2e_keeps_baseline_and_exposes_hook_results(
         for flow_id, branch in BANK_CLEARING_EXPECTED_BRANCHES.items()
         if branch[2] == "PENDING_HUMAN"
     }
+    expected_auto_fixed = DEFAULT_BANK_CLEARING_NORMAL_ROWS + 1
     persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
     assert persisted_task is not None
     assert persisted_task.scenario_type == "BANK_CLEARING"
-    assert persisted_task.auto_fixed_rows == 1
+    assert persisted_task.auto_fixed_rows == expected_auto_fixed
     assert persisted_task.pending_ai_rows == 0
     assert persisted_task.pending_human_rows == len(expected_pending)
     assert persisted_task.ai_processed_rows == len(expected_pending)
