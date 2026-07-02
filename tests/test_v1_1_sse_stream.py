@@ -21,8 +21,8 @@ DEMO_HEADERS = demo_bearer_headers()
         (
             "BANK_ENTERPRISE",
             generate_mvp1_mock_excel,
-            "bank_transactions.xlsx",
-            "clear_transactions.xlsx",
+            "mvp1_bank.xlsx",
+            "mvp1_clear.xlsx",
         ),
         (
             "BANK_CLEARING",

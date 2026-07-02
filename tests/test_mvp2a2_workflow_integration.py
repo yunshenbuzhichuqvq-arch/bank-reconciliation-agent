@@ -223,9 +223,8 @@ class StaticAuditAgent:
         clear_amount: str | None,
         amount_diff: str | None,
         evidence: list[RagSearchItem],
-        memory_context: str | None = None,
     ) -> AuditDecision:
-        del error_type, exception_branch, bank_amount, clear_amount, amount_diff, memory_context
+        del error_type, exception_branch, bank_amount, clear_amount, amount_diff
         return AuditDecision(
             flow_id=flow_id,
             decision="PENDING_HUMAN",

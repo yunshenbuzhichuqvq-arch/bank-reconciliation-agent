@@ -117,12 +117,12 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -316,12 +316,12 @@ def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     invalid_bank,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -350,12 +350,12 @@ def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     invalid_bank,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -383,12 +383,12 @@ def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     invalid_clear,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -411,12 +411,12 @@ def test_upload_reconciliation_files_uses_stable_task_id_for_same_content(
                 headers=DEMO_HEADERS,
                 files={
                     "bank_file": (
-                        "bank_transactions.xlsx",
+                        "mvp1_bank.xlsx",
                         bank_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
                     "clear_file": (
-                        "clear_transactions.xlsx",
+                        "mvp1_clear.xlsx",
                         clear_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
@@ -438,12 +438,12 @@ def test_upload_reconciliation_files_rejects_invalid_scenario_type(tmp_path: Pat
             data={"scenario_type": "INVALID_SCENARIO"},
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -464,12 +464,12 @@ def test_upload_reconciliation_files_persists_bank_clearing_scenario_type(tmp_pa
             data={"scenario_type": "BANK_CLEARING"},
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -526,12 +526,12 @@ def test_upload_reconciliation_files_rejects_empty_bank_flow_id(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     invalid_bank,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -608,12 +608,12 @@ def test_upload_rolls_back_core_writes_when_ai_stats_update_fails(
                 headers=DEMO_HEADERS,
                 files={
                     "bank_file": (
-                        "bank_transactions.xlsx",
+                        "mvp1_bank.xlsx",
                         bank_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
                     "clear_file": (
-                        "clear_transactions.xlsx",
+                        "mvp1_clear.xlsx",
                         clear_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
@@ -653,12 +653,12 @@ def test_upload_ignores_agent_log_side_effect_failures(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),

@@ -32,12 +32,12 @@ def _upload_task(tmp_path: Path) -> str:
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
