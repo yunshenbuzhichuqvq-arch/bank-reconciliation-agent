@@ -831,27 +831,47 @@ def _write_excel_pair(
     bank_df: pd.DataFrame,
     clear_df: pd.DataFrame,
 ) -> tuple[Path, Path]:
-    from datetime import datetime, timezone
-    import openpyxl.writer.excel as _oxl_writer
-
-    FIXED_DT = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    _orig_save_workbook = _oxl_writer.save_workbook
-
-    def _patched_save_workbook(workbook, archive):
-        workbook.properties.modified = FIXED_DT.replace(tzinfo=None)
-        return _orig_save_workbook(workbook, archive)
-
-    _oxl_writer.save_workbook = _patched_save_workbook
+    import io
+    import re
+    import zipfile
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     bank_path = output_path / bank_filename
     clear_path = output_path / clear_filename
 
-    for file_path, df in [(bank_path, bank_df), (clear_path, clear_df)]:
-        df.to_excel(file_path, index=False)
+    FIXED_TS = b"2026-01-01T00:00:00Z"
+    TARGET = "docProps/core.xml"
+    CREATED_RE = re.compile(rb"<dcterms:created[^>]*>.*?</dcterms:created>")
+    MODIFIED_RE = re.compile(rb"<dcterms:modified[^>]*>.*?</dcterms:modified>")
 
-    _oxl_writer.save_workbook = _orig_save_workbook
+    for file_path, df in [(bank_path, bank_df), (clear_path, clear_df)]:
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False)
+        raw = buf.getvalue()
+
+        entries: list[tuple[zipfile.ZipInfo, bytes]] = []
+        with zipfile.ZipFile(io.BytesIO(raw)) as zin:
+            for info in zin.infolist():
+                data = zin.read(info.filename)
+                if info.filename == TARGET:
+                    data = CREATED_RE.sub(
+                        f'<dcterms:created xsi:type="dcterms:W3CDTF">{FIXED_TS.decode()}</dcterms:created>'.encode(),
+                        data,
+                    )
+                    data = MODIFIED_RE.sub(
+                        f'<dcterms:modified xsi:type="dcterms:W3CDTF">{FIXED_TS.decode()}</dcterms:modified>'.encode(),
+                        data,
+                    )
+                entries.append((info, data))
+
+        out_buf = io.BytesIO()
+        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info, data in entries:
+                info.date_time = (2026, 1, 1, 0, 0, 0)
+                zout.writestr(info, data)
+        file_path.write_bytes(out_buf.getvalue())
+
     return bank_path, clear_path
 
 
