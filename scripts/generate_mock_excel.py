@@ -832,27 +832,26 @@ def _write_excel_pair(
     clear_df: pd.DataFrame,
 ) -> tuple[Path, Path]:
     from datetime import datetime, timezone
+    import openpyxl.writer.excel as _oxl_writer
+
+    FIXED_DT = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    _orig_save_workbook = _oxl_writer.save_workbook
+
+    def _patched_save_workbook(workbook, archive):
+        workbook.properties.modified = FIXED_DT.replace(tzinfo=None)
+        return _orig_save_workbook(workbook, archive)
+
+    _oxl_writer.save_workbook = _patched_save_workbook
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     bank_path = output_path / bank_filename
     clear_path = output_path / clear_filename
 
-    FIXED = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     for file_path, df in [(bank_path, bank_df), (clear_path, clear_df)]:
-        from openpyxl import Workbook
-        from openpyxl.utils.dataframe import dataframe_to_rows
+        df.to_excel(file_path, index=False)
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Sheet1"
-        for row in dataframe_to_rows(df, index=False, header=True):
-            ws.append(row)
-
-        wb.properties.created = FIXED
-        wb.properties.modified = FIXED
-        wb.save(file_path)
-
+    _oxl_writer.save_workbook = _orig_save_workbook
     return bank_path, clear_path
 
 
