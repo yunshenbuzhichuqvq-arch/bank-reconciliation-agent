@@ -840,21 +840,6 @@ def _write_excel_pair(
     return bank_path, clear_path
 
 
-def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Path]:
-    """生成银行端和清算端模拟 Excel，为上传解析和后续对账测试提供固定样本。"""
-    bank_df, clear_df, _expected = build_batch(
-        n_normal=DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS,
-        flow_prefix="F1",
-    )
-    return _write_excel_pair(
-        output_dir,
-        "bank_transactions.xlsx",
-        "clear_transactions.xlsx",
-        bank_df,
-        clear_df,
-    )
-
-
 def generate_mvp1_mock_excel(
     output_dir: str | Path = "mock_data",
     *,
@@ -941,11 +926,8 @@ def generate_mvp2a3_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Pa
 
 
 if __name__ == "__main__":
-    bank_file, clear_file = generate_mock_excel()
     mvp1_bank_file, mvp1_clear_file = generate_mvp1_mock_excel()
     mvp2a3_bank_file, mvp2a3_clear_file = generate_mvp2a3_mock_excel()
-    print(f"Generated {bank_file}")
-    print(f"Generated {clear_file}")
     print(f"Generated {mvp1_bank_file}")
     print(f"Generated {mvp1_clear_file}")
     print(f"Generated {mvp2a3_bank_file}")

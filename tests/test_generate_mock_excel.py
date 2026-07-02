@@ -7,19 +7,18 @@ from scripts.generate_mock_excel import (
     CLEAR_COLUMNS,
     DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS,
     EXPECTED_BRANCHES,
-    generate_mock_excel,
     generate_mvp1_mock_excel,
 )
 
 
-def test_generate_mock_excel_writes_small_reconciliation_dataset(tmp_path: Path) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+def test_generate_mvp1_mock_excel_writes_small_reconciliation_dataset(tmp_path: Path) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
 
     bank_df = pd.read_excel(bank_path)
     clear_df = pd.read_excel(clear_path)
 
-    assert bank_path.name == "bank_transactions.xlsx"
-    assert clear_path.name == "clear_transactions.xlsx"
+    assert bank_path.name == "mvp1_bank.xlsx"
+    assert clear_path.name == "mvp1_clear.xlsx"
     assert list(bank_df.columns) == [
         "flow_id",
         "bank_serial_no",
@@ -87,24 +86,24 @@ def test_generate_mock_excel_writes_small_reconciliation_dataset(tmp_path: Path)
     assert len(clear_df) == DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS + 5
     assert bank_df["counterparty_name_masked"].nunique() > 1
     assert bank_df["summary"].nunique() > 1
-    assert set(bank_df["flow_id"]) - set(clear_df["flow_id"]) == {"F12006", "F12008"}
-    assert set(clear_df["flow_id"]) - set(bank_df["flow_id"]) == {"F12005"}
+    assert set(bank_df["flow_id"]) - set(clear_df["flow_id"]) == {"F2006", "F2008"}
+    assert set(clear_df["flow_id"]) - set(bank_df["flow_id"]) == {"F2005"}
     normal_flow_ids = set(bank_df["flow_id"]) & set(clear_df["flow_id"]) - {
-        "F12003",
-        "F12004",
-        "F12007",
+        "F2003",
+        "F2004",
+        "F2007",
     }
     assert len(normal_flow_ids) >= DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS
 
 
-def test_generate_mock_excel_includes_amount_mismatch_case(tmp_path: Path) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+def test_generate_mvp1_mock_excel_includes_amount_mismatch_case(tmp_path: Path) -> None:
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
 
     bank_df = pd.read_excel(bank_path)
     clear_df = pd.read_excel(clear_path)
 
-    bank_amount = bank_df.loc[bank_df["flow_id"] == "F12003", "credit_amount"].iloc[0]
-    clear_amount = clear_df.loc[clear_df["flow_id"] == "F12003", "transaction_amount"].iloc[0]
+    bank_amount = bank_df.loc[bank_df["flow_id"] == "F2003", "credit_amount"].iloc[0]
+    clear_amount = clear_df.loc[clear_df["flow_id"] == "F2003", "transaction_amount"].iloc[0]
 
     assert bank_amount == 300.00
     assert clear_amount == 295.00

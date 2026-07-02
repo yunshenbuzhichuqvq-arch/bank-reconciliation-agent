@@ -29,7 +29,6 @@ from scripts.generate_mock_excel import (
     BANK_COLUMNS,
     CLEAR_COLUMNS,
     EXPECTED_BRANCHES,
-    generate_mock_excel,
     generate_mvp1_mock_excel,
 )
 from tests.auth_helpers import demo_bearer_headers
@@ -305,7 +304,7 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     bank_df = pd.read_excel(bank_path).drop(columns=["bank_serial_no"])
     invalid_bank = BytesIO()
     bank_df.to_excel(invalid_bank, index=False)
@@ -337,7 +336,7 @@ def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
 def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     bank_df = pd.read_excel(bank_path)
     duplicated_flow_id = str(bank_df.loc[0, "flow_id"])
     bank_df.loc[1, "flow_id"] = bank_df.loc[0, "flow_id"]
@@ -370,7 +369,7 @@ def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
 def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     clear_df = pd.read_excel(clear_path)
     duplicated_flow_id = str(clear_df.loc[0, "flow_id"])
     clear_df.loc[1, "flow_id"] = clear_df.loc[0, "flow_id"]
@@ -403,7 +402,7 @@ def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
 def test_upload_reconciliation_files_uses_stable_task_id_for_same_content(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
 
     def upload_once() -> str:
         with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
@@ -514,7 +513,7 @@ def test_upload_reconciliation_files_persists_bank_clearing_scenario_type(tmp_pa
 def test_upload_reconciliation_files_rejects_empty_bank_flow_id(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     bank_df = pd.read_excel(bank_path)
     bank_df.loc[0, "flow_id"] = None
     invalid_bank = BytesIO()
