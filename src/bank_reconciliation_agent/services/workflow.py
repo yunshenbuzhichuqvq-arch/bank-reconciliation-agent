@@ -24,7 +24,6 @@ from bank_reconciliation_agent.services.hooks import (
     SchemaValidationError,
     constraint_hook,
     decision_hook,
-    memory_hook,
     schema_hook,
 )
 from bank_reconciliation_agent.services.stream_emitter import NullEmitter, StreamEmitter, to_stream_event
@@ -65,10 +64,6 @@ class ReconciliationState(TypedDict):
     fallback_cases: NotRequired[list[dict[str, Any]]]
     t1_candidate: NotRequired[dict[str, str] | None]
     fuzzy_candidate: NotRequired[dict[str, str] | None]
-    long_term_memory: NotRequired[list[dict[str, Any]]]
-    short_term_memory: NotRequired[list[dict[str, Any]]]
-    summary_buffer: NotRequired[dict[str, Any] | None]
-    memory_context: NotRequired[str | None]
 
 
 class Retriever(Protocol):
@@ -97,8 +92,6 @@ def run_item(
         step="run_item",
         exception_branch=state.get("exception_branch"),
     )
-    state = memory_hook(state)
-
     flow_id = _flow_id(state)
     summary = _combined_text(state, "summary")
     remark = _combined_text(state, "remark") or None
@@ -452,7 +445,6 @@ def _audit_with_schema_retry(
     max_attempts = 3
     state["error_message"] = None
     audit_kwargs = dict(audit_kwargs)
-    audit_kwargs["memory_context"] = state.get("memory_context")
     for attempt in range(1, max_attempts + 1):
         try:
             decision = schema_hook(audit_agent.decide_with_llm(**audit_kwargs))

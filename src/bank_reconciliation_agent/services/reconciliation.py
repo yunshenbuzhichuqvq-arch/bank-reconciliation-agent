@@ -39,7 +39,6 @@ from bank_reconciliation_agent.services.agent_log import agent_log_service
 from bank_reconciliation_agent.services.exception_router import BranchResult, exception_router
 from bank_reconciliation_agent.services.hooks import auth_hook, validation_hook
 from bank_reconciliation_agent.services.ledger import error_ledger_table, ledger_service
-from bank_reconciliation_agent.services.memory.manager import memory_manager
 from bank_reconciliation_agent.services.queue import queue_service, reconciliation_queue_table
 from bank_reconciliation_agent.services.queue_client import enqueue_reconciliation
 from bank_reconciliation_agent.services.rag_log import rag_log_service
@@ -696,38 +695,6 @@ class ReconciliationService:
                 ),
                 task_id=task_id,
                 flow_id=flow_id,
-            )
-        for ledger_row in write_bundle.ledger_rows:
-            queue_row = queue_service.get_row(
-                user_id=user_id,
-                task_id=task_id,
-                flow_id=ledger_row.flow_id,
-            )
-            if queue_row is None:
-                continue
-            self._run_side_effect(
-                side_effect_name="memory",
-                operation=lambda ledger_row=ledger_row, queue_row=queue_row: memory_manager.update_after_decision(
-                    user_id=user_id,
-                    thread_id=task_id,
-                    error_type=ledger_row.error_type,
-                    decision={
-                        "queue_id": queue_row["id"],
-                        "flow_id": ledger_row.flow_id,
-                        "risk_level": queue_row["risk_level"],
-                        "decision": ledger_row.handle_status,
-                        "confidence": ledger_row.ai_confidence,
-                        "exception_branch": ledger_row.exception_branch,
-                        "bank_amount": ledger_row.bank_amount,
-                        "clear_amount": ledger_row.clear_amount,
-                        "amount_diff": ledger_row.discrepancy_amount,
-                        "ai_suggestion": queue_row["status"],
-                        "summary": queue_row.get("error_type"),
-                    },
-                    is_human_confirmed=False,
-                ),
-                task_id=task_id,
-                flow_id=ledger_row.flow_id,
             )
 
     def _build_write_bundle(

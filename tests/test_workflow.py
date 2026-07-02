@@ -173,41 +173,6 @@ def test_run_item_retries_schema_drift_then_falls_back_to_human() -> None:
     assert [row["retry_count"] for row in schema_logs] == [1, 2, 3]
 
 
-def test_run_item_memory_hook_keeps_state_intact() -> None:
-    result = run_item(
-        _state("BE-R002"),
-        extraction_agent=SpyExtractionAgent(),
-        trace_agent=SpyTraceAgent(),
-        audit_agent=SpyAuditAgent(),
-        retriever=StaticRetriever(),
-    )
-
-    assert result["source_a_item"]["flow_id"] == "FLOW-BE-R002"
-
-
-def test_run_item_passes_memory_context_to_audit_agent(monkeypatch) -> None:
-    audit_agent = SpyAuditAgent()
-
-    def fake_memory_hook(state: ReconciliationState) -> ReconciliationState:
-        state["memory_context"] = "memory context from hook"
-        return state
-
-    monkeypatch.setattr(
-        "bank_reconciliation_agent.services.workflow.memory_hook",
-        fake_memory_hook,
-    )
-
-    run_item(
-        _state("BE-R002"),
-        extraction_agent=SpyExtractionAgent(),
-        trace_agent=SpyTraceAgent(),
-        audit_agent=audit_agent,
-        retriever=StaticRetriever(),
-    )
-
-    assert audit_agent.memory_contexts == ["memory context from hook"]
-
-
 def test_run_item_rag_failure_opens_breaker_and_short_circuits_to_human(monkeypatch) -> None:
     now = 0.0
 
@@ -430,9 +395,6 @@ class SpyTraceAgent:
 
 
 class SpyAuditAgent:
-    def __init__(self) -> None:
-        self.memory_contexts: list[str | None] = []
-
     def decide_with_llm(
         self,
         flow_id: str,
@@ -442,10 +404,8 @@ class SpyAuditAgent:
         clear_amount: str | None,
         amount_diff: str | None,
         evidence: list[RagSearchItem],
-        memory_context: str | None = None,
     ) -> AuditDecision:
         del error_type, exception_branch, bank_amount, clear_amount, amount_diff
-        self.memory_contexts.append(memory_context)
         return AuditDecision(
             flow_id=flow_id,
             decision="PENDING_HUMAN",
@@ -475,7 +435,6 @@ class InvalidSchemaAuditAgent:
         evidence: list[RagSearchItem],
         few_shot_cases: list[dict[str, object]] | None = None,
         trace_context: dict[str, object] | None = None,
-        memory_context: str | None = None,
     ) -> dict[str, object]:
         del (
             error_type,
@@ -486,7 +445,6 @@ class InvalidSchemaAuditAgent:
             evidence,
             few_shot_cases,
             trace_context,
-            memory_context,
         )
         self.calls += 1
         return {

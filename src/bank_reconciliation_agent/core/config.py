@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     chroma_path: str = "./chroma_data"
     upload_dir: str = "./uploads"
     trace_dir: str = "./data/traces"
-    memory_sqlite_path: str = "./data/memory.sqlite"
     checkpoint_enabled: bool = False
     checkpoint_sqlite_path: str = "./data/checkpoint.sqlite"
     redis_dsn: str = "redis://127.0.0.1:6379/0"

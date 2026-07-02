@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class RagSourceRef(BaseModel):
@@ -36,6 +36,3 @@ class ReviewActionRequest(BaseModel):
 class ReviewResultResponse(BaseModel):
     queue_id: int
     current_status: str
-    memory_updated: dict[str, bool] = Field(
-        default_factory=lambda: {"short_term": False, "long_term": False}
-    )

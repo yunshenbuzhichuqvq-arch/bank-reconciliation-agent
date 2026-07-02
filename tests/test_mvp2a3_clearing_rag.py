@@ -36,7 +36,7 @@ def test_workflow_falls_back_to_human_when_bank_clearing_rag_has_no_hits() -> No
     assert result["fallback_level"] == 0
 
 
-def test_workflow_memory_hook_keeps_bank_clearing_state_intact() -> None:
+def test_workflow_keeps_bank_clearing_state_intact() -> None:
     state = _state()
 
     result = run_item(
