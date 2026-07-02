@@ -840,46 +840,20 @@ def _write_excel_pair(
 
     FIXED = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     for file_path, df in [(bank_path, bank_df), (clear_path, clear_df)]:
-        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
-            writer.book.properties.created = FIXED
-            writer.book.properties.modified = FIXED
-        _stamp_core_xml_timestamps(file_path)
+        from openpyxl import Workbook
+        from openpyxl.utils.dataframe import dataframe_to_rows
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        for row in dataframe_to_rows(df, index=False, header=True):
+            ws.append(row)
+
+        wb.properties.created = FIXED
+        wb.properties.modified = FIXED
+        wb.save(file_path)
 
     return bank_path, clear_path
-
-
-def _stamp_core_xml_timestamps(file_path: Path) -> None:
-    FIXED_TS = b"2026-01-01T00:00:00Z"
-    data = file_path.read_bytes()
-    idx = data.find(b"docProps/core.xml")
-    if idx == -1:
-        return
-    end = data.find(b"PK", idx + 20)
-    if end == -1:
-        return
-    entry_data = data[idx + 4 + len(b"docProps/core.xml") : data.rfind(b"PK\x01\x02", idx, end)]
-    patched = _replace_ts(entry_data, FIXED_TS)
-    if patched == entry_data:
-        return
-    new = bytearray(data)
-    start = idx + 4 + len(b"docProps/core.xml")
-    new[start : start + len(entry_data)] = patched
-    file_path.write_bytes(bytes(new))
-
-
-def _replace_ts(data: bytes, ts: bytes) -> bytes:
-    import re
-
-    return re.sub(
-        rb"<dcterms:created[^>]*>.*?</dcterms:created>",
-        f"<dcterms:created xsi:type=\"dcterms:W3CDTF\">{ts.decode()}</dcterms:created>".encode(),
-        re.sub(
-            rb"<dcterms:modified[^>]*>.*?</dcterms:modified>",
-            f"<dcterms:modified xsi:type=\"dcterms:W3CDTF\">{ts.decode()}</dcterms:modified>".encode(),
-            data,
-        ),
-    )
 
 
 def generate_mvp1_mock_excel(
