@@ -22,3 +22,6 @@ reports/rag_eval_metrics.json
 /architecture-lite.md
 /optimize_prompt.md
 /prd-lite.md
+/docs/interview/*.md
+data/*.sqlite
+data/*.sqlite-*
