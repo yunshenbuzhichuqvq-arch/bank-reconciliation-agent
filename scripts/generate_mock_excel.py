@@ -844,8 +844,42 @@ def _write_excel_pair(
             df.to_excel(writer, index=False)
             writer.book.properties.created = FIXED
             writer.book.properties.modified = FIXED
+        _stamp_core_xml_timestamps(file_path)
 
     return bank_path, clear_path
+
+
+def _stamp_core_xml_timestamps(file_path: Path) -> None:
+    FIXED_TS = b"2026-01-01T00:00:00Z"
+    data = file_path.read_bytes()
+    idx = data.find(b"docProps/core.xml")
+    if idx == -1:
+        return
+    end = data.find(b"PK", idx + 20)
+    if end == -1:
+        return
+    entry_data = data[idx + 4 + len(b"docProps/core.xml") : data.rfind(b"PK\x01\x02", idx, end)]
+    patched = _replace_ts(entry_data, FIXED_TS)
+    if patched == entry_data:
+        return
+    new = bytearray(data)
+    start = idx + 4 + len(b"docProps/core.xml")
+    new[start : start + len(entry_data)] = patched
+    file_path.write_bytes(bytes(new))
+
+
+def _replace_ts(data: bytes, ts: bytes) -> bytes:
+    import re
+
+    return re.sub(
+        rb"<dcterms:created[^>]*>.*?</dcterms:created>",
+        f"<dcterms:created xsi:type=\"dcterms:W3CDTF\">{ts.decode()}</dcterms:created>".encode(),
+        re.sub(
+            rb"<dcterms:modified[^>]*>.*?</dcterms:modified>",
+            f"<dcterms:modified xsi:type=\"dcterms:W3CDTF\">{ts.decode()}</dcterms:modified>".encode(),
+            data,
+        ),
+    )
 
 
 def generate_mvp1_mock_excel(
