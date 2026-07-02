@@ -831,12 +831,20 @@ def _write_excel_pair(
     bank_df: pd.DataFrame,
     clear_df: pd.DataFrame,
 ) -> tuple[Path, Path]:
+    from datetime import datetime, timezone
+
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     bank_path = output_path / bank_filename
     clear_path = output_path / clear_filename
-    bank_df.to_excel(bank_path, index=False)
-    clear_df.to_excel(clear_path, index=False)
+
+    FIXED = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    for file_path, df in [(bank_path, bank_df), (clear_path, clear_df)]:
+        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False)
+            writer.book.properties.created = FIXED
+            writer.book.properties.modified = FIXED
+
     return bank_path, clear_path
 
 
