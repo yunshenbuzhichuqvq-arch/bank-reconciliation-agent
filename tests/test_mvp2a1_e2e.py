@@ -25,12 +25,12 @@ def test_mvp2a1_upload_to_ledger_covers_five_bank_enterprise_branches(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),

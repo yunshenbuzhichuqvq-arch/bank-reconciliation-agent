@@ -29,12 +29,12 @@ def test_stream_reconcile_returns_ordered_sse_events(tmp_path: Path) -> None:
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),

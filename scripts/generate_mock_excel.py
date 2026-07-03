@@ -831,28 +831,48 @@ def _write_excel_pair(
     bank_df: pd.DataFrame,
     clear_df: pd.DataFrame,
 ) -> tuple[Path, Path]:
+    import io
+    import re
+    import zipfile
+
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     bank_path = output_path / bank_filename
     clear_path = output_path / clear_filename
-    bank_df.to_excel(bank_path, index=False)
-    clear_df.to_excel(clear_path, index=False)
+
+    FIXED_TS = b"2026-01-01T00:00:00Z"
+    TARGET = "docProps/core.xml"
+    CREATED_RE = re.compile(rb"<dcterms:created[^>]*>.*?</dcterms:created>")
+    MODIFIED_RE = re.compile(rb"<dcterms:modified[^>]*>.*?</dcterms:modified>")
+
+    for file_path, df in [(bank_path, bank_df), (clear_path, clear_df)]:
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False)
+        raw = buf.getvalue()
+
+        entries: list[tuple[zipfile.ZipInfo, bytes]] = []
+        with zipfile.ZipFile(io.BytesIO(raw)) as zin:
+            for info in zin.infolist():
+                data = zin.read(info.filename)
+                if info.filename == TARGET:
+                    data = CREATED_RE.sub(
+                        f'<dcterms:created xsi:type="dcterms:W3CDTF">{FIXED_TS.decode()}</dcterms:created>'.encode(),
+                        data,
+                    )
+                    data = MODIFIED_RE.sub(
+                        f'<dcterms:modified xsi:type="dcterms:W3CDTF">{FIXED_TS.decode()}</dcterms:modified>'.encode(),
+                        data,
+                    )
+                entries.append((info, data))
+
+        out_buf = io.BytesIO()
+        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info, data in entries:
+                info.date_time = (2026, 1, 1, 0, 0, 0)
+                zout.writestr(info, data)
+        file_path.write_bytes(out_buf.getvalue())
+
     return bank_path, clear_path
-
-
-def generate_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Path, Path]:
-    """生成银行端和清算端模拟 Excel，为上传解析和后续对账测试提供固定样本。"""
-    bank_df, clear_df, _expected = build_batch(
-        n_normal=DEFAULT_BANK_ENTERPRISE_NORMAL_ROWS,
-        flow_prefix="F1",
-    )
-    return _write_excel_pair(
-        output_dir,
-        "bank_transactions.xlsx",
-        "clear_transactions.xlsx",
-        bank_df,
-        clear_df,
-    )
 
 
 def generate_mvp1_mock_excel(
@@ -941,11 +961,8 @@ def generate_mvp2a3_mock_excel(output_dir: str | Path = "mock_data") -> tuple[Pa
 
 
 if __name__ == "__main__":
-    bank_file, clear_file = generate_mock_excel()
     mvp1_bank_file, mvp1_clear_file = generate_mvp1_mock_excel()
     mvp2a3_bank_file, mvp2a3_clear_file = generate_mvp2a3_mock_excel()
-    print(f"Generated {bank_file}")
-    print(f"Generated {clear_file}")
     print(f"Generated {mvp1_bank_file}")
     print(f"Generated {mvp1_clear_file}")
     print(f"Generated {mvp2a3_bank_file}")

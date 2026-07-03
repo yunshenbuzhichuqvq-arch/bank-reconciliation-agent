@@ -14,10 +14,8 @@ from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.services.ledger import LedgerService, error_ledger_table
-from bank_reconciliation_agent.services.memory.short_term import ShortTermMemoryService
 from bank_reconciliation_agent.services.queue import QueueService, queue_service
 from bank_reconciliation_agent.services.rag_log import RagLogService
-from bank_reconciliation_agent.services import reconciliation as reconciliation_module
 from bank_reconciliation_agent.services.reconciliation import (
     ReconciliationMatchResult,
     ReconciliationService,
@@ -31,7 +29,6 @@ from scripts.generate_mock_excel import (
     BANK_COLUMNS,
     CLEAR_COLUMNS,
     EXPECTED_BRANCHES,
-    generate_mock_excel,
     generate_mvp1_mock_excel,
 )
 from tests.auth_helpers import demo_bearer_headers
@@ -120,12 +117,12 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -307,7 +304,7 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     bank_df = pd.read_excel(bank_path).drop(columns=["bank_serial_no"])
     invalid_bank = BytesIO()
     bank_df.to_excel(invalid_bank, index=False)
@@ -319,12 +316,12 @@ def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     invalid_bank,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -339,7 +336,7 @@ def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
 def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     bank_df = pd.read_excel(bank_path)
     duplicated_flow_id = str(bank_df.loc[0, "flow_id"])
     bank_df.loc[1, "flow_id"] = bank_df.loc[0, "flow_id"]
@@ -353,12 +350,12 @@ def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     invalid_bank,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -372,7 +369,7 @@ def test_upload_reconciliation_files_rejects_duplicate_bank_flow_id(
 def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     clear_df = pd.read_excel(clear_path)
     duplicated_flow_id = str(clear_df.loc[0, "flow_id"])
     clear_df.loc[1, "flow_id"] = clear_df.loc[0, "flow_id"]
@@ -386,12 +383,12 @@ def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     invalid_clear,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -405,7 +402,7 @@ def test_upload_reconciliation_files_rejects_duplicate_clear_flow_id(
 def test_upload_reconciliation_files_uses_stable_task_id_for_same_content(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
 
     def upload_once() -> str:
         with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
@@ -414,12 +411,12 @@ def test_upload_reconciliation_files_uses_stable_task_id_for_same_content(
                 headers=DEMO_HEADERS,
                 files={
                     "bank_file": (
-                        "bank_transactions.xlsx",
+                        "mvp1_bank.xlsx",
                         bank_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
                     "clear_file": (
-                        "clear_transactions.xlsx",
+                        "mvp1_clear.xlsx",
                         clear_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
@@ -441,12 +438,12 @@ def test_upload_reconciliation_files_rejects_invalid_scenario_type(tmp_path: Pat
             data={"scenario_type": "INVALID_SCENARIO"},
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -467,12 +464,12 @@ def test_upload_reconciliation_files_persists_bank_clearing_scenario_type(tmp_pa
             data={"scenario_type": "BANK_CLEARING"},
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -516,7 +513,7 @@ def test_upload_reconciliation_files_persists_bank_clearing_scenario_type(tmp_pa
 def test_upload_reconciliation_files_rejects_empty_bank_flow_id(
     tmp_path: Path,
 ) -> None:
-    bank_path, clear_path = generate_mock_excel(tmp_path)
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     bank_df = pd.read_excel(bank_path)
     bank_df.loc[0, "flow_id"] = None
     invalid_bank = BytesIO()
@@ -529,12 +526,12 @@ def test_upload_reconciliation_files_rejects_empty_bank_flow_id(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     invalid_bank,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -611,12 +608,12 @@ def test_upload_rolls_back_core_writes_when_ai_stats_update_fails(
                 headers=DEMO_HEADERS,
                 files={
                     "bank_file": (
-                        "bank_transactions.xlsx",
+                        "mvp1_bank.xlsx",
                         bank_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
                     "clear_file": (
-                        "clear_transactions.xlsx",
+                        "mvp1_clear.xlsx",
                         clear_file,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     ),
@@ -656,12 +653,12 @@ def test_upload_ignores_agent_log_side_effect_failures(
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -675,74 +672,6 @@ def test_upload_ignores_agent_log_side_effect_failures(
     persisted_task = TaskService().get(user_id="demo_user", task_id=task_id)
     assert persisted_task is not None
     assert persisted_task.ai_processed_rows == 6
-
-
-def test_upload_appends_short_term_memory_after_each_decision(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
-    task_id = "TASK_MEMORY_SHORT_TERM_TEST"
-    monkeypatch.setattr(ReconciliationService, "_generate_task_id", lambda self, content: task_id)
-
-    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
-        response = client.post(
-            "/api/v1/reconcile/upload",
-            headers=DEMO_HEADERS,
-            files={
-                "bank_file": (
-                    "bank_transactions.xlsx",
-                    bank_file,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ),
-                "clear_file": (
-                    "clear_transactions.xlsx",
-                    clear_file,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ),
-            },
-        )
-
-    assert response.status_code == 200
-    task_id = response.json()["data"]["task_id"]
-    short_rows = ShortTermMemoryService().recent(thread_id=task_id)
-
-    assert len(short_rows) == 6
-    assert {row["error_type"] for row in short_rows} >= {"AMOUNT_MISMATCH", "BANK_UNARRIVED"}
-    assert all(row["decision"] == "PENDING_HUMAN" for row in short_rows)
-
-
-def test_upload_ignores_memory_side_effect_failures(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
-
-    def failing_memory_update(**kwargs):
-        del kwargs
-        raise RuntimeError("memory unavailable")
-
-    monkeypatch.setattr(reconciliation_module.memory_manager, "update_after_decision", failing_memory_update)
-
-    with bank_path.open("rb") as bank_file, clear_path.open("rb") as clear_file:
-        response = client.post(
-            "/api/v1/reconcile/upload",
-            headers=DEMO_HEADERS,
-            files={
-                "bank_file": (
-                    "bank_transactions.xlsx",
-                    bank_file,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ),
-                "clear_file": (
-                    "clear_transactions.xlsx",
-                    clear_file,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ),
-            },
-        )
-
-    assert response.status_code == 200
 
 
 def test_write_ledger_entries_does_not_directly_touch_other_service_privates(

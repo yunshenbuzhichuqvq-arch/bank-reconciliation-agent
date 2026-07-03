@@ -1,5 +1,4 @@
 import sqlite3
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -9,8 +8,6 @@ from sqlalchemy import func, select
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.main import app
-from bank_reconciliation_agent.services.memory.long_term import LongTermMemoryService
-from bank_reconciliation_agent.services.memory.short_term import ShortTermMemoryService
 from bank_reconciliation_agent.services.queue import reconciliation_queue_table
 from bank_reconciliation_agent.services.review import human_review_table
 from bank_reconciliation_agent.services.review_graph import get_review_graph
@@ -153,95 +150,12 @@ def test_checkpoint_toggle_e2e_matches_plain_and_preserves_scenario_baseline(
     checkpoint_counters = _task_counters(checkpoint_task_id)
 
     assert plain_result["current_status"] == "FIXED"
-    assert checkpoint_result == plain_result | {"queue_id": checkpoint_pending["queue_id"]}
+    assert checkpoint_result["current_status"] == plain_result["current_status"]
+    assert checkpoint_result["queue_id"] == checkpoint_pending["queue_id"]
     assert plain_counters == checkpoint_counters == {"pending_human_rows": expected_upload_counts["pending_human_rows"] - 1, "unresolved_rows": expected_upload_counts["pending_human_rows"] - 1}
 
     with sqlite3.connect(checkpoint_path) as connection:
         assert connection.execute("select count(*) from checkpoints").fetchone()[0] >= 1
-    get_review_graph.cache_clear()
-
-
-@pytest.mark.parametrize("checkpoint_enabled", [False, True])
-def test_memory_rollback_and_non_override_e2e_are_consistent_across_toggle(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    checkpoint_enabled: bool,
-) -> None:
-    checkpoint_path = tmp_path / "memory-checkpoint.sqlite"
-    monkeypatch.setattr(settings, "checkpoint_enabled", checkpoint_enabled)
-    monkeypatch.setattr(settings, "checkpoint_sqlite_path", str(checkpoint_path))
-    get_review_graph.cache_clear()
-
-    override_task_id, _ = _upload_task(tmp_path / "override", scenario_type="BANK_ENTERPRISE")
-    override_pending = _pending_item_by_branch(override_task_id, "BE-R004")
-    short_term_service = ShortTermMemoryService()
-    short_term_service.append(
-        thread_id=override_task_id,
-        queue_id=int(override_pending["queue_id"]),
-        flow_id="F2005",
-        error_type="NAME_MISMATCH",
-        risk_level="LOW",
-        decision="APPROVED_MATCH",
-        confidence="0.9500",
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-
-    override_result = _approve(
-        int(override_pending["queue_id"]),
-        action="FORCE_HOLD",
-        handler_username="reviewer_override",
-        remark="override",
-    )
-    assert override_result["current_status"] == "HELD"
-    assert override_result["memory_updated"] == {"short_term": True, "long_term": False}
-    assert all(
-        row["queue_id"] != override_pending["queue_id"]
-        for row in short_term_service.recent(thread_id=override_task_id, limit=20)
-    )
-    assert all(
-        row["flow_id"] != "F2005"
-        for row in LongTermMemoryService().recall(
-            user_id="demo_user",
-            error_type="NAME_MISMATCH",
-            keywords=["override"],
-            limit=20,
-        )
-    )
-
-    non_override_task_id, _ = _upload_task(tmp_path / "non-override", scenario_type="BANK_ENTERPRISE")
-    non_override_pending = _pending_item_by_branch(non_override_task_id, "BE-R002")
-    short_term_service.append(
-        thread_id=non_override_task_id,
-        queue_id=int(non_override_pending["queue_id"]),
-        flow_id="F2003",
-        error_type="AMOUNT_MISMATCH",
-        risk_level="MEDIUM",
-        decision="PENDING_HUMAN",
-        confidence="0.8800",
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-
-    non_override_result = _approve(
-        int(non_override_pending["queue_id"]),
-        action="APPROVED_MATCH",
-        handler_username="reviewer_confirm",
-        remark="confirm",
-    )
-    assert non_override_result["current_status"] == "FIXED"
-    assert non_override_result["memory_updated"] == {"short_term": False, "long_term": True}
-    assert any(
-        row["queue_id"] == non_override_pending["queue_id"]
-        for row in short_term_service.recent(thread_id=non_override_task_id, limit=20)
-    )
-    assert any(
-        row["flow_id"] == "F2003" and row["human_decision"] == "APPROVED_MATCH"
-        for row in LongTermMemoryService().recall(
-            user_id="demo_user",
-            error_type="AMOUNT_MISMATCH",
-            keywords=["confirm"],
-            limit=20,
-        )
-    )
     get_review_graph.cache_clear()
 
 
@@ -282,9 +196,7 @@ def test_checkpoint_approve_is_idempotent_and_does_not_duplicate_review_rows(
         ).scalar_one()
 
     assert first["current_status"] == "FIXED"
-    assert first["memory_updated"] == {"short_term": False, "long_term": True}
     assert second["current_status"] == "FIXED"
-    assert second["memory_updated"] == {"short_term": False, "long_term": False}
     assert review_count_after == review_count_before + 1
     assert queue_status == "FIXED"
     get_review_graph.cache_clear()

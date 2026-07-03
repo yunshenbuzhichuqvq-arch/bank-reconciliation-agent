@@ -81,8 +81,6 @@ def test_mvp2b1_bank_enterprise_e2e_keeps_baseline_and_exposes_hook_results(
     assert '"hook_name": "ValidationHook"' in messages
     assert '"event": "auth_hook_passed"' in messages
     assert '"hook_name": "AuthHook"' in messages
-    assert '"event": "memory_hook_passed"' in messages
-    assert '"hook_name": "MemoryHook"' in messages
     assert '"event": "schema_hook_passed"' in messages
     assert '"hook_name": "SchemaHook"' in messages
     assert '"event": "constraint_hook_evaluated"' in messages
@@ -139,8 +137,6 @@ def test_mvp2b1_bank_clearing_e2e_keeps_baseline_and_exposes_hook_results(
     assert '"hook_name": "ValidationHook"' in messages
     assert '"event": "auth_hook_passed"' in messages
     assert '"hook_name": "AuthHook"' in messages
-    assert '"event": "memory_hook_passed"' in messages
-    assert '"hook_name": "MemoryHook"' in messages
     assert '"event": "schema_hook_passed"' in messages
     assert '"hook_name": "SchemaHook"' in messages
     assert '"event": "constraint_hook_evaluated"' in messages

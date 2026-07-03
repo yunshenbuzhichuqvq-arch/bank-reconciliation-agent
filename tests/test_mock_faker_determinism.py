@@ -5,7 +5,6 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 
 from scripts.generate_mock_excel import (
-    generate_mock_excel,
     generate_mvp1_mock_excel,
     generate_mvp2a3_mock_excel,
 )
@@ -26,10 +25,6 @@ def _assert_generator_writes_deterministic_files(
         second_df = pd.read_excel(second_path)
 
         assert_frame_equal(first_df, second_df)
-
-
-def test_generate_mock_excel_is_deterministic(tmp_path: Path) -> None:
-    _assert_generator_writes_deterministic_files(tmp_path, generate_mock_excel)
 
 
 def test_generate_mvp1_mock_excel_is_deterministic(tmp_path: Path) -> None:

@@ -145,7 +145,6 @@ class AuditAgent:
         evidence: list[RagSearchItem],
         few_shot_cases: list[dict[str, object]] | None = None,
         trace_context: dict[str, object] | None = None,
-        memory_context: str | None = None,
         match_candidate_context: dict[str, object] | None = None,
     ) -> AuditDecision:
         """LLM audit path; missing evidence still short-circuits to manual review."""
@@ -185,8 +184,6 @@ class AuditAgent:
             user_payload["trace_context"] = trace_context
 
         messages = [{"role": "system", "content": self.prompt_text}]
-        if memory_context:
-            messages.append({"role": "system", "content": memory_context})
         messages.append(
             {
                 "role": "user",

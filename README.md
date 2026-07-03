@@ -11,7 +11,7 @@
 - by-taskId SSE 看板实时结果推送
 - 量化指标仪表盘
 - 银企对账与银行清算对账双场景
-- RAG 证据、Fallback、Hook、Memory、Checkpoint 等 Agent 链路演进
+- RAG 证据、Fallback、Hook、Checkpoint 等 Agent 链路演进
 
 这不是稳定部署版。2026-06-17 的本地 smoke 显示：基础页面和多数 API 可以访问，但看板实时链路仍有阻断问题，见“当前 smoke 状态”和“已知问题”。
 

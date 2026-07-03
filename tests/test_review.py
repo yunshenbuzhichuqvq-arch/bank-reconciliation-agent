@@ -1,5 +1,4 @@
 import sqlite3
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,8 +10,6 @@ from langgraph.types import Command
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.ledger import error_ledger_table
-from bank_reconciliation_agent.services.memory.long_term import LongTermMemoryService
-from bank_reconciliation_agent.services.memory.short_term import ShortTermMemoryService
 from bank_reconciliation_agent.services.queue import reconciliation_queue_table
 from bank_reconciliation_agent.services import review as review_module
 from bank_reconciliation_agent.services.review import human_review_table, review_service
@@ -35,12 +32,12 @@ def _upload_task(tmp_path: Path) -> str:
             headers=DEMO_HEADERS,
             files={
                 "bank_file": (
-                    "bank_transactions.xlsx",
+                    "mvp1_bank.xlsx",
                     bank_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
                 "clear_file": (
-                    "clear_transactions.xlsx",
+                    "mvp1_clear.xlsx",
                     clear_file,
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ),
@@ -113,7 +110,6 @@ def test_approve_match_writes_review_and_updates_ledger_queue_task(tmp_path: Pat
     body = response.json()["data"]
     assert body["queue_id"] == pending["queue_id"]
     assert body["current_status"] == "FIXED"
-    assert body["memory_updated"] == {"short_term": False, "long_term": True}
 
     engine = get_engine()
     with engine.connect() as connection:
@@ -152,16 +148,6 @@ def test_approve_match_writes_review_and_updates_ledger_queue_task(tmp_path: Pat
     assert task["pending_human_rows"] == 5
     assert task["unresolved_rows"] == 5
 
-    long_rows = LongTermMemoryService().recall(
-        user_id="demo_user",
-        error_type="AMOUNT_MISMATCH",
-        keywords=["amount", "confirmed"],
-    )
-    assert any(
-        row["flow_id"] == "F2003" and row["human_decision"] == "APPROVED_MATCH"
-        for row in long_rows
-    )
-
 
 def test_approve_force_hold_sets_held(tmp_path: Path) -> None:
     task_id = _upload_task(tmp_path)
@@ -195,157 +181,6 @@ def test_approve_force_hold_sets_held(tmp_path: Path) -> None:
 
     assert ledger_status == "HELD"
     assert queue_status == "HELD"
-
-
-def test_approve_ignores_memory_side_effect_failures(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    task_id = _upload_task(tmp_path)
-    pending = client.get(
-        f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=1",
-        headers=DEMO_HEADERS,
-    ).json()["data"]["items"][0]
-
-    def failing_memory_update(**kwargs):
-        del kwargs
-        raise RuntimeError("memory unavailable")
-
-    monkeypatch.setattr(review_module.memory_manager, "update_after_decision", failing_memory_update)
-
-    response = client.post(
-        f"/api/v1/review/{pending['queue_id']}/approve",
-        headers=DEMO_HEADERS,
-        json={
-            "action": "APPROVED_MATCH",
-            "handler_username": "reviewer_a",
-            "remark": "确认平账",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["memory_updated"] == {"short_term": False, "long_term": False}
-
-
-def test_approve_override_deletes_short_term_without_writing_long_term(tmp_path: Path) -> None:
-    task_id = _upload_task(tmp_path)
-    pending = _pending_item_by_branch(task_id, "BE-R004")
-    short_term_service = ShortTermMemoryService()
-    short_term_service.append(
-        thread_id=task_id,
-        queue_id=int(pending["queue_id"]),
-        flow_id="F2005",
-        error_type="NAME_MISMATCH",
-        risk_level="LOW",
-        decision="APPROVED_MATCH",
-        confidence=review_module.Decimal("0.9500"),
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-
-    response = client.post(
-        f"/api/v1/review/{pending['queue_id']}/approve",
-        headers=DEMO_HEADERS,
-        json={
-            "action": "FORCE_HOLD",
-            "handler_username": "reviewer_override",
-            "remark": "人工改为挂账",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["memory_updated"] == {"short_term": True, "long_term": False}
-    recent_rows = short_term_service.recent(thread_id=task_id, limit=20)
-    assert all(row["queue_id"] != pending["queue_id"] for row in recent_rows)
-
-    long_rows = LongTermMemoryService().recall(
-        user_id="demo_user",
-        error_type="NAME_MISMATCH",
-        keywords=["name", "override"],
-        limit=20,
-    )
-    assert all(row["flow_id"] != "F2005" for row in long_rows)
-
-
-def test_approve_non_override_keeps_short_term_and_writes_long_term(tmp_path: Path) -> None:
-    task_id = _upload_task(tmp_path)
-    pending = _pending_item_by_branch(task_id, "BE-R002")
-    short_term_service = ShortTermMemoryService()
-    short_term_service.append(
-        thread_id=task_id,
-        queue_id=int(pending["queue_id"]),
-        flow_id="F2003",
-        error_type="AMOUNT_MISMATCH",
-        risk_level="MEDIUM",
-        decision="PENDING_HUMAN",
-        confidence=review_module.Decimal("0.8800"),
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-
-    response = client.post(
-        f"/api/v1/review/{pending['queue_id']}/approve",
-        headers=DEMO_HEADERS,
-        json={
-            "action": "APPROVED_MATCH",
-            "handler_username": "reviewer_confirm",
-            "remark": "人工确认平账",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["memory_updated"] == {"short_term": False, "long_term": True}
-    recent_rows = short_term_service.recent(thread_id=task_id, limit=20)
-    assert any(row["queue_id"] == pending["queue_id"] for row in recent_rows)
-
-    long_rows = LongTermMemoryService().recall(
-        user_id="demo_user",
-        error_type="AMOUNT_MISMATCH",
-        keywords=["amount", "confirm"],
-        limit=20,
-    )
-    assert any(
-        row["flow_id"] == "F2003" and row["human_decision"] == "APPROVED_MATCH"
-        for row in long_rows
-    )
-
-
-def test_approve_via_checkpoint_override_matches_plain_memory_rollback(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    task_id = _upload_task(tmp_path)
-    pending = _pending_item_by_branch(task_id, "BE-R004")
-    short_term_service = ShortTermMemoryService()
-    short_term_service.append(
-        thread_id=task_id,
-        queue_id=int(pending["queue_id"]),
-        flow_id="F2005",
-        error_type="NAME_MISMATCH",
-        risk_level="LOW",
-        decision="APPROVED_MATCH",
-        confidence=review_module.Decimal("0.9500"),
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-
-    checkpoint_path = tmp_path / "override-checkpoint.sqlite"
-    monkeypatch.setattr(settings, "checkpoint_enabled", True)
-    monkeypatch.setattr(settings, "checkpoint_sqlite_path", str(checkpoint_path))
-    get_review_graph.cache_clear()
-
-    response = client.post(
-        f"/api/v1/review/{pending['queue_id']}/approve",
-        headers=DEMO_HEADERS,
-        json={
-            "action": "FORCE_HOLD",
-            "handler_username": "reviewer_checkpoint_override",
-            "remark": "checkpoint override",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["memory_updated"] == {"short_term": True, "long_term": False}
-    recent_rows = short_term_service.recent(thread_id=task_id, limit=20)
-    assert all(row["queue_id"] != pending["queue_id"] for row in recent_rows)
-    get_review_graph.cache_clear()
 
 
 def test_approve_rejects_other_user_queue(tmp_path: Path) -> None:
@@ -390,7 +225,6 @@ def test_approve_routes_to_plain_when_checkpoint_disabled(
     expected = review_module.ReviewResultResponse(
         queue_id=7,
         current_status="FIXED",
-        memory_updated={"short_term": False, "long_term": True},
     )
 
     def fake_plain(**kwargs):
@@ -422,7 +256,6 @@ def test_approve_routes_to_checkpoint_when_enabled(
     expected = review_module.ReviewResultResponse(
         queue_id=8,
         current_status="HELD",
-        memory_updated={"short_term": False, "long_term": False},
     )
 
     def fail_plain(**kwargs):
@@ -487,7 +320,6 @@ def test_review_graph_interrupt_resume_persists_checkpoint(
     second = graph.invoke(Command(resume="APPROVED_MATCH"), config)
 
     assert second["result"]["current_status"] == "FIXED"
-    assert second["result"]["memory_updated"] == {"short_term": False, "long_term": True}
 
     with get_engine().connect() as connection:
         queue = connection.execute(
@@ -526,7 +358,6 @@ def test_approve_via_checkpoint_matches_plain_result(tmp_path: Path, monkeypatch
     assert response.json()["data"] == {
         "queue_id": pending["queue_id"],
         "current_status": "FIXED",
-        "memory_updated": {"short_term": False, "long_term": True},
     }
     get_review_graph.cache_clear()
 
@@ -564,9 +395,7 @@ def test_approve_via_checkpoint_is_idempotent(tmp_path: Path, monkeypatch: pytes
     )
 
     assert first.current_status == "FIXED"
-    assert first.memory_updated == {"short_term": False, "long_term": True}
     assert second.current_status == "FIXED"
-    assert second.memory_updated == {"short_term": False, "long_term": False}
 
     with get_engine().connect() as connection:
         review_count = connection.execute(
