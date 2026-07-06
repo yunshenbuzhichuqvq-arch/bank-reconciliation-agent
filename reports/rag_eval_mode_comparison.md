@@ -7,13 +7,13 @@
 | Embedding Backend | `hash` |
 | Top K | 5 |
 | Case Count | 120 |
-| Evaluated At | 2026-07-06T16:57:52.515560Z |
+| Evaluated At | 2026-07-06T17:28:57.067014Z |
 
 ## Mode Selection
 
 - **Baseline**: dense
 - **Selected**: hybrid_rerank
-- **Reason**: Highest NDCG@5 among eligible modes with positive ranking delta
+- **Reason**: Highest NDCG@5 among eligible modes with no negative ranking deltas
 
 ## Global Metrics by Mode
 

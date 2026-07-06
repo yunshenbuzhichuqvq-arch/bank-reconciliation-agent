@@ -9,7 +9,7 @@
 | Embedding Backend Match | True |
 | Top K Match | True |
 | Before RAG Mode | `dense` |
-| After RAG Mode | `dense` |
+| After RAG Mode | `hybrid_rerank` |
 
 ## System Eval Deltas
 
@@ -28,10 +28,10 @@
 
 | Metric | Δ Value |
 |---|---|
-| hit_at_1 | 0.000000 |
-| mrr | 0.000000 |
-| ndcg_at_5 | 0.000000 |
-| recall_at_5 | 0.000000 |
+| hit_at_1 | +0.266667 |
+| mrr | +0.293194 |
+| ndcg_at_5 | +0.270394 |
+| recall_at_5 | +0.270833 |
 
 ## Agent Eval Deltas
 

@@ -373,3 +373,36 @@ def test_comparison_json_includes_honest_gaps(tmp_path: Path) -> None:
     gap_text = " ".join(gaps).lower()
     for term in ["real llm", "real embedding", "latency", "cost"]:
         assert term in gap_text
+
+
+# ---------------------------------------------------------------------------
+# TASK-EO.4: Comparison structure tests (before_metrics / after_metrics)
+# ---------------------------------------------------------------------------
+
+
+def test_comparison_includes_before_and_after_metrics_for_all_layers() -> None:
+    before = eval_harness.run_harness(normal_rows=10)
+    after = eval_harness.run_harness(normal_rows=10, rag_mode="hybrid")
+
+    comparison = eval_harness.compare_harness_reports(before=before, after=after)
+
+    for layer in ["system_eval", "rag_eval", "agent_eval"]:
+        assert "before_metrics" in comparison[layer], f"{layer} missing before_metrics"
+        assert "after_metrics" in comparison[layer], f"{layer} missing after_metrics"
+        assert "deltas" in comparison[layer], f"{layer} missing deltas"
+
+    assert isinstance(comparison["system_eval"]["before_metrics"], dict)
+    assert isinstance(comparison["system_eval"]["after_metrics"], dict)
+    assert isinstance(comparison["rag_eval"]["after_metrics"], dict)
+    assert isinstance(comparison["agent_eval"]["after_metrics"], dict)
+
+
+def test_comparison_deltas_still_present_alongside_metrics() -> None:
+    before = eval_harness.run_harness(normal_rows=10)
+    after = eval_harness.run_harness(normal_rows=10)
+
+    comparison = eval_harness.compare_harness_reports(before=before, after=after)
+
+    assert "risk_accuracy" in comparison["agent_eval"]["deltas"]
+    assert "risk_accuracy" in comparison["agent_eval"]["before_metrics"]
+    assert "risk_accuracy" in comparison["agent_eval"]["after_metrics"]

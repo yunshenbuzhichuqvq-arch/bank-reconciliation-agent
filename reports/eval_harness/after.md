@@ -9,8 +9,8 @@
 | Normal Rows | 1000 |
 | Embedding Backend | `hash` |
 | Top K | 5 |
-| RAG Mode | `dense` |
-| Evaluated At | 2026-07-06T17:09:53.611841Z |
+| RAG Mode | `hybrid_rerank` |
+| Evaluated At | 2026-07-06T17:29:11.705394Z |
 
 ## System Eval
 
@@ -29,10 +29,10 @@
 
 | Metric | Value |
 |---|---|
-| hit_at_1 | 0.1667 |
-| recall_at_5 | 0.3875 |
-| mrr | 0.2750 |
-| ndcg_at_5 | 0.2824 |
+| hit_at_1 | 0.4333 |
+| recall_at_5 | 0.6583 |
+| mrr | 0.5682 |
+| ndcg_at_5 | 0.5528 |
 
 ## Agent Eval
 

@@ -169,6 +169,8 @@ def compare_harness_reports(
             "after_summary": {
                 "case_count": after["system_eval"].get("case_count"),
             },
+            "before_metrics": before["system_eval"].get("metrics", {}),
+            "after_metrics": after["system_eval"].get("metrics", {}),
             "deltas": system_deltas,
         },
         "rag_eval": {
@@ -178,6 +180,8 @@ def compare_harness_reports(
             "after_summary": {
                 "case_count": after["rag_eval"].get("case_count"),
             },
+            "before_metrics": before["rag_eval"].get("global_metrics", {}),
+            "after_metrics": after["rag_eval"].get("global_metrics", {}),
             "deltas": rag_deltas,
         },
         "agent_eval": {
@@ -187,6 +191,8 @@ def compare_harness_reports(
             "after_summary": {
                 "case_count": after["agent_eval"].get("case_count"),
             },
+            "before_metrics": before["agent_eval"].get("metrics", {}),
+            "after_metrics": after["agent_eval"].get("metrics", {}),
             "deltas": agent_deltas,
         },
         "gates": {

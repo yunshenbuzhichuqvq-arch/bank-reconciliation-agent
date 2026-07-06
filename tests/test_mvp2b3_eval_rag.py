@@ -610,3 +610,50 @@ def test_mode_comparison_selects_better_mode() -> None:
     assert report["selected_mode"] == "hybrid"
     deltas = report["deltas_vs_dense"]["hybrid"]
     assert deltas["hit_at_1"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TASK-EO.4: Stricter RAG selection tests
+# ---------------------------------------------------------------------------
+
+
+def test_mode_with_negative_delta_is_rejected() -> None:
+    """A mode with positive delta but any negative ranking metric is NOT eligible."""
+    modes = ["dense", "hybrid"]
+    deltas = {
+        "hybrid": {"hit_at_1": 0.1, "mrr": -0.05, "ndcg_at_5": 0.0},
+    }
+    mode_reports = {
+        "dense": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+        "hybrid": {"global_metrics": {"hit_at_1": 0.6, "mrr": 0.45, "ndcg_at_5": 0.5}},
+    }
+    selected, _ = eval_rag._select_best_mode(modes, deltas, mode_reports)
+    assert selected == "dense"
+
+
+def test_mode_with_all_non_negative_deltas_remains_eligible() -> None:
+    modes = ["dense", "hybrid"]
+    deltas = {
+        "hybrid": {"hit_at_1": 0.0, "mrr": 0.1, "ndcg_at_5": 0.15},
+    }
+    mode_reports = {
+        "dense": {"global_metrics": {"hit_at_1": 0.2, "mrr": 0.2, "ndcg_at_5": 0.2}},
+        "hybrid": {"global_metrics": {"hit_at_1": 0.2, "mrr": 0.3, "ndcg_at_5": 0.35}},
+    }
+    selected, _ = eval_rag._select_best_mode(modes, deltas, mode_reports)
+    assert selected == "hybrid"
+
+
+def test_mode_with_zero_only_deltas_keeps_dense() -> None:
+    modes = ["dense", "hybrid", "hybrid_rerank"]
+    deltas = {
+        "hybrid": {"hit_at_1": 0.0, "mrr": 0.0, "ndcg_at_5": 0.0},
+        "hybrid_rerank": {"hit_at_1": 0.0, "mrr": 0.0, "ndcg_at_5": 0.0},
+    }
+    mode_reports = {
+        "dense": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+        "hybrid": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+        "hybrid_rerank": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+    }
+    selected, _ = eval_rag._select_best_mode(modes, deltas, mode_reports)
+    assert selected == "dense"

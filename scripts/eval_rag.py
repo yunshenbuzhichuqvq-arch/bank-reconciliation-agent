@@ -239,11 +239,9 @@ def _select_best_mode(
         if m == "dense":
             continue
         d = deltas[m]
-        improved = [k for k in ranking_metrics if d[k] > 0]
-        if not improved:
+        if any(d[k] < 0 for k in ranking_metrics):
             continue
-        other_metrics = [k for k in ranking_metrics if k not in improved]
-        if other_metrics and all(d[k] < 0 for k in other_metrics):
+        if not any(d[k] > 0 for k in ranking_metrics):
             continue
         eligible.append(m)
 
@@ -255,7 +253,7 @@ def _select_best_mode(
         return (gm["ndcg_at_5"], gm["mrr"], gm["hit_at_1"])
 
     best = max(eligible, key=_sort_key)
-    return best, "Highest NDCG@5 among eligible modes with positive ranking delta"
+    return best, "Highest NDCG@5 among eligible modes with no negative ranking deltas"
 
 
 def write_mode_comparison_markdown(
