@@ -270,3 +270,64 @@ class FailingClient:
 
     def create(self, **kwargs):
         raise RuntimeError("network down")
+
+
+def test_fake_provider_returns_high_risk_for_be_r008() -> None:
+    provider = FakeLLMProvider()
+    result = provider.complete([
+        {"role": "system", "content": "Audit prompt"},
+        {"role": "user", "content": json.dumps({
+            "task": "audit",
+            "flow_id": "agent-high-risk-001",
+            "error_type": "DUPLICATE_BOOKING",
+            "exception_branch": "BE-R008",
+            "bank_amount": "500.00",
+            "clear_amount": "500.00",
+            "amount_diff": "0.00",
+            "evidence": [{"chunk_id": "x"}],
+        }, sort_keys=True)},
+    ])
+    payload = json.loads(result.text)
+    assert payload["agent"] == "audit"
+    assert payload["decision"] == "PENDING_HUMAN"
+    assert payload["risk_level"] == "HIGH"
+    assert payload["ai_suggestion"] == "FORCE_HOLD"
+
+
+def test_fake_provider_returns_high_risk_for_duplicate_booking() -> None:
+    provider = FakeLLMProvider()
+    result = provider.complete([
+        {"role": "system", "content": "Audit prompt"},
+        {"role": "user", "content": json.dumps({
+            "task": "audit",
+            "flow_id": "test-001",
+            "error_type": "DUPLICATE_BOOKING",
+            "exception_branch": None,
+            "bank_amount": "100.00",
+            "clear_amount": "100.00",
+            "amount_diff": "0.00",
+            "evidence": [{"chunk_id": "y"}],
+        }, sort_keys=True)},
+    ])
+    payload = json.loads(result.text)
+    assert payload["risk_level"] == "HIGH"
+
+
+def test_fake_provider_returns_medium_for_non_high_risk_case() -> None:
+    provider = FakeLLMProvider()
+    result = provider.complete([
+        {"role": "system", "content": "Audit prompt"},
+        {"role": "user", "content": json.dumps({
+            "task": "audit",
+            "flow_id": "agent-single-side-001",
+            "error_type": "BANK_UNARRIVED",
+            "exception_branch": "BE-R005",
+            "bank_amount": "200.00",
+            "clear_amount": "0.00",
+            "amount_diff": "200.00",
+            "evidence": [{"chunk_id": "z"}],
+        }, sort_keys=True)},
+    ])
+    payload = json.loads(result.text)
+    assert payload["decision"] == "PENDING_HUMAN"
+    assert payload["risk_level"] == "MEDIUM"

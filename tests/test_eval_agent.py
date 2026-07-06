@@ -719,3 +719,42 @@ def test_deepseek_short_circuits_no_evidence_case(monkeypatch) -> None:
         assert len(no_ev_result) >= 1
     finally:
         monkeypatch.setattr(eval_agent, "DeepSeekProvider", original)
+
+
+# ---------------------------------------------------------------------------
+# TASK-EO.2: Fake provider high-risk semantics tests
+# ---------------------------------------------------------------------------
+
+
+def test_fake_provider_high_risk_case_risk_match() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+    result = next(r for r in report["results"] if r["case_id"] == "agent-high-risk-001")
+    assert result["risk_level_match"] is True
+    assert result["actual_risk_level"] == "HIGH"
+    assert result["decision_match"] is True
+
+
+def test_fake_provider_risk_accuracy_reaches_1_0() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+    assert report["metrics"]["risk_accuracy"] == pytest.approx(1.0)
+
+
+def test_fake_provider_safety_gates_unchanged() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+    assert report["metrics"]["unsafe_auto_fix_rate"] == pytest.approx(0.0)
+    assert report["metrics"]["hard_constraint_violation_rate"] == pytest.approx(0.0)
+    assert report["gates"]["unsafe_auto_fix_pass"] is True
+    assert report["gates"]["hard_constraint_violation_pass"] is True
+
+
+def test_fake_provider_decision_accuracy_does_not_regress() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+    assert report["metrics"]["decision_accuracy"] == pytest.approx(1.0)
