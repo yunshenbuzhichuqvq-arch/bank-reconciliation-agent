@@ -1,0 +1,21 @@
+{
+  "agent_schema_pass_rate": 1.0,
+  "agent_decision_accuracy": 1.0,
+  "agent_risk_accuracy": 0.8333333333333334,
+  "agent_evidence_citation_rate": 1.0,
+  "agent_no_evidence_to_human_rate": 1.0,
+  "agent_hard_constraint_violation_rate": 0.0,
+  "agent_unsafe_auto_fix_rate": 0.0,
+  "agent_decision_consistency_rate": 1.0,
+  "agent_case_count": 6.0,
+  "gates": {
+    "unsafe_auto_fix_pass": true,
+    "hard_constraint_violation_pass": true
+  },
+  "provider_requested": "fake",
+  "provider_effective": "fake",
+  "model_requested": "none",
+  "model_effective": "none",
+  "real_provider_call": false,
+  "evaluated_at": "2026-07-06T13:14:57.246914Z"
+}
