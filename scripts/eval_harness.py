@@ -21,6 +21,15 @@ from scripts.eval_system import evaluate_system_batch
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "reports/eval_harness"
 
+HONEST_GAPS = [
+    "Real LLM provider quality: Agent Eval uses FakeLLMProvider; decision quality under a real LLM (e.g. DeepSeek) is not measured by this baseline.",
+    "Real embedding quality: RAG Eval uses embedding_backend=hash; real embedding (e.g. bge-m3, bge-small) retrieval quality is not measured here.",
+    "LLM-as-Judge: No LLM-based evaluation of explanation completeness, reasoning quality, or natural-language audit judgment is included.",
+    "Online human adoption/override rate: This offline eval does not measure how often human reviewers accept, override, or escalate system decisions in production.",
+    "Production latency: End-to-end system latency and per-agent call latency are not measured in this offline eval.",
+    "Production cost: LLM token usage, embedding compute cost, and infrastructure cost are not measured in this offline eval.",
+]
+
 
 def run_harness(
     *,
@@ -87,6 +96,7 @@ def run_harness(
             "gates": agent_gates,
         },
         "gates": gates,
+        "honest_gaps": HONEST_GAPS,
     }
 
 
@@ -194,6 +204,16 @@ def _format_baseline_markdown(report: dict[str, Any]) -> str:
         f"- System Eval: {sys_eval.get('case_count', 'N/A')}",
         f"- RAG Eval: {rag_eval.get('case_count', 'N/A')}",
         f"- Agent Eval: {agent_eval.get('case_count', 'N/A')}",
+        "",
+        "## Honest Gaps / Not Measured",
+        "",
+        "> This offline stage does not measure everything. The following metrics are",
+        "> explicitly not covered by this baseline:",
+        "",
+    ])
+    for gap in report.get("honest_gaps", []):
+        lines.append(f"- {gap}")
+    lines.extend([
         "",
         "## Baseline Review Gate",
         "",

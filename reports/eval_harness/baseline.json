@@ -5,7 +5,7 @@
     "normal_rows": 1000,
     "embedding_backend": "hash",
     "top_k": 5,
-    "evaluated_at": "2026-07-06T10:21:52.514761Z"
+    "evaluated_at": "2026-07-06T12:23:05.484275Z"
   },
   "system_eval": {
     "case_count": 1007,
@@ -47,6 +47,7 @@
       "case_count": 6.0,
       "schema_pass_rate": 1.0,
       "decision_accuracy": 1.0,
+      "risk_accuracy": 0.8333333333333334,
       "evidence_citation_rate": 1.0,
       "no_evidence_to_human_rate": 1.0,
       "hard_constraint_violation_rate": 0.0,
@@ -63,5 +64,13 @@
     "system_hard_constraint_violation_pass": true,
     "agent_unsafe_auto_fix_pass": true,
     "agent_hard_constraint_violation_pass": true
-  }
+  },
+  "honest_gaps": [
+    "Real LLM provider quality: Agent Eval uses FakeLLMProvider; decision quality under a real LLM (e.g. DeepSeek) is not measured by this baseline.",
+    "Real embedding quality: RAG Eval uses embedding_backend=hash; real embedding (e.g. bge-m3, bge-small) retrieval quality is not measured here.",
+    "LLM-as-Judge: No LLM-based evaluation of explanation completeness, reasoning quality, or natural-language audit judgment is included.",
+    "Online human adoption/override rate: This offline eval does not measure how often human reviewers accept, override, or escalate system decisions in production.",
+    "Production latency: End-to-end system latency and per-agent call latency are not measured in this offline eval.",
+    "Production cost: LLM token usage, embedding compute cost, and infrastructure cost are not measured in this offline eval."
+  ]
 }

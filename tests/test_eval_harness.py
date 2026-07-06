@@ -12,6 +12,7 @@ def test_harness_report_contains_all_three_layers() -> None:
     assert "rag_eval" in report
     assert "agent_eval" in report
     assert "gates" in report
+    assert "honest_gaps" in report
 
     assert "case_count" in report["system_eval"]
     assert "metrics" in report["system_eval"]
@@ -92,6 +93,7 @@ def test_baseline_markdown_includes_required_sections(tmp_path: Path) -> None:
     assert "Combined Gates" in content
     assert "Case Counts" in content
     assert "Baseline Review Gate" in content
+    assert "Honest Gaps" in content
     assert "opencode **must stop**" in content
     assert "Codex" in content
 
@@ -102,7 +104,7 @@ def test_baseline_json_includes_all_layers(tmp_path: Path) -> None:
     eval_harness.write_baseline_json(report, output_dir)
     snapshot = json.loads((output_dir / "baseline.json").read_text(encoding="utf-8"))
 
-    for key in ["metadata", "system_eval", "rag_eval", "agent_eval", "gates"]:
+    for key in ["metadata", "system_eval", "rag_eval", "agent_eval", "gates", "honest_gaps"]:
         assert key in snapshot
 
 
@@ -158,3 +160,39 @@ def test_gate_failures_returned_not_raised_in_checker() -> None:
     assert len(failures) == 2
     assert "system_unsafe_auto_fix_pass" in failures
     assert "system_hard_constraint_violation_pass" in failures
+
+
+def test_honest_gaps_includes_all_required_categories() -> None:
+    report = eval_harness.run_harness(normal_rows=10)
+    gaps = report["honest_gaps"]
+
+    assert len(gaps) >= 6
+    gap_text = " ".join(gaps).lower()
+    for term in ["real llm", "real embedding", "llm-as-judge", "adoption", "latency", "cost"]:
+        assert term in gap_text, f"Expected '{term}' in honest_gaps"
+
+
+def test_markdown_renders_honest_gaps(tmp_path: Path) -> None:
+    report = eval_harness.run_harness(normal_rows=10)
+    output_dir = tmp_path / "eval_harness"
+    eval_harness.write_baseline_markdown(report, output_dir)
+    content = (output_dir / "baseline.md").read_text(encoding="utf-8")
+
+    assert "Honest Gaps / Not Measured" in content
+    for term in ["real LLM", "real embedding", "LLM-as-Judge", "latency", "cost"]:
+        assert term in content
+
+
+def test_agent_eval_includes_risk_accuracy() -> None:
+    report = eval_harness.run_harness(normal_rows=10)
+    agent_metrics = report["agent_eval"]["metrics"]
+    assert "risk_accuracy" in agent_metrics
+
+
+def test_agent_eval_risk_accuracy_in_markdown(tmp_path: Path) -> None:
+    report = eval_harness.run_harness(normal_rows=10)
+    output_dir = tmp_path / "eval_harness"
+    eval_harness.write_baseline_markdown(report, output_dir)
+    content = (output_dir / "baseline.md").read_text(encoding="utf-8")
+
+    assert "risk_accuracy" in content.lower()

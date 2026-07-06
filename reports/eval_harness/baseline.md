@@ -9,7 +9,7 @@
 | Normal Rows | 1000 |
 | Embedding Backend | `hash` |
 | Top K | 5 |
-| Evaluated At | 2026-07-06T10:21:52.514761Z |
+| Evaluated At | 2026-07-06T12:23:05.484275Z |
 
 ## System Eval
 
@@ -40,6 +40,7 @@
 | case_count | 6.0000 |
 | schema_pass_rate | 1.0000 |
 | decision_accuracy | 1.0000 |
+| risk_accuracy | 0.8333 |
 | evidence_citation_rate | 1.0000 |
 | no_evidence_to_human_rate | 1.0000 |
 | hard_constraint_violation_rate | 0.0000 |
@@ -60,6 +61,18 @@
 - System Eval: 1007
 - RAG Eval: 120
 - Agent Eval: 6
+
+## Honest Gaps / Not Measured
+
+> This offline stage does not measure everything. The following metrics are
+> explicitly not covered by this baseline:
+
+- Real LLM provider quality: Agent Eval uses FakeLLMProvider; decision quality under a real LLM (e.g. DeepSeek) is not measured by this baseline.
+- Real embedding quality: RAG Eval uses embedding_backend=hash; real embedding (e.g. bge-m3, bge-small) retrieval quality is not measured here.
+- LLM-as-Judge: No LLM-based evaluation of explanation completeness, reasoning quality, or natural-language audit judgment is included.
+- Online human adoption/override rate: This offline eval does not measure how often human reviewers accept, override, or escalate system decisions in production.
+- Production latency: End-to-end system latency and per-agent call latency are not measured in this offline eval.
+- Production cost: LLM token usage, embedding compute cost, and infrastructure cost are not measured in this offline eval.
 
 ## Baseline Review Gate
 
