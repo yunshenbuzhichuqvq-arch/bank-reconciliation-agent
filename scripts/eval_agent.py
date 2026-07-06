@@ -380,6 +380,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.provider == "deepseek":
         if args.report.resolve() == DEFAULT_REPORT_PATH.resolve():
             args.report = DEEPSEEK_FLASH_REPORT_PATH
+        if args.json_report.resolve() == DEFAULT_JSON_REPORT_PATH.resolve():
             args.json_report = DEEPSEEK_FLASH_JSON_PATH
 
     cases = load_agent_eval_cases(args.cases)

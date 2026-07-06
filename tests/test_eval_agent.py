@@ -482,32 +482,142 @@ def test_fake_metadata_never_mentions_deepseek_in_markdown(tmp_path: Path) -> No
 
 
 def test_deepseek_auto_redirects_from_fake_baseline_paths(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-test")
-    md_path = tmp_path / "agent_eval.md"
-    json_path = tmp_path / "agent_eval_metrics.json"
+    class StubDeepSeek:
+        def __init__(self, **kwargs):
+            self.model = kwargs.get("model", "unknown")
 
-    fake_md_def = tmp_path / "fake_default.md"
-    fake_json_def = tmp_path / "fake_default_metrics.json"
-    monkeypatch.setattr(eval_agent, "DEFAULT_REPORT_PATH", fake_md_def)
-    monkeypatch.setattr(eval_agent, "DEFAULT_JSON_REPORT_PATH", fake_json_def)
-    monkeypatch.setattr(
-        eval_agent, "DEEPSEEK_FLASH_REPORT_PATH", tmp_path / "agent_eval_deepseek_flash.md"
-    )
-    monkeypatch.setattr(
-        eval_agent, "DEEPSEEK_FLASH_JSON_PATH", tmp_path / "agent_eval_deepseek_flash_metrics.json"
-    )
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            return LLMResult(
+                text=json.dumps({
+                    "decision": "PENDING_HUMAN",
+                    "risk_level": "MEDIUM",
+                    "reason": "stub deepseek response",
+                    "ai_suggestion": "PENDING_HUMAN",
+                    "evidence": ["stub-evidence"],
+                    "confidence": 0.8,
+                }),
+                prompt_tokens=10,
+                completion_tokens=5,
+                model=self.model,
+            )
 
-    with pytest.raises(SystemExit):
+    fake_md = tmp_path / "fake_agent_eval.md"
+    fake_json = tmp_path / "fake_agent_eval_metrics.json"
+    ds_md = tmp_path / "agent_eval_deepseek_flash.md"
+    ds_json = tmp_path / "agent_eval_deepseek_flash_metrics.json"
+
+    original_ds = eval_agent.DeepSeekProvider
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", StubDeepSeek)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+    monkeypatch.setattr(eval_agent, "DEFAULT_REPORT_PATH", fake_md)
+    monkeypatch.setattr(eval_agent, "DEFAULT_JSON_REPORT_PATH", fake_json)
+    monkeypatch.setattr(eval_agent, "DEEPSEEK_FLASH_REPORT_PATH", ds_md)
+    monkeypatch.setattr(eval_agent, "DEEPSEEK_FLASH_JSON_PATH", ds_json)
+    try:
         eval_agent.main([
             "--cases", str(PROJECT_ROOT / "data/agent_eval_cases.json"),
             "--provider", "deepseek",
             "--model", "deepseek-v4-flash",
-            "--report", str(md_path),
-            "--json-report", str(json_path),
+            "--report", str(fake_md),
+            "--json-report", str(fake_json),
         ])
+        assert not fake_md.exists()
+        assert not fake_json.exists()
+        assert ds_md.exists()
+        assert ds_json.exists()
+        snapshot = json.loads(ds_json.read_text(encoding="utf-8"))
+        assert snapshot["provider_effective"] == "deepseek"
+        assert snapshot["real_provider_call"] is True
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original_ds)
 
-    assert not md_path.exists()
-    assert not json_path.exists()
+
+def test_deepseek_protects_json_baseline_independently(monkeypatch, tmp_path: Path) -> None:
+    class StubDeepSeek:
+        def __init__(self, **kwargs):
+            self.model = kwargs.get("model", "unknown")
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            return LLMResult(
+                text=json.dumps({
+                    "decision": "PENDING_HUMAN",
+                    "risk_level": "MEDIUM",
+                    "reason": "stub",
+                    "ai_suggestion": "PENDING_HUMAN",
+                    "evidence": ["stub"],
+                    "confidence": 0.8,
+                }),
+                prompt_tokens=10,
+                completion_tokens=5,
+                model=self.model,
+            )
+
+    custom_md = tmp_path / "custom.md"
+    fake_json = tmp_path / "fake_agent_eval_metrics.json"
+    ds_json = tmp_path / "agent_eval_deepseek_flash_metrics.json"
+
+    original_ds = eval_agent.DeepSeekProvider
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", StubDeepSeek)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+    monkeypatch.setattr(eval_agent, "DEFAULT_JSON_REPORT_PATH", fake_json)
+    monkeypatch.setattr(eval_agent, "DEEPSEEK_FLASH_JSON_PATH", ds_json)
+    try:
+        eval_agent.main([
+            "--cases", str(PROJECT_ROOT / "data/agent_eval_cases.json"),
+            "--provider", "deepseek",
+            "--model", "deepseek-v4-flash",
+            "--report", str(custom_md),
+            "--json-report", str(fake_json),
+        ])
+        assert custom_md.exists()
+        assert not fake_json.exists()
+        assert ds_json.exists()
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original_ds)
+
+
+def test_deepseek_protects_md_baseline_independently(monkeypatch, tmp_path: Path) -> None:
+    class StubDeepSeek:
+        def __init__(self, **kwargs):
+            self.model = kwargs.get("model", "unknown")
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            return LLMResult(
+                text=json.dumps({
+                    "decision": "PENDING_HUMAN",
+                    "risk_level": "MEDIUM",
+                    "reason": "stub",
+                    "ai_suggestion": "PENDING_HUMAN",
+                    "evidence": ["stub"],
+                    "confidence": 0.8,
+                }),
+                prompt_tokens=10,
+                completion_tokens=5,
+                model=self.model,
+            )
+
+    fake_md = tmp_path / "fake_agent_eval.md"
+    custom_json = tmp_path / "custom.json"
+    ds_md = tmp_path / "agent_eval_deepseek_flash.md"
+
+    original_ds = eval_agent.DeepSeekProvider
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", StubDeepSeek)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+    monkeypatch.setattr(eval_agent, "DEFAULT_REPORT_PATH", fake_md)
+    monkeypatch.setattr(eval_agent, "DEEPSEEK_FLASH_REPORT_PATH", ds_md)
+    try:
+        eval_agent.main([
+            "--cases", str(PROJECT_ROOT / "data/agent_eval_cases.json"),
+            "--provider", "deepseek",
+            "--model", "deepseek-v4-flash",
+            "--report", str(fake_md),
+            "--json-report", str(custom_json),
+        ])
+        assert not fake_md.exists()
+        assert ds_md.exists()
+        assert custom_json.exists()
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original_ds)
 
 
 def test_stubbed_deepseek_success_sets_real_provider_call(monkeypatch) -> None:
