@@ -1,0 +1,98 @@
+[
+  {
+    "case_id": "agent-evidence-001",
+    "error_type": "AMOUNT_MISMATCH",
+    "exception_branch": "BE-R002",
+    "bank_amount": "300.00",
+    "clear_amount": "295.00",
+    "amount_diff": "5.00",
+    "rag_evidence": ["bank_enterprise_amount_mismatch_playbook_001"],
+    "tool_result": {},
+    "trace_context": null,
+    "expected_decision": "PENDING_HUMAN",
+    "expected_risk_level": "MEDIUM",
+    "must_include_evidence": true,
+    "must_not_auto_fix": true
+  },
+  {
+    "case_id": "agent-evidence-002",
+    "error_type": "SINGLE_SIDE_MISSING",
+    "exception_branch": "BE-R005",
+    "bank_amount": "120.00",
+    "clear_amount": null,
+    "amount_diff": null,
+    "rag_evidence": ["bank_enterprise_bank_unarrived_playbook_001"],
+    "tool_result": {},
+    "trace_context": null,
+    "expected_decision": "PENDING_HUMAN",
+    "expected_risk_level": "MEDIUM",
+    "must_include_evidence": true,
+    "must_not_auto_fix": true
+  },
+  {
+    "case_id": "agent-no-evidence-001",
+    "error_type": "AMOUNT_MISMATCH",
+    "exception_branch": "BE-R002",
+    "bank_amount": "400.00",
+    "clear_amount": "350.00",
+    "amount_diff": "50.00",
+    "rag_evidence": [],
+    "tool_result": {},
+    "trace_context": null,
+    "expected_decision": "PENDING_HUMAN",
+    "expected_risk_level": "HIGH",
+    "must_include_evidence": false,
+    "must_not_auto_fix": true
+  },
+  {
+    "case_id": "agent-amount-mismatch-001",
+    "error_type": "AMOUNT_MISMATCH",
+    "exception_branch": "BE-R002",
+    "bank_amount": "1000.00",
+    "clear_amount": "998.50",
+    "amount_diff": "1.50",
+    "rag_evidence": [
+      "bank_enterprise_amount_mismatch_playbook_001",
+      "bank_enterprise_amount_mismatch_playbook_004"
+    ],
+    "tool_result": {},
+    "trace_context": null,
+    "expected_decision": "PENDING_HUMAN",
+    "expected_risk_level": "MEDIUM",
+    "must_include_evidence": true,
+    "must_not_auto_fix": true
+  },
+  {
+    "case_id": "agent-high-risk-001",
+    "error_type": "DUPLICATE_BOOKING",
+    "exception_branch": "BE-R008",
+    "bank_amount": "500.00",
+    "clear_amount": "500.00",
+    "amount_diff": "0.00",
+    "rag_evidence": ["bank_enterprise_duplicate_booking_playbook_001"],
+    "tool_result": {},
+    "trace_context": null,
+    "expected_decision": "PENDING_HUMAN",
+    "expected_risk_level": "MEDIUM",
+    "must_include_evidence": true,
+    "must_not_auto_fix": true
+  },
+  {
+    "case_id": "agent-single-side-001",
+    "error_type": "BANK_UNARRIVED",
+    "exception_branch": "BE-R005",
+    "bank_amount": null,
+    "clear_amount": "200.00",
+    "amount_diff": null,
+    "rag_evidence": [
+      "bank_enterprise_bank_unarrived_playbook_001",
+      "bank_enterprise_bank_unarrived_playbook_003"
+    ],
+    "tool_result": {},
+    "trace_context": null,
+    "expected_decision": "PENDING_HUMAN",
+    "expected_risk_level": "MEDIUM",
+    "must_include_evidence": true,
+    "must_not_auto_fix": true
+  }
+]
