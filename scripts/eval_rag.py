@@ -6,7 +6,7 @@ import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever, rule_retriever
@@ -19,6 +19,10 @@ DEFAULT_EVAL_SET_PATH = PROJECT_ROOT / "data/rag_eval_set.json"
 DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval.md"
 DEFAULT_JSON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_metrics.json"
+DEFAULT_COMPARISON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_mode_comparison.md"
+DEFAULT_COMPARISON_JSON_PATH = PROJECT_ROOT / "reports/rag_eval_mode_comparison.json"
+
+RagEvalMode = Literal["dense", "hybrid", "hybrid_rerank"]
 
 
 @dataclass(frozen=True)
@@ -110,15 +114,53 @@ def load_eval_set(path: Path = DEFAULT_EVAL_SET_PATH) -> list[EvalCase]:
     return [EvalCase(**item) for item in payload]
 
 
+def request_for_eval_mode(
+    case: EvalCase,
+    *,
+    mode: RagEvalMode,
+    top_k: int,
+    min_score: float = 0.0,
+) -> RagSearchRequest:
+    if mode == "dense":
+        return RagSearchRequest(
+            query=case.query,
+            top_k=top_k,
+            min_score=min_score,
+            scenario_type=case.scenario_type,
+            enable_hybrid=False,
+            enable_reranker=False,
+        )
+    if mode == "hybrid":
+        return RagSearchRequest(
+            query=case.query,
+            top_k=top_k,
+            min_score=min_score,
+            scenario_type=case.scenario_type,
+            enable_hybrid=True,
+            enable_reranker=False,
+        )
+    if mode == "hybrid_rerank":
+        return RagSearchRequest(
+            query=case.query,
+            top_k=top_k,
+            min_score=min_score,
+            scenario_type=case.scenario_type,
+            enable_hybrid=True,
+            enable_reranker=True,
+        )
+    raise ValueError(f"unsupported eval mode: {mode}")
+
+
 def evaluate_eval_set(
     cases: list[EvalCase],
     *,
     retriever: RuleRetriever | Any = rule_retriever,
     top_k: int = 5,
     embedding_backend: str = "hash",
+    mode: RagEvalMode = "dense",
 ) -> dict[str, Any]:
     results = [
-        _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0)
+        _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0, mode=mode)
         for case in cases
     ]
     scenario_types = sorted({case.scenario_type for case in cases})
@@ -139,6 +181,157 @@ def evaluate_eval_set(
     }
 
 
+def evaluate_mode_comparison(
+    cases: list[EvalCase],
+    *,
+    retriever: RuleRetriever | Any | None = None,
+    modes: list[RagEvalMode] | None = None,
+    top_k: int = 5,
+    embedding_backend: str = "hash",
+) -> dict[str, Any]:
+    if modes is None:
+        modes = ["dense", "hybrid", "hybrid_rerank"]
+    if retriever is None:
+        retriever = rule_retriever
+
+    mode_reports: dict[str, dict[str, Any]] = {}
+    for m in modes:
+        mode_reports[m] = evaluate_eval_set(
+            cases, retriever=retriever, top_k=top_k,
+            embedding_backend=embedding_backend, mode=m,
+        )
+
+    dense_metrics = mode_reports["dense"]["global_metrics"]
+    deltas: dict[str, dict[str, float]] = {}
+    for m in modes:
+        if m == "dense":
+            continue
+        gm = mode_reports[m]["global_metrics"]
+        deltas[m] = {
+            "hit_at_1": gm["hit_at_1"] - dense_metrics["hit_at_1"],
+            "mrr": gm["mrr"] - dense_metrics["mrr"],
+            "ndcg_at_5": gm["ndcg_at_5"] - dense_metrics["ndcg_at_5"],
+        }
+
+    selected_mode, selection_reason = _select_best_mode(modes, deltas, mode_reports)
+
+    return {
+        "embedding_backend": embedding_backend,
+        "top_k": top_k,
+        "case_count": len(cases),
+        "evaluated_at": mode_reports[modes[0]]["evaluated_at"],
+        "baseline_mode": "dense",
+        "selected_mode": selected_mode,
+        "selection_reason": selection_reason,
+        "modes": {m: {"global_metrics": mode_reports[m]["global_metrics"]} for m in modes},
+        "deltas_vs_dense": deltas,
+    }
+
+
+def _select_best_mode(
+    modes: list[str],
+    deltas: dict[str, dict[str, float]],
+    mode_reports: dict[str, dict[str, Any]],
+) -> tuple[str, str]:
+    ranking_metrics = ["hit_at_1", "mrr", "ndcg_at_5"]
+    eligible: list[str] = []
+    for m in modes:
+        if m == "dense":
+            continue
+        d = deltas[m]
+        improved = [k for k in ranking_metrics if d[k] > 0]
+        if not improved:
+            continue
+        other_metrics = [k for k in ranking_metrics if k not in improved]
+        if other_metrics and all(d[k] < 0 for k in other_metrics):
+            continue
+        eligible.append(m)
+
+    if not eligible:
+        return "dense", "No mode improved ranking metrics over dense baseline; RAG has no proven improvement"
+
+    def _sort_key(m: str) -> tuple[float, float, float]:
+        gm = mode_reports[m]["global_metrics"]
+        return (gm["ndcg_at_5"], gm["mrr"], gm["hit_at_1"])
+
+    best = max(eligible, key=_sort_key)
+    return best, "Highest NDCG@5 among eligible modes with positive ranking delta"
+
+
+def write_mode_comparison_markdown(
+    report: dict[str, Any],
+    output_path: Path = DEFAULT_COMPARISON_REPORT_PATH,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(_format_mode_comparison_markdown(report), encoding="utf-8")
+
+
+def write_mode_comparison_json(
+    report: dict[str, Any],
+    output_path: Path = DEFAULT_COMPARISON_JSON_PATH,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _format_mode_comparison_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# RAG Mode Comparison Report",
+        "",
+        "## Metadata",
+        "",
+        "| Key | Value |",
+        "|---|---|",
+        f"| Embedding Backend | `{report.get('embedding_backend', 'unknown')}` |",
+        f"| Top K | {report.get('top_k', 5)} |",
+        f"| Case Count | {report['case_count']} |",
+        f"| Evaluated At | {report.get('evaluated_at', 'N/A')} |",
+        "",
+        "## Mode Selection",
+        "",
+        f"- **Baseline**: {report.get('baseline_mode', 'dense')}",
+        f"- **Selected**: {report.get('selected_mode', 'dense')}",
+        f"- **Reason**: {report.get('selection_reason', 'N/A')}",
+        "",
+        "## Global Metrics by Mode",
+        "",
+        "| Mode | Hit@1 | Recall@5 | MRR | NDCG@5 |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    modes_data = report.get("modes", {})
+    for mode_name in sorted(modes_data):
+        gm = modes_data[mode_name].get("global_metrics", {})
+        lines.append(
+            f"| {mode_name} | {gm.get('hit_at_1', 0):.4f} | {gm.get('recall_at_5', 0):.4f} | "
+            f"{gm.get('mrr', 0):.4f} | {gm.get('ndcg_at_5', 0):.4f} |"
+        )
+    lines.append("")
+
+    deltas = report.get("deltas_vs_dense", {})
+    if deltas:
+        lines.extend([
+            "## Deltas vs Dense",
+            "",
+            "| Mode | Δ Hit@1 | Δ MRR | Δ NDCG@5 |",
+            "| --- | ---: | ---: | ---: |",
+        ])
+        for mode_name in sorted(deltas):
+            d = deltas[mode_name]
+            sign_h = "+" if d.get("hit_at_1", 0) > 0 else ""
+            sign_m = "+" if d.get("mrr", 0) > 0 else ""
+            sign_n = "+" if d.get("ndcg_at_5", 0) > 0 else ""
+            lines.append(
+                f"| {mode_name} | {sign_h}{d.get('hit_at_1', 0):.4f} | "
+                f"{sign_m}{d.get('mrr', 0):.4f} | {sign_n}{d.get('ndcg_at_5', 0):.4f} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Evaluate offline RAG quality with a labeled eval set.")
     parser.add_argument("--eval-set", type=Path, default=DEFAULT_EVAL_SET_PATH)
@@ -148,6 +341,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT_PATH)
     parser.add_argument("--embedding-backend", default=settings.embedding_backend)
+    parser.add_argument("--mode", choices=["dense", "hybrid", "hybrid_rerank"], default="dense")
+    parser.add_argument("--compare-modes", type=str, default=None)
+    parser.add_argument("--comparison-report", type=Path, default=DEFAULT_COMPARISON_REPORT_PATH)
+    parser.add_argument("--comparison-json", type=Path, default=DEFAULT_COMPARISON_JSON_PATH)
     args = parser.parse_args(argv)
 
     if args.chunks is not None:
@@ -176,11 +373,31 @@ def main(argv: list[str] | None = None) -> None:
             )
         )
     )
+
+    if args.compare_modes is not None:
+        modes: list[RagEvalMode] = [
+            m.strip() for m in args.compare_modes.split(",")  # type: ignore[assignment]
+        ]
+        report = evaluate_mode_comparison(
+            load_eval_set(args.eval_set),
+            retriever=retriever,
+            modes=modes,
+            top_k=args.top_k,
+            embedding_backend=args.embedding_backend,
+        )
+        if args.comparison_report:
+            write_mode_comparison_markdown(report, args.comparison_report)
+        if args.comparison_json:
+            write_mode_comparison_json(report, args.comparison_json)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+
     report = evaluate_eval_set(
         load_eval_set(args.eval_set),
         retriever=retriever,
         top_k=args.top_k,
         embedding_backend=args.embedding_backend,
+        mode=args.mode,
     )
     write_markdown_report(report, args.report)
     write_json_metrics_snapshot(report, args.json_report)
@@ -374,14 +591,10 @@ def _evaluate_case(
     retriever: RuleRetriever | Any,
     top_k: int,
     min_score: float,
+    mode: RagEvalMode = "dense",
 ) -> EvalCaseResult:
     response = retriever.search(
-        RagSearchRequest(
-            query=case.query,
-            top_k=top_k,
-            min_score=min_score,
-            scenario_type=case.scenario_type,
-        )
+        request_for_eval_mode(case, mode=mode, top_k=top_k, min_score=min_score)
     )
     retrieved_chunk_ids = [item.chunk_id for item in response.items[:top_k]]
     return EvalCaseResult(
