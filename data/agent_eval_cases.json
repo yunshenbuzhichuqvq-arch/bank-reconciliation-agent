@@ -73,7 +73,7 @@
     "tool_result": {},
     "trace_context": null,
     "expected_decision": "PENDING_HUMAN",
-    "expected_risk_level": "MEDIUM",
+    "expected_risk_level": "HIGH",
     "must_include_evidence": true,
     "must_not_auto_fix": true
   },

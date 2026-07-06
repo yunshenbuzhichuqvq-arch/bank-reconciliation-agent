@@ -74,7 +74,8 @@ def test_evaluate_agent_cases_report_structure() -> None:
 
     metrics = report["metrics"]
     for key in [
-        "schema_pass_rate", "decision_accuracy", "evidence_citation_rate",
+        "schema_pass_rate", "decision_accuracy", "risk_accuracy",
+        "evidence_citation_rate",
         "no_evidence_to_human_rate", "hard_constraint_violation_rate",
         "unsafe_auto_fix_rate", "decision_consistency_rate",
     ]:
@@ -231,6 +232,8 @@ def test_markdown_report_includes_required_sections(tmp_path: Path) -> None:
     assert "Metrics" in content
     assert "Schema Pass Rate" in content
     assert "Decision Accuracy" in content
+    assert "Risk Accuracy" in content
+    assert "Risk Match" in content
     assert "Evidence Citation Rate" in content
     assert "No-Evidence → Human Rate" in content
     assert "Hard Constraint Violation Rate" in content
@@ -249,6 +252,7 @@ def test_json_snapshot_includes_required_keys(tmp_path: Path) -> None:
 
     for key in [
         "agent_schema_pass_rate", "agent_decision_accuracy",
+        "agent_risk_accuracy",
         "agent_evidence_citation_rate", "agent_no_evidence_to_human_rate",
         "agent_hard_constraint_violation_rate", "agent_unsafe_auto_fix_rate",
         "agent_decision_consistency_rate", "gates", "provider", "evaluated_at",
@@ -299,3 +303,88 @@ def test_evidence_from_eval_cases_is_deterministic() -> None:
     assert items[0].chunk_id == "test_chunk_001"
     assert items[0].source == "eval_case#test_chunk_001"
     assert items[1].chunk_id == "test_chunk_002"
+
+
+def test_non_fake_provider_rejected_by_evaluator() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    with pytest.raises(ValueError, match="provider must be 'fake'"):
+        eval_agent.evaluate_agent_cases(cases, provider="deepseek")
+
+
+def test_non_fake_provider_rejected_by_cli(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        eval_agent.main([
+            "--cases", str(PROJECT_ROOT / "data/agent_eval_cases.json"),
+            "--provider", "deepseek",
+            "--report", str(tmp_path / "report.md"),
+            "--json-report", str(tmp_path / "report.json"),
+        ])
+
+
+def test_high_risk_case_expects_high() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    high_risk = [c for c in cases if c.case_id == "agent-high-risk-001"]
+    assert len(high_risk) == 1
+    assert high_risk[0].expected_risk_level == "HIGH"
+
+
+def test_risk_accuracy_computed_from_risk_match() -> None:
+    results = [
+        eval_agent.AgentEvalResult(
+            case_id="r1",
+            error_type="AMOUNT_MISMATCH",
+            exception_branch=None,
+            actual_decision="PENDING_HUMAN",
+            actual_risk_level="MEDIUM",
+            schema_passed=True,
+            decision_match=True,
+            risk_level_match=True,
+            has_evidence=True,
+            evidence_cited=True,
+            no_evidence_decision_is_human=True,
+            hard_constraint_violated=False,
+            unsafe_auto_fix=False,
+            consistency_passed=True,
+        ),
+        eval_agent.AgentEvalResult(
+            case_id="r2",
+            error_type="AMOUNT_MISMATCH",
+            exception_branch=None,
+            actual_decision="PENDING_HUMAN",
+            actual_risk_level="LOW",
+            schema_passed=True,
+            decision_match=True,
+            risk_level_match=False,
+            has_evidence=True,
+            evidence_cited=True,
+            no_evidence_decision_is_human=True,
+            hard_constraint_violated=False,
+            unsafe_auto_fix=False,
+            consistency_passed=True,
+        ),
+    ]
+    metrics = eval_agent._compute_metrics(results)
+    assert metrics["risk_accuracy"] == pytest.approx(0.5)
+    assert metrics["decision_accuracy"] == pytest.approx(1.0)
+
+
+def test_json_snapshot_includes_risk_accuracy(tmp_path: Path) -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases)
+    json_path = tmp_path / "agent_eval_metrics.json"
+    eval_agent.write_json_metrics_snapshot(report, json_path)
+    snapshot = json.loads(json_path.read_text(encoding="utf-8"))
+    assert "agent_risk_accuracy" in snapshot
+
+
+def test_markdown_includes_risk_match_column(tmp_path: Path) -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases)
+    md_path = tmp_path / "agent_eval.md"
+    eval_agent.write_markdown_report(report, md_path)
+    content = md_path.read_text(encoding="utf-8")
+
+    assert "Risk Match" in content
+    assert "Risk Accuracy" in content
+    # Per-case rows include risk_level_match (True/False)
+    assert "| agent-high-risk-001 |" in content

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -102,6 +103,11 @@ def evaluate_agent_cases(
     *,
     provider: str = "fake",
 ) -> dict[str, Any]:
+    if provider != "fake":
+        raise ValueError(
+            f"Agent Eval provider must be 'fake' in this stage. "
+            f"Got '{provider}'. Real LLM provider eval is out of scope."
+        )
     agent = AuditAgent(provider=FakeLLMProvider())
     results: list[AgentEvalResult] = []
     consistency_results: list[list[AuditDecision]] = []
@@ -184,6 +190,7 @@ def _compute_metrics(results: list[AgentEvalResult]) -> dict[str, float]:
         "case_count": float(total),
         "schema_pass_rate": sum(1 for r in results if r.schema_passed) / total,
         "decision_accuracy": sum(1 for r in results if r.decision_match) / total,
+        "risk_accuracy": sum(1 for r in results if r.risk_level_match) / total,
         "evidence_citation_rate": sum(
             1 for r in results if r.has_evidence and r.evidence_cited
         ) / max(sum(1 for r in results if r.has_evidence), 1),
@@ -232,6 +239,7 @@ def _to_metrics_snapshot(report: dict[str, Any]) -> dict[str, object]:
     return {
         "agent_schema_pass_rate": metrics.get("schema_pass_rate", 0.0),
         "agent_decision_accuracy": metrics.get("decision_accuracy", 0.0),
+        "agent_risk_accuracy": metrics.get("risk_accuracy", 0.0),
         "agent_evidence_citation_rate": metrics.get("evidence_citation_rate", 0.0),
         "agent_no_evidence_to_human_rate": metrics.get("no_evidence_to_human_rate", 0.0),
         "agent_hard_constraint_violation_rate": metrics.get("hard_constraint_violation_rate", 0.0),
@@ -264,6 +272,7 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
         "|---|---|",
         f"| Schema Pass Rate | {metrics.get('schema_pass_rate', 0):.4f} |",
         f"| Decision Accuracy | {metrics.get('decision_accuracy', 0):.4f} |",
+        f"| Risk Accuracy | {metrics.get('risk_accuracy', 0):.4f} |",
         f"| Evidence Citation Rate | {metrics.get('evidence_citation_rate', 0):.4f} |",
         f"| No-Evidence → Human Rate | {metrics.get('no_evidence_to_human_rate', 0):.4f} |",
         f"| Hard Constraint Violation Rate | {metrics.get('hard_constraint_violation_rate', 0):.4f} |",
@@ -279,14 +288,14 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
         "",
         "## Per-Case Results",
         "",
-        "| Case ID | Error Type | Branch | Decision | Risk | Schema | Decision Match | Evidence | Consistent |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Case ID | Error Type | Branch | Decision | Risk | Schema | Decision Match | Risk Match | Evidence | Consistent |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for result in report["results"]:
         lines.append(
             "| {case_id} | {error_type} | {exception_branch} | {actual_decision} | "
             "{actual_risk_level} | {schema_passed} | {decision_match} | "
-            "{evidence_cited} | {consistency_passed} |".format(**result)
+            "{risk_level_match} | {evidence_cited} | {consistency_passed} |".format(**result)
         )
     lines.append("")
     return "\n".join(lines)
@@ -299,6 +308,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT_PATH)
     args = parser.parse_args(argv)
+
+    if args.provider != "fake":
+        print(
+            f"ERROR: Agent Eval provider must be 'fake' in this stage. "
+            f"Got '{args.provider}'. Real LLM provider eval is out of scope.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     cases = load_agent_eval_cases(args.cases)
     report = evaluate_agent_cases(cases, provider=args.provider)
