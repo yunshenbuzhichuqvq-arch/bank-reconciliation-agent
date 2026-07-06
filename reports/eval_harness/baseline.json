@@ -5,7 +5,7 @@
     "normal_rows": 1000,
     "embedding_backend": "hash",
     "top_k": 5,
-    "evaluated_at": "2026-07-06T12:23:05.484275Z"
+    "evaluated_at": "2026-07-06T12:52:37.406922Z"
   },
   "system_eval": {
     "case_count": 1007,

@@ -9,7 +9,7 @@
 | Normal Rows | 1000 |
 | Embedding Backend | `hash` |
 | Top K | 5 |
-| Evaluated At | 2026-07-06T12:23:05.484275Z |
+| Evaluated At | 2026-07-06T12:52:37.406922Z |
 
 ## System Eval
 

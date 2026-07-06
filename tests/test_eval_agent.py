@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
+from bank_reconciliation_agent.core.llm.provider import LLMResult, LLMUnavailable
 from scripts import eval_agent
 
 
@@ -453,3 +453,159 @@ def test_markdown_includes_risk_match_column(tmp_path: Path) -> None:
     assert "Risk Accuracy" in content
     # Per-case rows include risk_level_match (True/False)
     assert "| agent-high-risk-001 |" in content
+
+
+def test_fake_metadata_never_mentions_deepseek() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+    assert report["model_requested"] == "none"
+    assert report["model_effective"] == "none"
+    assert "deepseek" not in report["model_requested"]
+    assert "deepseek" not in report["model_effective"]
+
+    snapshot = eval_agent._to_metrics_snapshot(report)
+    assert snapshot["model_requested"] == "none"
+    assert snapshot["model_effective"] == "none"
+
+
+def test_fake_metadata_never_mentions_deepseek_in_markdown(tmp_path: Path) -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+    md_path = tmp_path / "agent_eval.md"
+    eval_agent.write_markdown_report(report, md_path)
+    content = md_path.read_text(encoding="utf-8")
+
+    assert "deepseek" not in content.lower()
+    assert "| Model Requested | `none` |" in content
+    assert "| Model Effective | `none` |" in content
+
+
+def test_deepseek_auto_redirects_from_fake_baseline_paths(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-test")
+    md_path = tmp_path / "agent_eval.md"
+    json_path = tmp_path / "agent_eval_metrics.json"
+
+    fake_md_def = tmp_path / "fake_default.md"
+    fake_json_def = tmp_path / "fake_default_metrics.json"
+    monkeypatch.setattr(eval_agent, "DEFAULT_REPORT_PATH", fake_md_def)
+    monkeypatch.setattr(eval_agent, "DEFAULT_JSON_REPORT_PATH", fake_json_def)
+    monkeypatch.setattr(
+        eval_agent, "DEEPSEEK_FLASH_REPORT_PATH", tmp_path / "agent_eval_deepseek_flash.md"
+    )
+    monkeypatch.setattr(
+        eval_agent, "DEEPSEEK_FLASH_JSON_PATH", tmp_path / "agent_eval_deepseek_flash_metrics.json"
+    )
+
+    with pytest.raises(SystemExit):
+        eval_agent.main([
+            "--cases", str(PROJECT_ROOT / "data/agent_eval_cases.json"),
+            "--provider", "deepseek",
+            "--model", "deepseek-v4-flash",
+            "--report", str(md_path),
+            "--json-report", str(json_path),
+        ])
+
+    assert not md_path.exists()
+    assert not json_path.exists()
+
+
+def test_stubbed_deepseek_success_sets_real_provider_call(monkeypatch) -> None:
+    class StubDeepSeek:
+        def __init__(self, **kwargs):
+            self.model = kwargs.get("model", "unknown")
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            return LLMResult(
+                text=json.dumps({
+                    "decision": "PENDING_HUMAN",
+                    "risk_level": "MEDIUM",
+                    "reason": "stub deepseek response",
+                    "ai_suggestion": "PENDING_HUMAN",
+                    "evidence": ["stub-evidence"],
+                    "confidence": 0.8,
+                }),
+                prompt_tokens=10,
+                completion_tokens=5,
+                model=self.model,
+            )
+
+    original = eval_agent.DeepSeekProvider
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", StubDeepSeek)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+    try:
+        cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+        report = eval_agent.evaluate_agent_cases(
+            cases, provider="deepseek", model="deepseek-v4-flash",
+        )
+        assert report["provider_effective"] == "deepseek"
+        assert report["real_provider_call"] is True
+        assert report["model_effective"] == "deepseek-v4-flash"
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original)
+
+
+def test_deepseek_unavailable_raises_before_report(monkeypatch) -> None:
+    class FailingDeepSeek:
+        def __init__(self, **kwargs):
+            pass
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            raise LLMUnavailable("stub network error")
+
+    original = eval_agent.DeepSeekProvider
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", FailingDeepSeek)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+    try:
+        cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+        evidence_cases = [c for c in cases if c.rag_evidence]
+        with pytest.raises(LLMUnavailable, match="stub network error|Cannot trust"):
+            eval_agent.evaluate_agent_cases(
+                evidence_cases[:1], provider="deepseek", model="deepseek-v4-flash",
+            )
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original)
+
+
+def test_deepseek_short_circuits_no_evidence_case(monkeypatch) -> None:
+    """No-evidence case does not call provider, but still needs one real call elsewhere."""
+    class CountingDeepSeek:
+        def __init__(self, **kwargs):
+            self.call_count = 0
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            self.call_count += 1
+            return LLMResult(
+                text=json.dumps({
+                    "decision": "PENDING_HUMAN",
+                    "risk_level": "HIGH",
+                    "reason": "stub",
+                    "ai_suggestion": "PENDING_HUMAN",
+                    "evidence": ["stub"],
+                    "confidence": 0.7,
+                }),
+                prompt_tokens=5,
+                completion_tokens=3,
+                model="stub",
+            )
+
+    original = eval_agent.DeepSeekProvider
+    stub = CountingDeepSeek()
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", lambda **kw: stub)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+    try:
+        cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+        # Include the no-evidence case + one evidence case
+        mixed = [c for c in cases if not c.rag_evidence][:1] + [
+            c for c in cases if c.rag_evidence
+        ][:1]
+        report = eval_agent.evaluate_agent_cases(
+            mixed, provider="deepseek", model="deepseek-v4-flash",
+        )
+        assert report["real_provider_call"] is True
+        assert report["provider_effective"] == "deepseek"
+        # no-evidence case short-circuits without provider call
+        no_ev_result = [r for r in report["results"] if not r["has_evidence"]]
+        assert len(no_ev_result) >= 1
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original)

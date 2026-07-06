@@ -21,6 +21,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES_PATH = PROJECT_ROOT / "data/agent_eval_cases.json"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "reports/agent_eval.md"
 DEFAULT_JSON_REPORT_PATH = PROJECT_ROOT / "reports/agent_eval_metrics.json"
+DEEPSEEK_FLASH_REPORT_PATH = PROJECT_ROOT / "reports/agent_eval_deepseek_flash.md"
+DEEPSEEK_FLASH_JSON_PATH = PROJECT_ROOT / "reports/agent_eval_deepseek_flash_metrics.json"
 CONSISTENCY_RUNS = 3
 
 
@@ -113,14 +115,13 @@ def evaluate_agent_cases(
 ) -> dict[str, Any]:
     provider_requested = provider
     model_requested = model
-    real_provider_call = False
-    provider_effective = provider
-    model_effective = model
 
     if provider == "fake":
         agent = AuditAgent(provider=FakeLLMProvider())
         provider_effective = "fake"
         model_effective = "none"
+        model_requested = "none"
+        real_provider_call = False
         runs = CONSISTENCY_RUNS
     elif provider == "deepseek":
         api_key = settings.deepseek_api_key
@@ -131,14 +132,15 @@ def evaluate_agent_cases(
             )
         ds_provider = DeepSeekProvider(api_key=api_key, model=model)
         agent = AuditAgent(provider=ds_provider)
-        real_provider_call = True
         provider_effective = "deepseek"
         model_effective = model
+        real_provider_call = False
         runs = 1
     else:
         raise ValueError(f"Unsupported provider: {provider}. Use 'fake' or 'deepseek'.")
 
     results: list[AgentEvalResult] = []
+    had_successful_real_call = False
 
     for case in cases:
         evidence = _build_rag_evidence(case.rag_evidence)
@@ -153,6 +155,16 @@ def evaluate_agent_cases(
                 amount_diff=case.amount_diff,
                 evidence=evidence,
             )
+
+            if provider == "deepseek" and evidence:
+                if _is_fallback_or_no_result(decision, agent):
+                    raise LLMUnavailable(
+                        "DeepSeek provider returned fallback output or no fresh LLM result "
+                        f"for evidence-bearing case {case.case_id}. "
+                        "Cannot trust the evaluation result."
+                    )
+                had_successful_real_call = True
+
             multi_run_decisions.append(decision)
 
         decision = multi_run_decisions[0]
@@ -185,6 +197,14 @@ def evaluate_agent_cases(
             consistency_passed=consistency_passed,
         ))
 
+    if provider == "deepseek":
+        if not had_successful_real_call:
+            raise LLMUnavailable(
+                "DeepSeek provider did not produce a single successful real call "
+                "for an evidence-bearing eval case. Cannot write a DeepSeek report."
+            )
+        real_provider_call = True
+
     metrics = _compute_metrics(results)
     gates = _compute_gates(metrics)
     return {
@@ -199,6 +219,14 @@ def evaluate_agent_cases(
         "gates": gates,
         "results": [asdict(result) for result in results],
     }
+
+
+def _is_fallback_or_no_result(decision: AuditDecision, agent: AuditAgent) -> bool:
+    if decision.fallback_applied:
+        return True
+    if agent.last_llm_result is None:
+        return True
+    return False
 
 
 def _check_consistency(decisions: list[AuditDecision]) -> bool:
@@ -348,6 +376,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT_PATH)
     args = parser.parse_args(argv)
+
+    if args.provider == "deepseek":
+        if args.report.resolve() == DEFAULT_REPORT_PATH.resolve():
+            args.report = DEEPSEEK_FLASH_REPORT_PATH
+            args.json_report = DEEPSEEK_FLASH_JSON_PATH
 
     cases = load_agent_eval_cases(args.cases)
     try:

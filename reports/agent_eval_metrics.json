@@ -14,8 +14,8 @@
   },
   "provider_requested": "fake",
   "provider_effective": "fake",
-  "model_requested": "deepseek-v4-flash",
+  "model_requested": "none",
   "model_effective": "none",
   "real_provider_call": false,
-  "evaluated_at": "2026-07-06T12:41:22.388068Z"
+  "evaluated_at": "2026-07-06T12:52:25.253580Z"
 }
