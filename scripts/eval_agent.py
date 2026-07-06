@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
-from bank_reconciliation_agent.core.llm.provider import FakeLLMProvider
+from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.core.llm.provider import (
+    DeepSeekProvider,
+    FakeLLMProvider,
+    LLMUnavailable,
+)
 from bank_reconciliation_agent.schemas.rag import RagSearchItem
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -71,7 +76,9 @@ def _validate_case_item(item: dict[str, object]) -> None:
     }
     missing = required - set(item)
     if missing:
-        raise ValueError(f"Missing required fields: {missing} in case {item.get('case_id', 'unknown')}")
+        raise ValueError(
+            f"Missing required fields: {missing} in case {item.get('case_id', 'unknown')}"
+        )
     if item.get("expected_decision") not in {"AUTO_FIXED", "PENDING_HUMAN", "UNRESOLVED"}:
         raise ValueError(
             f"Invalid expected_decision in case {item['case_id']}: {item['expected_decision']}"
@@ -102,20 +109,41 @@ def evaluate_agent_cases(
     cases: list[AgentEvalCase],
     *,
     provider: str = "fake",
+    model: str = "deepseek-v4-flash",
 ) -> dict[str, Any]:
-    if provider != "fake":
-        raise ValueError(
-            f"Agent Eval provider must be 'fake' in this stage. "
-            f"Got '{provider}'. Real LLM provider eval is out of scope."
-        )
-    agent = AuditAgent(provider=FakeLLMProvider())
+    provider_requested = provider
+    model_requested = model
+    real_provider_call = False
+    provider_effective = provider
+    model_effective = model
+
+    if provider == "fake":
+        agent = AuditAgent(provider=FakeLLMProvider())
+        provider_effective = "fake"
+        model_effective = "none"
+        runs = CONSISTENCY_RUNS
+    elif provider == "deepseek":
+        api_key = settings.deepseek_api_key
+        if not api_key:
+            raise LLMUnavailable(
+                "DEEPSEEK_API_KEY is not configured. "
+                "Set the environment variable or use --provider fake."
+            )
+        ds_provider = DeepSeekProvider(api_key=api_key, model=model)
+        agent = AuditAgent(provider=ds_provider)
+        real_provider_call = True
+        provider_effective = "deepseek"
+        model_effective = model
+        runs = 1
+    else:
+        raise ValueError(f"Unsupported provider: {provider}. Use 'fake' or 'deepseek'.")
+
     results: list[AgentEvalResult] = []
-    consistency_results: list[list[AuditDecision]] = []
 
     for case in cases:
         evidence = _build_rag_evidence(case.rag_evidence)
         multi_run_decisions: list[AuditDecision] = []
-        for _ in range(CONSISTENCY_RUNS):
+        for _ in range(runs):
             decision = agent.decide_with_llm(
                 flow_id=case.case_id,
                 error_type=case.error_type,
@@ -126,7 +154,6 @@ def evaluate_agent_cases(
                 evidence=evidence,
             )
             multi_run_decisions.append(decision)
-        consistency_results.append(multi_run_decisions)
 
         decision = multi_run_decisions[0]
         schema_passed = True
@@ -162,7 +189,11 @@ def evaluate_agent_cases(
     gates = _compute_gates(metrics)
     return {
         "case_count": len(cases),
-        "provider": provider,
+        "provider_requested": provider_requested,
+        "provider_effective": provider_effective,
+        "model_requested": model_requested,
+        "model_effective": model_effective,
+        "real_provider_call": real_provider_call,
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "metrics": metrics,
         "gates": gates,
@@ -247,7 +278,11 @@ def _to_metrics_snapshot(report: dict[str, Any]) -> dict[str, object]:
         "agent_decision_consistency_rate": metrics.get("decision_consistency_rate", 0.0),
         "agent_case_count": metrics.get("case_count", 0),
         "gates": gates,
-        "provider": report.get("provider", "unknown"),
+        "provider_requested": report.get("provider_requested", "unknown"),
+        "provider_effective": report.get("provider_effective", "unknown"),
+        "model_requested": report.get("model_requested", "unknown"),
+        "model_effective": report.get("model_effective", "unknown"),
+        "real_provider_call": report.get("real_provider_call", False),
         "evaluated_at": report.get("evaluated_at", ""),
     }
 
@@ -262,7 +297,11 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
         "",
         "| Key | Value |",
         "|---|---|",
-        f"| Provider | `{report.get('provider', 'unknown')}` |",
+        f"| Provider Requested | `{report.get('provider_requested', 'unknown')}` |",
+        f"| Provider Effective | `{report.get('provider_effective', 'unknown')}` |",
+        f"| Model Requested | `{report.get('model_requested', 'unknown')}` |",
+        f"| Model Effective | `{report.get('model_effective', 'unknown')}` |",
+        f"| Real Provider Call | {report.get('real_provider_call', False)} |",
         f"| Case Count | {report['case_count']} |",
         f"| Evaluated At | {report.get('evaluated_at', 'N/A')} |",
         "",
@@ -305,20 +344,18 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Evaluate AuditAgent safety and decision baseline.")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH)
     parser.add_argument("--provider", default="fake")
+    parser.add_argument("--model", default="deepseek-v4-flash")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--json-report", type=Path, default=DEFAULT_JSON_REPORT_PATH)
     args = parser.parse_args(argv)
 
-    if args.provider != "fake":
-        print(
-            f"ERROR: Agent Eval provider must be 'fake' in this stage. "
-            f"Got '{args.provider}'. Real LLM provider eval is out of scope.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
     cases = load_agent_eval_cases(args.cases)
-    report = evaluate_agent_cases(cases, provider=args.provider)
+    try:
+        report = evaluate_agent_cases(cases, provider=args.provider, model=args.model)
+    except LLMUnavailable as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
     write_markdown_report(report, args.report)
     write_json_metrics_snapshot(report, args.json_report)
     print(json.dumps(report, ensure_ascii=False, indent=2))

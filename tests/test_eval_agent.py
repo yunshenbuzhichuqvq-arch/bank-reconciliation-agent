@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
 from scripts import eval_agent
 
 
@@ -65,7 +66,10 @@ def test_evaluate_agent_cases_report_structure() -> None:
     report = eval_agent.evaluate_agent_cases(cases)
 
     assert report["case_count"] == len(cases)
-    assert report["provider"] == "fake"
+    assert report["provider_requested"] == "fake"
+    assert report["provider_effective"] == "fake"
+    assert report["model_effective"] == "none"
+    assert report["real_provider_call"] is False
     assert "evaluated_at" in report
     assert "metrics" in report
     assert "gates" in report
@@ -228,7 +232,8 @@ def test_markdown_report_includes_required_sections(tmp_path: Path) -> None:
 
     assert "Agent Evaluation Report" in content
     assert "Metadata" in content
-    assert "fake" in content
+    assert "Provider Requested" in content
+    assert "Provider Effective" in content
     assert "Metrics" in content
     assert "Schema Pass Rate" in content
     assert "Decision Accuracy" in content
@@ -255,11 +260,15 @@ def test_json_snapshot_includes_required_keys(tmp_path: Path) -> None:
         "agent_risk_accuracy",
         "agent_evidence_citation_rate", "agent_no_evidence_to_human_rate",
         "agent_hard_constraint_violation_rate", "agent_unsafe_auto_fix_rate",
-        "agent_decision_consistency_rate", "gates", "provider", "evaluated_at",
+        "agent_decision_consistency_rate", "gates",
+        "provider_requested", "provider_effective",
+        "model_requested", "model_effective",
+        "real_provider_call", "evaluated_at",
     ]:
         assert key in snapshot
 
-    assert snapshot["provider"] == "fake"
+    assert snapshot["provider_effective"] == "fake"
+    assert snapshot["real_provider_call"] is False
 
 
 def test_cli_runs_and_writes_reports(tmp_path: Path) -> None:
@@ -277,7 +286,8 @@ def test_cli_runs_and_writes_reports(tmp_path: Path) -> None:
 
     snapshot = json.loads(json_path.read_text(encoding="utf-8"))
     assert snapshot["agent_case_count"] >= 5
-    assert snapshot["provider"] == "fake"
+    assert snapshot["provider_effective"] == "fake"
+    assert snapshot["real_provider_call"] is False
 
 
 def test_agent_eval_cases_include_required_case_types() -> None:
@@ -305,20 +315,75 @@ def test_evidence_from_eval_cases_is_deterministic() -> None:
     assert items[1].chunk_id == "test_chunk_002"
 
 
-def test_non_fake_provider_rejected_by_evaluator() -> None:
+def test_fake_provider_is_default_and_network_free() -> None:
     cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
-    with pytest.raises(ValueError, match="provider must be 'fake'"):
+    report = eval_agent.evaluate_agent_cases(cases)
+    assert report["provider_effective"] == "fake"
+    assert report["real_provider_call"] is False
+    assert report["model_effective"] == "none"
+
+
+def test_deepseek_provider_fails_when_api_key_missing(monkeypatch) -> None:
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", None)
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    with pytest.raises(LLMUnavailable, match="DEEPSEEK_API_KEY"):
         eval_agent.evaluate_agent_cases(cases, provider="deepseek")
 
 
-def test_non_fake_provider_rejected_by_cli(tmp_path: Path) -> None:
+def test_cli_deepseek_fails_on_missing_key(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", None)
     with pytest.raises(SystemExit):
         eval_agent.main([
             "--cases", str(PROJECT_ROOT / "data/agent_eval_cases.json"),
             "--provider", "deepseek",
+            "--model", "deepseek-v4-flash",
             "--report", str(tmp_path / "report.md"),
             "--json-report", str(tmp_path / "report.json"),
         ])
+
+
+def test_provider_metadata_in_report() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases)
+    for key in [
+        "provider_requested", "provider_effective",
+        "model_requested", "model_effective", "real_provider_call",
+    ]:
+        assert key in report
+
+
+def test_provider_metadata_in_snapshot(tmp_path: Path) -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases)
+    json_path = tmp_path / "metrics.json"
+    eval_agent.write_json_metrics_snapshot(report, json_path)
+    snapshot = json.loads(json_path.read_text(encoding="utf-8"))
+    for key in [
+        "provider_requested", "provider_effective",
+        "model_requested", "model_effective", "real_provider_call",
+    ]:
+        assert key in snapshot
+    assert snapshot["provider_effective"] == "fake"
+    assert snapshot["real_provider_call"] is False
+
+
+def test_markdown_includes_provider_metadata(tmp_path: Path) -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases)
+    md_path = tmp_path / "agent_eval.md"
+    eval_agent.write_markdown_report(report, md_path)
+    content = md_path.read_text(encoding="utf-8")
+    assert "Provider Requested" in content
+    assert "Provider Effective" in content
+    assert "Model Requested" in content
+    assert "Model Effective" in content
+    assert "Real Provider Call" in content
+
+
+def test_unsupported_provider_raises() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        eval_agent.evaluate_agent_cases(cases, provider="openai")
 
 
 def test_high_risk_case_expects_high() -> None:

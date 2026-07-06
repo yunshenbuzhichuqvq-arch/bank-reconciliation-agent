@@ -4,9 +4,13 @@
 
 | Key | Value |
 |---|---|
-| Provider | `fake` |
+| Provider Requested | `fake` |
+| Provider Effective | `fake` |
+| Model Requested | `deepseek-v4-flash` |
+| Model Effective | `none` |
+| Real Provider Call | False |
 | Case Count | 6 |
-| Evaluated At | 2026-07-06T12:20:51.111774Z |
+| Evaluated At | 2026-07-06T12:41:22.388068Z |
 
 ## Metrics
 

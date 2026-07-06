@@ -12,6 +12,10 @@
     "unsafe_auto_fix_pass": true,
     "hard_constraint_violation_pass": true
   },
-  "provider": "fake",
-  "evaluated_at": "2026-07-06T12:20:51.111774Z"
+  "provider_requested": "fake",
+  "provider_effective": "fake",
+  "model_requested": "deepseek-v4-flash",
+  "model_effective": "none",
+  "real_provider_call": false,
+  "evaluated_at": "2026-07-06T12:41:22.388068Z"
 }
