@@ -55,6 +55,17 @@ class ScenarioSummary:
 
 
 @dataclass(frozen=True)
+class ErrorTypeSummary:
+    scenario_type: str
+    error_type: str
+    case_count: int
+    hit_at_1: float
+    recall_at_5: float
+    mrr: float
+    ndcg_at_5: float
+
+
+@dataclass(frozen=True)
 class SmokeCase:
     query: str
     expected_tag: str
@@ -104,6 +115,7 @@ def evaluate_eval_set(
     *,
     retriever: RuleRetriever | Any = rule_retriever,
     top_k: int = 5,
+    embedding_backend: str = "hash",
 ) -> dict[str, Any]:
     results = [
         _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0)
@@ -111,12 +123,18 @@ def evaluate_eval_set(
     ]
     scenario_types = sorted({case.scenario_type for case in cases})
     summaries = [_summarize_scenario(results, scenario_type) for scenario_type in scenario_types]
+    error_type_summaries = _summarize_by_error_type(results)
+    global_metrics = _compute_global_metrics(summaries, len(cases))
+    notes = _build_saturation_notes(global_metrics, summaries)
     return {
         "case_count": len(cases),
-        "notes": [
-            "Recall@5 is evaluated on desaturated bank-enterprise and bank-clearing corpora; use MRR, NDCG@5, and Hit@1 for ranking quality."
-        ],
+        "embedding_backend": embedding_backend,
+        "top_k": top_k,
+        "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "global_metrics": global_metrics,
+        "notes": notes,
         "summaries": [asdict(summary) for summary in summaries],
+        "error_type_summaries": [asdict(summary) for summary in error_type_summaries],
         "results": [asdict(result) for result in results],
     }
 
@@ -162,6 +180,7 @@ def main(argv: list[str] | None = None) -> None:
         load_eval_set(args.eval_set),
         retriever=retriever,
         top_k=args.top_k,
+        embedding_backend=args.embedding_backend,
     )
     write_markdown_report(report, args.report)
     write_json_metrics_snapshot(report, args.json_report)
@@ -185,13 +204,36 @@ def write_json_metrics_snapshot(
 
 
 def _to_metrics_snapshot(report: dict[str, Any]) -> dict[str, object]:
+    global_metrics = report.get("global_metrics", {})
     summaries = report["summaries"]
     total_cases = sum(summary["case_count"] for summary in summaries)
-    return {
-        "rag_recall_at5": _weighted_average(summaries, "recall_at_5", total_cases),
-        "rag_mrr": _weighted_average(summaries, "mrr", total_cases),
-        "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    recall_at5 = global_metrics.get(
+        "recall_at_5", _weighted_average(summaries, "recall_at_5", total_cases),
+    )
+    mrr = global_metrics.get(
+        "mrr", _weighted_average(summaries, "mrr", total_cases),
+    )
+    evaluated_at = report.get(
+        "evaluated_at",
+        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+    snapshot: dict[str, object] = {
+        # Backward-compatible required keys
+        "rag_recall_at5": recall_at5,
+        "rag_mrr": mrr,
+        "evaluated_at": evaluated_at,
+        # Richer keys
+        "rag_hit_at1": global_metrics.get(
+            "hit_at_1", _weighted_average(summaries, "hit_at_1", total_cases),
+        ),
+        "rag_ndcg_at5": global_metrics.get(
+            "ndcg_at_5", _weighted_average(summaries, "ndcg_at_5", total_cases),
+        ),
+        "embedding_backend": report.get("embedding_backend", "unknown"),
+        "top_k": report.get("top_k", 5),
+        "case_count": report.get("case_count", total_cases),
     }
+    return snapshot
 
 
 def _weighted_average(summaries: list[dict[str, Any]], metric: str, total_cases: int) -> float:
@@ -200,11 +242,94 @@ def _weighted_average(summaries: list[dict[str, Any]], metric: str, total_cases:
     return sum(summary[metric] * summary["case_count"] for summary in summaries) / total_cases
 
 
+def _compute_global_metrics(
+    summaries: list[ScenarioSummary | dict[str, Any]],
+    total_cases: int,
+) -> dict[str, float]:
+    """Compute weighted global metrics across all scenarios."""
+    as_dicts = [
+        asdict(s) if not isinstance(s, dict) else s for s in summaries
+    ]
+    return {
+        "hit_at_1": _weighted_average(as_dicts, "hit_at_1", total_cases),
+        "recall_at_5": _weighted_average(as_dicts, "recall_at_5", total_cases),
+        "mrr": _weighted_average(as_dicts, "mrr", total_cases),
+        "ndcg_at_5": _weighted_average(as_dicts, "ndcg_at_5", total_cases),
+    }
+
+
+def _build_saturation_notes(
+    global_metrics: dict[str, float],
+    summaries: list[ScenarioSummary | dict[str, Any]],
+) -> list[str]:
+    """Build evaluation notes including Recall@5 saturation risk."""
+    notes = [
+        "Recall@5 is evaluated on desaturated bank-enterprise and bank-clearing corpora; "
+        "use MRR, NDCG@5, and Hit@1 for ranking quality.",
+    ]
+    if global_metrics.get("recall_at_5", 0) == 1.0:
+        notes.append(
+            "⚠️ Recall@5 = 1.0 globally. This may indicate top-k saturation: "
+            "all expected chunks fall within top-5 results. "
+            "Inspect Hit@1, MRR, and NDCG@5 for ranking quality."
+        )
+    for summary in summaries:
+        s = asdict(summary) if not isinstance(summary, dict) else summary
+        if s.get("recall_at_5", 0) == 1.0:
+            notes.append(
+                f"⚠️ Recall@5 = 1.0 for scenario {s['scenario_type']}. "
+                f"Possible top-k saturation. Hit@1={s.get('hit_at_1', 'N/A'):.4f}, "
+                f"MRR={s.get('mrr', 'N/A'):.4f}."
+            )
+    return notes
+
+
+def _summarize_by_error_type(results: list[EvalCaseResult]) -> list[ErrorTypeSummary]:
+    """Group results by (scenario_type, error_type) and compute per-group metrics."""
+    groups: dict[tuple[str, str], list[EvalCaseResult]] = {}
+    for result in results:
+        key = (result.scenario_type, result.error_type)
+        groups.setdefault(key, []).append(result)
+
+    summaries: list[ErrorTypeSummary] = []
+    for (scenario_type, error_type), group_results in sorted(groups.items()):
+        case_count = len(group_results)
+        summaries.append(ErrorTypeSummary(
+            scenario_type=scenario_type,
+            error_type=error_type,
+            case_count=case_count,
+            hit_at_1=sum(r.hit_at_1 for r in group_results) / case_count,
+            recall_at_5=sum(r.recall_at_5 for r in group_results) / case_count,
+            mrr=sum(r.reciprocal_rank for r in group_results) / case_count,
+            ndcg_at_5=sum(r.ndcg_at_5 for r in group_results) / case_count,
+        ))
+    return summaries
+
+
 def _format_markdown_report(report: dict[str, Any]) -> str:
+    global_metrics = report.get("global_metrics", {})
     lines = [
         "# RAG Evaluation Report",
         "",
-        f"- Cases: {report['case_count']}",
+        "## Metadata",
+        "",
+        "| Key | Value |",
+        "|---|---|",
+        f"| Embedding Backend | `{report.get('embedding_backend', 'unknown')}` |",
+        f"| Top K | {report.get('top_k', 5)} |",
+        f"| Case Count | {report['case_count']} |",
+        f"| Evaluated At | {report.get('evaluated_at', 'N/A')} |",
+        "",
+        "## Global Metrics",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| Hit@1 | {global_metrics.get('hit_at_1', 0):.4f} |",
+        f"| Recall@5 | {global_metrics.get('recall_at_5', 0):.4f} |",
+        f"| MRR | {global_metrics.get('mrr', 0):.4f} |",
+        f"| NDCG@5 | {global_metrics.get('ndcg_at_5', 0):.4f} |",
+        "",
+        "## By Scenario",
         "",
         "| Scenario | Cases | Hit@1 | Recall@5 | MRR | NDCG@5 |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
@@ -215,6 +340,31 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
             "{mrr:.4f} | {ndcg_at_5:.4f} |".format(**summary)
         )
     lines.append("")
+
+    # Error-type grouping
+    error_type_summaries = report.get("error_type_summaries", [])
+    if error_type_summaries:
+        lines.extend([
+            "## By Scenario × Error Type",
+            "",
+            "| Scenario | Error Type | Cases | Hit@1 | Recall@5 | MRR | NDCG@5 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        ])
+        for summary in error_type_summaries:
+            lines.append(
+                "| {scenario_type} | {error_type} | {case_count} | {hit_at_1:.4f} | "
+                "{recall_at_5:.4f} | {mrr:.4f} | {ndcg_at_5:.4f} |".format(**summary)
+            )
+        lines.append("")
+
+    # Notes including saturation
+    notes = report.get("notes", [])
+    if notes:
+        lines.extend(["## Notes", ""])
+        for note in notes:
+            lines.append(f"- {note}")
+        lines.append("")
+
     return "\n".join(lines)
 
 

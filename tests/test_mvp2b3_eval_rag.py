@@ -78,6 +78,18 @@ def test_evaluate_eval_set_computes_recall_mrr_and_ndcg() -> None:
         )
     ]
     assert [request.enable_hybrid for request in retriever.requests] == [False, False]
+    # New: global metrics are present
+    assert "global_metrics" in report
+    assert report["global_metrics"] == pytest.approx({
+        "hit_at_1": 0.5,
+        "recall_at_5": 1.0,
+        "mrr": 0.75,
+        "ndcg_at_5": 0.7753252713598225,
+    })
+    # New: metadata keys are present
+    assert "embedding_backend" in report
+    assert "top_k" in report
+    assert "evaluated_at" in report
 
 
 def test_eval_rag_cli_prints_metric_fields(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -148,3 +160,240 @@ def test_bank_enterprise_eval_set_has_no_single_chunk_stuffing() -> None:
     )
 
     assert all(count <= 3 for count in sole_expected_counts.values())
+
+
+# ---------------------------------------------------------------------------
+# TASK-EH.2: New tests for grouped reporting, metadata, snapshot compat
+# ---------------------------------------------------------------------------
+
+
+def test_error_type_summaries_present_and_grouped() -> None:
+    """Report has at least one grouping by (scenario_type, error_type)."""
+    cases = [
+        eval_rag.EvalCase(
+            id="et-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+        eval_rag.EvalCase(
+            id="et-2",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="SINGLE_SIDE_MISSING",
+            query="q2",
+            expected_chunk_ids=["c2"],
+        ),
+        eval_rag.EvalCase(
+            id="et-3",
+            scenario_type="BANK_CLEARING",
+            error_type="AMOUNT_MISMATCH",
+            query="q3",
+            expected_chunk_ids=["c3"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"], "q2": ["x", "c2"], "q3": ["c3"]})
+    report = eval_rag.evaluate_eval_set(cases, retriever=retriever)
+
+    assert "error_type_summaries" in report
+    error_summaries = report["error_type_summaries"]
+    assert len(error_summaries) >= 2  # at least 2 groups
+    # Each summary has scenario_type and error_type
+    for summary in error_summaries:
+        assert "scenario_type" in summary
+        assert "error_type" in summary
+        assert "hit_at_1" in summary
+        assert "recall_at_5" in summary
+        assert "mrr" in summary
+        assert "ndcg_at_5" in summary
+
+
+def test_error_type_summary_metric_math() -> None:
+    """Verify per-error-type metrics are computed correctly, not hardcoded."""
+    cases = [
+        eval_rag.EvalCase(
+            id="math-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+        eval_rag.EvalCase(
+            id="math-2",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q2",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    # q1 hits c1 at position 1 (hit@1=1), q2 does not hit (hit@1=0)
+    retriever = StubRetriever({"q1": ["c1", "x"], "q2": ["x", "y"]})
+    report = eval_rag.evaluate_eval_set(cases, retriever=retriever)
+
+    amt_group = [
+        s for s in report["error_type_summaries"]
+        if s["error_type"] == "AMOUNT_MISMATCH"
+    ]
+    assert len(amt_group) == 1
+    assert amt_group[0]["case_count"] == 2
+    assert amt_group[0]["hit_at_1"] == pytest.approx(0.5)  # 1 hit / 2 cases
+
+
+def test_json_snapshot_backward_compatible_keys() -> None:
+    """JSON snapshot must retain rag_recall_at5, rag_mrr, evaluated_at."""
+    cases = [
+        eval_rag.EvalCase(
+            id="compat-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})
+    report = eval_rag.evaluate_eval_set(cases, retriever=retriever)
+    snapshot = eval_rag._to_metrics_snapshot(report)
+
+    # Required backward-compatible keys
+    assert "rag_recall_at5" in snapshot
+    assert "rag_mrr" in snapshot
+    assert "evaluated_at" in snapshot
+    # Richer keys also present
+    assert "rag_hit_at1" in snapshot
+    assert "rag_ndcg_at5" in snapshot
+    assert "embedding_backend" in snapshot
+    assert "top_k" in snapshot
+    assert "case_count" in snapshot
+
+
+def test_json_snapshot_preserves_numeric_values() -> None:
+    """JSON snapshot numeric values come from global metrics, not hardcoded."""
+    cases = [
+        eval_rag.EvalCase(
+            id="num-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})
+    report = eval_rag.evaluate_eval_set(cases, retriever=retriever)
+    snapshot = eval_rag._to_metrics_snapshot(report)
+
+    assert snapshot["rag_recall_at5"] == pytest.approx(1.0)
+    assert snapshot["rag_mrr"] == pytest.approx(1.0)
+    assert snapshot["rag_hit_at1"] == pytest.approx(1.0)
+    assert snapshot["rag_ndcg_at5"] == pytest.approx(1.0)
+
+
+def test_metadata_records_embedding_backend_and_top_k() -> None:
+    """embedding_backend and top_k are recorded in report and snapshot."""
+    cases = [
+        eval_rag.EvalCase(
+            id="meta-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})
+    report = eval_rag.evaluate_eval_set(
+        cases, retriever=retriever, embedding_backend="hash", top_k=5,
+    )
+    assert report["embedding_backend"] == "hash"
+    assert report["top_k"] == 5
+
+    snapshot = eval_rag._to_metrics_snapshot(report)
+    assert snapshot["embedding_backend"] == "hash"
+    assert snapshot["top_k"] == 5
+
+
+def test_saturation_note_when_recall_at_5_is_one() -> None:
+    """Recall@5 saturation risk is explicitly noted when Recall@5 = 1.0."""
+    cases = [
+        eval_rag.EvalCase(
+            id="sat-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})  # Recall@5 = 1.0
+    report = eval_rag.evaluate_eval_set(cases, retriever=retriever)
+
+    saturation_notes = [n for n in report["notes"] if "saturation" in n.lower()]
+    assert len(saturation_notes) >= 1, "Expected at least one saturation note"
+
+
+def test_no_saturation_note_when_recall_below_one() -> None:
+    """No saturation note when Recall@5 < 1.0."""
+    cases = [
+        eval_rag.EvalCase(
+            id="nosat-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1", "c2"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})  # Recall@5 = 0.5
+    report = eval_rag.evaluate_eval_set(cases, retriever=retriever)
+
+    saturation_notes = [n for n in report["notes"] if "saturation" in n.lower()]
+    assert len(saturation_notes) == 0
+
+
+def test_markdown_report_includes_all_sections(tmp_path: Path) -> None:
+    """Markdown report includes Hit@1, Recall@5, MRR, NDCG@5 and groupings."""
+    cases = [
+        eval_rag.EvalCase(
+            id="md-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+        eval_rag.EvalCase(
+            id="md-2",
+            scenario_type="BANK_CLEARING",
+            error_type="CUTOFF_CROSS_DAY",
+            query="q2",
+            expected_chunk_ids=["c2"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"], "q2": ["x"]})
+    report = eval_rag.evaluate_eval_set(
+        cases, retriever=retriever, embedding_backend="hash", top_k=5,
+    )
+    md_path = tmp_path / "rag_eval.md"
+    eval_rag.write_markdown_report(report, md_path)
+    content = md_path.read_text(encoding="utf-8")
+
+    assert "Hit@1" in content
+    assert "Recall@5" in content
+    assert "MRR" in content
+    assert "NDCG@5" in content
+    assert "Global Metrics" in content
+    assert "By Scenario" in content
+    assert "Error Type" in content
+    assert "hash" in content  # embedding_backend
+    assert "Notes" in content
+
+
+def test_evalcase_input_format_unchanged() -> None:
+    """EvalCase dataclass must keep the same fields."""
+    case = eval_rag.EvalCase(
+        id="compat",
+        scenario_type="BANK_ENTERPRISE",
+        error_type="AMOUNT_MISMATCH",
+        query="test query",
+        expected_chunk_ids=["chunk-1"],
+    )
+    assert case.id == "compat"
+    assert case.scenario_type == "BANK_ENTERPRISE"
+    assert case.error_type == "AMOUNT_MISMATCH"
+    assert case.query == "test query"
+    assert case.expected_chunk_ids == ["chunk-1"]
