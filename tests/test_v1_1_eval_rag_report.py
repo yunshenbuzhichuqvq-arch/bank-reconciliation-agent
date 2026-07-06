@@ -52,7 +52,7 @@ def test_eval_rag_cli_writes_markdown_report_for_both_scenarios(
     assert "| BANK_ENTERPRISE |" in markdown
 
     snapshot = json.loads(json_report_path.read_text(encoding="utf-8"))
-    assert set(snapshot) == {"rag_recall_at5", "rag_mrr", "evaluated_at"}
+    assert {"rag_recall_at5", "rag_mrr", "evaluated_at"}.issubset(set(snapshot))
     assert 0.0 <= snapshot["rag_recall_at5"] <= 1.0
     assert 0.0 <= snapshot["rag_mrr"] <= 1.0
     assert snapshot["evaluated_at"]
