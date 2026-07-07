@@ -1,5 +1,5 @@
 {
-  "evaluated_at": "2026-07-07T10:10:07.425388Z",
+  "evaluated_at": "2026-07-07T10:33:40.250392Z",
   "source_reports": {
     "harness_comparison": "reports/eval_harness/comparison.json",
     "rag_matrix": "reports/rag_quality_matrix.json",
@@ -59,12 +59,28 @@
       }
     },
     {
-      "category": "environment_gap",
-      "area": "real_llm_agent_eval",
-      "summary": "DeepSeek Agent Eval report is not present. Real LLM quality is not measured.",
+      "category": "measured_gap",
+      "area": "real_llm_agent_safety",
+      "summary": "DeepSeek Agent Eval has safety violations: unsafe_auto_fix_rate=0.167, hard_constraint_violation_rate=0.000",
       "evidence": {
-        "report_present": false,
-        "hint": "Run: uv run python -m scripts.eval_agent --cases data/agent_eval_cases.json --provider deepseek --model deepseek-v4-flash --report reports/agent_eval_deepseek_flash.md --json-report reports/agent_eval_deepseek_flash_metrics.json"
+        "provider_effective": "deepseek",
+        "real_provider_call": true,
+        "unsafe_auto_fix_rate": 0.16666666666666666,
+        "hard_constraint_violation_rate": 0.0,
+        "gates": {
+          "unsafe_auto_fix_pass": false,
+          "hard_constraint_violation_pass": true
+        }
+      }
+    },
+    {
+      "category": "measured_gap",
+      "area": "real_llm_agent_quality",
+      "summary": "DeepSeek Agent risk_accuracy=0.500 below 1.0 (case_count=6.0).",
+      "evidence": {
+        "risk_accuracy": 0.5,
+        "decision_accuracy": 0.8333333333333334,
+        "case_count": 6.0
       }
     },
     {
@@ -148,6 +164,13 @@
       "boundary": "offline eval set; hash embedding"
     },
     {
+      "area": "agent",
+      "fact": "DeepSeek Agent Eval: decision_accuracy=0.833, risk_accuracy=0.500, unsafe_auto_fix_rate=0.167, hard_constraint_violation_rate=0.000",
+      "source_report": "reports/agent_eval_deepseek_flash_metrics.json",
+      "boundary": "offline eval set; real DeepSeek provider",
+      "blocking": true
+    },
+    {
       "area": "latency",
       "fact": "Offline latency benchmark: ExtractionAgent avg=0ms, P95=0ms; RAG avg=49ms, P95=244ms",
       "source_report": "reports/performance_cost_benchmark.json",
@@ -155,13 +178,14 @@
     }
   ],
   "resume_bullet_draft": [
-    "RAG quality measured on 120-case offline eval set with hash baseline."
+    "RAG quality measured on 120-case offline eval set with hash baseline.",
+    "[BLOCKING] Agent safety evaluation found violations: DeepSeek Agent Eval: decision_accuracy=0.833, risk_accuracy=0.500, unsafe_auto_fix_rate=0.167, hard_constraint_violation_rate=0.000"
   ],
   "claim_boundary": [
     "offline benchmark only; not production SLA",
     "no online adoption rate measured",
     "no production traffic or real user data",
-    "DeepSeek Agent Eval not run; real LLM safety not verified",
+    "DeepSeek Agent Eval has blocking safety violations: unsafe_auto_fix_rate=0.167, hard_constraint_violation_rate=0.000",
     "performance/cost benchmark uses fake provider; not real LLM latency/cost"
   ],
   "next_stage_recommendations": [
@@ -177,8 +201,8 @@
     },
     {
       "target": "agent",
-      "reason": "Real LLM (DeepSeek) agent quality is not measured. Run the DeepSeek eval command when credentials are available.",
-      "scope_hint": "Do not tune prompts before measuring real DeepSeek behavior on the existing eval set."
+      "reason": "DeepSeek agent shows safety violations. Investigate unsafe auto-fix or hard constraint cases.",
+      "scope_hint": "Examine specific failing cases before changing safety logic."
     }
   ]
 }

@@ -564,6 +564,7 @@ def _build_resume_safe_facts(
         if provider_eff == "deepseek" and real_call:
             unsafe = agent_real_report.get("agent_unsafe_auto_fix_rate", 0.0)
             hard = agent_real_report.get("agent_hard_constraint_violation_rate", 0.0)
+            blocking = unsafe > 0 or hard > 0
             facts.append({
                 "area": "agent",
                 "fact": (
@@ -575,6 +576,7 @@ def _build_resume_safe_facts(
                 ),
                 "source_report": "reports/agent_eval_deepseek_flash_metrics.json",
                 "boundary": "offline eval set; real DeepSeek provider",
+                "blocking": blocking,
             })
 
     if performance_cost_report is not None:
@@ -632,7 +634,12 @@ def _build_resume_bullet_draft(
             bullets.append("RAG quality measured on 120-case offline eval set with hash baseline.")
 
     for f in agent_facts:
-        bullets.append(f"Agent safety evaluation: {f['fact']}")
+        if f.get("blocking"):
+            bullets.append(
+                f"[BLOCKING] Agent safety evaluation found violations: {f['fact']}"
+            )
+        else:
+            bullets.append(f"Agent safety evaluation: {f['fact']}")
 
     for f in cost_facts:
         bullets.append(f"Performance/cost benchmark: {f['fact']}")
@@ -664,6 +671,15 @@ def _build_claim_boundary(
         real_call = agent_real_report.get("real_provider_call", False)
         if provider_eff != "deepseek" or not real_call:
             boundary.append("DeepSeek Agent report is not trusted (fake or fallback provider)")
+        else:
+            unsafe = agent_real_report.get("agent_unsafe_auto_fix_rate", 0.0)
+            hard = agent_real_report.get("agent_hard_constraint_violation_rate", 0.0)
+            if unsafe > 0 or hard > 0:
+                boundary.append(
+                    "DeepSeek Agent Eval has blocking safety violations: "
+                    f"unsafe_auto_fix_rate={unsafe:.3f}, "
+                    f"hard_constraint_violation_rate={hard:.3f}"
+                )
 
     if performance_cost_report is None:
         boundary.append("performance/cost benchmark not run")

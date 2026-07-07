@@ -885,3 +885,127 @@ class TestBuildTriageSummaryExtended:
         ]
         assert len(perf_findings) == 1
         assert perf_findings[0]["category"] == "environment_gap"
+
+
+# ---------------------------------------------------------------------------
+# TASK-17.6: DeepSeek blocking safety gap tests
+# ---------------------------------------------------------------------------
+
+class TestDeepSeekBlockingSafetyGap:
+    def test_no_environment_gap_when_trusted_deepseek_exists(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        env_gaps = [
+            f for f in summary["findings"]
+            if f["area"] == "real_llm_agent_eval"
+            and f["category"] == "environment_gap"
+        ]
+        assert len(env_gaps) == 0
+
+    def test_safety_violation_is_measured_gap(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        safety_findings = [
+            f for f in summary["findings"]
+            if f["area"] == "real_llm_agent_safety"
+        ]
+        assert len(safety_findings) == 1
+        assert safety_findings[0]["category"] == "measured_gap"
+
+    def test_source_reports_points_to_deepseek_flash_json(self) -> None:
+        report = _risky_deepseek_report()
+        report["_source_path"] = "reports/agent_eval_deepseek_flash_metrics.json"
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=report,
+            performance_cost_report=None,
+        )
+        assert "agent_eval_deepseek_flash_metrics.json" in summary["source_reports"]["agent_real_json"]
+
+    def test_claim_boundary_notes_deepseek_safety_violation(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        boundaries = summary["claim_boundary"]
+        assert any("safety violations" in b.lower() for b in boundaries)
+        assert not any("not run" in b and "deepseek" in b.lower() for b in boundaries)
+
+    def test_claim_boundary_does_not_say_deepseek_not_run_when_report_exists(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_trusted_deepseek_report(),
+            performance_cost_report=None,
+        )
+        boundaries = summary["claim_boundary"]
+        assert not any("not run" in b and "deepseek" in b.lower() for b in boundaries)
+
+    def test_resume_bullet_draft_marks_blocking_finding(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        bullets = summary["resume_bullet_draft"]
+        blocking_bullets = [b for b in bullets if "BLOCKING" in b]
+        assert len(blocking_bullets) >= 1
+
+    def test_resume_bullet_draft_does_not_claim_safety_pass(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        bullets_text = " ".join(summary["resume_bullet_draft"])
+        assert "pass" not in bullets_text.lower() or "BLOCKING" in bullets_text
+
+    def test_resume_safe_facts_agent_blocking_flag(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        agent_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "agent"]
+        assert len(agent_facts) >= 1
+        assert agent_facts[0].get("blocking") is True
+
+    def test_resume_safe_facts_agent_not_blocking_when_safe(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_trusted_deepseek_report(),
+            performance_cost_report=None,
+        )
+        agent_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "agent"]
+        assert len(agent_facts) >= 1
+        assert agent_facts[0].get("blocking") is False
+
+    def test_markdown_includes_safety_violation_not_deepseek_not_run(
+        self, tmp_path: Path,
+    ) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        eval_quality_triage.write_triage_markdown(summary, tmp_path / "triage.md")
+        md = (tmp_path / "triage.md").read_text(encoding="utf-8")
+
+        assert "unsafe_auto_fix_rate" in md.lower()
+        assert "BLOCKING" in md
