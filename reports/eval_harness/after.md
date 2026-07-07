@@ -10,7 +10,7 @@
 | Embedding Backend | `hash` |
 | Top K | 5 |
 | RAG Mode | `hybrid_rerank` |
-| Evaluated At | 2026-07-06T17:29:11.705394Z |
+| Evaluated At | 2026-07-07T02:46:50.199728Z |
 
 ## System Eval
 

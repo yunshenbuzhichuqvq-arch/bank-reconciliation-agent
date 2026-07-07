@@ -2,7 +2,7 @@
   "embedding_backend": "hash",
   "top_k": 5,
   "case_count": 120,
-  "evaluated_at": "2026-07-06T17:28:57.067014Z",
+  "evaluated_at": "2026-07-07T02:46:39.545377Z",
   "baseline_mode": "dense",
   "selected_mode": "hybrid_rerank",
   "selection_reason": "Highest NDCG@5 among eligible modes with no negative ranking deltas",

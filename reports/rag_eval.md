@@ -7,7 +7,7 @@
 | Embedding Backend | `hash` |
 | Top K | 5 |
 | Case Count | 120 |
-| Evaluated At | 2026-07-06T16:58:37.526860Z |
+| Evaluated At | 2026-07-07T02:48:11.840697Z |
 
 ## Global Metrics
 

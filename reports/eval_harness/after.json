@@ -6,7 +6,7 @@
     "embedding_backend": "hash",
     "top_k": 5,
     "rag_mode": "hybrid_rerank",
-    "evaluated_at": "2026-07-06T17:29:11.705394Z"
+    "evaluated_at": "2026-07-07T02:46:50.199728Z"
   },
   "system_eval": {
     "case_count": 1007,
