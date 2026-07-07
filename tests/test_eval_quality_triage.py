@@ -493,9 +493,63 @@ class TestBuildTriageSummary:
             "--harness-comparison", str(harness_path),
             "--rag-matrix", str(rag_path),
             "--output", str(tmp_path / "triage.md"),
+            "--json-output", str(tmp_path / "triage.json"),
         ])
 
         md = (tmp_path / "triage.md").read_text(encoding="utf-8")
         assert "comparison.json" in md
         assert "rag_matrix.json" in md
         assert "(not present)" in md.lower() or "not present" in md
+        js = json.loads((tmp_path / "triage.json").read_text(encoding="utf-8"))
+        assert js["source_reports"]["agent_real_json"] is None
+
+
+def test_missing_agent_real_json_path_preserved_in_source_reports(
+    tmp_path: Path,
+) -> None:
+    harness_path = tmp_path / "comparison.json"
+    harness_path.write_text(json.dumps(_harness_comparison(), ensure_ascii=False))
+    rag_path = tmp_path / "rag_matrix.json"
+    rag_path.write_text(json.dumps(_rag_matrix_skip(), ensure_ascii=False))
+    missing_path = tmp_path / "nonexistent.json"
+
+    eval_quality_triage.main([
+        "--harness-comparison", str(harness_path),
+        "--rag-matrix", str(rag_path),
+        "--agent-real-json", str(missing_path),
+        "--output", str(tmp_path / "triage.md"),
+        "--json-output", str(tmp_path / "triage.json"),
+    ])
+
+    js = json.loads((tmp_path / "triage.json").read_text(encoding="utf-8"))
+    assert js["source_reports"]["agent_real_json"] == str(missing_path)
+
+    md = (tmp_path / "triage.md").read_text(encoding="utf-8")
+    assert "nonexistent.json" in md
+
+
+def test_missing_agent_real_json_is_environment_gap(
+    tmp_path: Path,
+) -> None:
+    harness_path = tmp_path / "comparison.json"
+    harness_path.write_text(json.dumps(_harness_comparison(), ensure_ascii=False))
+    rag_path = tmp_path / "rag_matrix.json"
+    rag_path.write_text(json.dumps(_rag_matrix_skip(), ensure_ascii=False))
+    missing_path = tmp_path / "nonexistent.json"
+
+    eval_quality_triage.main([
+        "--harness-comparison", str(harness_path),
+        "--rag-matrix", str(rag_path),
+        "--agent-real-json", str(missing_path),
+        "--output", str(tmp_path / "triage.md"),
+        "--json-output", str(tmp_path / "triage.json"),
+    ])
+
+    js = json.loads((tmp_path / "triage.json").read_text(encoding="utf-8"))
+    agent_findings = [
+        f for f in js["findings"]
+        if f["area"] == "real_llm_agent_eval"
+    ]
+    assert len(agent_findings) == 1
+    assert agent_findings[0]["category"] == "environment_gap"
+    assert "not present" in agent_findings[0]["summary"]

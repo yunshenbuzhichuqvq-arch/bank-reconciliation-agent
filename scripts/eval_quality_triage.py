@@ -27,6 +27,7 @@ def build_triage_summary(
     harness_comparison: dict[str, Any],
     rag_matrix: dict[str, Any],
     agent_real_report: dict[str, Any] | None = None,
+    agent_real_path: str | None = None,
 ) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
 
@@ -40,7 +41,9 @@ def build_triage_summary(
 
     return {
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "source_reports": _build_source_reports(harness_comparison, rag_matrix, agent_real_report),
+        "source_reports": _build_source_reports(
+            harness_comparison, rag_matrix, agent_real_report, agent_real_path,
+        ),
         "findings": findings,
         "next_stage_recommendations": recommendations,
     }
@@ -425,7 +428,13 @@ def _build_source_reports(
     harness_comparison: dict[str, Any],
     rag_matrix: dict[str, Any],
     agent_real_report: dict[str, Any] | None,
+    agent_real_path: str | None = None,
 ) -> dict[str, str | None]:
+    agent_source: str | None = None
+    if agent_real_report is not None:
+        agent_source = agent_real_report.get("_source_path")
+    elif agent_real_path is not None:
+        agent_source = agent_real_path
     return {
         "harness_comparison": harness_comparison.get(
             "_source_path",
@@ -435,11 +444,7 @@ def _build_source_reports(
             "_source_path",
             "reports/rag_quality_matrix.json",
         ),
-        "agent_real_json": (
-            agent_real_report.get("_source_path")
-            if agent_real_report
-            else None
-        ),
+        "agent_real_json": agent_source,
     }
 
 
@@ -571,6 +576,7 @@ def main(argv: list[str] | None = None) -> None:
         harness_comparison=harness_comparison,
         rag_matrix=rag_matrix,
         agent_real_report=agent_real_report,
+        agent_real_path=str(agent_real_path) if agent_real_path is not None else None,
     )
 
     if args.output:

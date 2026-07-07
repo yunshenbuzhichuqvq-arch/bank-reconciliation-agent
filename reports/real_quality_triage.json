@@ -1,9 +1,9 @@
 {
-  "evaluated_at": "2026-07-07T07:37:58.962890Z",
+  "evaluated_at": "2026-07-07T08:06:58.400813Z",
   "source_reports": {
     "harness_comparison": "reports/eval_harness/comparison.json",
     "rag_matrix": "reports/rag_quality_matrix.json",
-    "agent_real_json": null
+    "agent_real_json": "reports/agent_eval_deepseek_flash_metrics.json"
   },
   "findings": [
     {

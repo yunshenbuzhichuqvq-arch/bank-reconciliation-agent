@@ -9,9 +9,26 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from bank_reconciliation_agent.core.config import settings
-from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever, rule_retriever
 from bank_reconciliation_agent.rag.scoring import representative_score
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
+
+_retriever_classes: tuple[Any, Any] | None = None
+
+
+def _get_retriever_classes() -> tuple[Any, Any]:
+    global _retriever_classes
+    if _retriever_classes is None:
+        from bank_reconciliation_agent.rag.retriever import ChromaRuleStore as _C
+        from bank_reconciliation_agent.rag.retriever import RuleRetriever as _R
+
+        _retriever_classes = (_R, _C)
+    return _retriever_classes
+
+
+def _get_rule_retriever() -> Any:
+    from bank_reconciliation_agent.rag.retriever import rule_retriever as _r
+
+    return _r
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -158,11 +175,13 @@ def request_for_eval_mode(
 def evaluate_eval_set(
     cases: list[EvalCase],
     *,
-    retriever: RuleRetriever | Any = rule_retriever,
+    retriever: Any = None,
     top_k: int = 5,
     embedding_backend: str = "hash",
     mode: RagEvalMode = "dense",
 ) -> dict[str, Any]:
+    if retriever is None:
+        retriever = _get_rule_retriever()
     results = [
         _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0, mode=mode)
         for case in cases
@@ -188,7 +207,7 @@ def evaluate_eval_set(
 def evaluate_mode_comparison(
     cases: list[EvalCase],
     *,
-    retriever: RuleRetriever | Any | None = None,
+    retriever: Any | None = None,
     modes: list[RagEvalMode] | None = None,
     top_k: int = 5,
     embedding_backend: str = "hash",
@@ -196,7 +215,7 @@ def evaluate_mode_comparison(
     if modes is None:
         modes = ["dense", "hybrid", "hybrid_rerank"]
     if retriever is None:
-        retriever = rule_retriever
+        retriever = _get_rule_retriever()
 
     mode_reports: dict[str, dict[str, Any]] = {}
     for m in modes:
@@ -267,12 +286,14 @@ def evaluate_backend_mode_matrix(
     modes: list[RagEvalMode] | None = None,
     top_k: int = 5,
     real_backend_policy: RealBackendPolicy = "skip",
-    retriever_factory: Callable[[str], RuleRetriever | Any] | None = None,
+    retriever_factory: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     if requested_backends is None:
         requested_backends = ["hash", "bge_small", "bge_m3"]
     if modes is None:
         modes = ["dense", "hybrid", "hybrid_rerank"]
+
+    _R, _S = _get_retriever_classes()
 
     rows: dict[str, dict[str, Any]] = {}
     for backend in requested_backends:
@@ -288,7 +309,7 @@ def evaluate_backend_mode_matrix(
         retriever: Any = (
             retriever_factory(backend)
             if retriever_factory is not None
-            else RuleRetriever(store=ChromaRuleStore(embedding_backend=backend))
+            else _R(store=_S(embedding_backend=backend))
         )
 
         effective_backend: str = getattr(retriever.store, "embedding_backend", backend)
@@ -363,17 +384,19 @@ def _build_miss_buckets(
     rows: dict[str, dict[str, Any]],
     best_real_backend: str,
     top_k: int,
-    retriever_factory: Callable[[str], RuleRetriever | Any] | None,
+    retriever_factory: Callable[[str], Any] | None,
     modes: list[RagEvalMode],
 ) -> list[dict[str, Any]]:
     row = rows[best_real_backend]
     selected_mode: str = row["selected_mode"]
     effective_backend: str = row["effective_backend"]
 
+    _R, _S = _get_retriever_classes()
+
     retriever: Any = (
         retriever_factory(effective_backend)
         if retriever_factory is not None
-        else RuleRetriever(store=ChromaRuleStore(embedding_backend=effective_backend))
+        else _R(store=_S(embedding_backend=effective_backend))
     )
 
     report = evaluate_eval_set(
@@ -637,16 +660,17 @@ def main(argv: list[str] | None = None) -> None:
         _print_legacy_report(dense_summary, hybrid_summary)
         return
 
-    retriever = (
-        rule_retriever
-        if args.chroma is None and args.embedding_backend == settings.embedding_backend
-        else RuleRetriever(
-            store=ChromaRuleStore(
+    retriever: Any
+    if args.chroma is None and args.embedding_backend == settings.embedding_backend:
+        retriever = _get_rule_retriever()
+    else:
+        _R, _S = _get_retriever_classes()
+        retriever = _R(
+            store=_S(
                 chroma_path=args.chroma,
                 embedding_backend=args.embedding_backend,
             )
         )
-    )
 
     if args.compare_modes is not None:
         modes: list[RagEvalMode] = [
@@ -883,7 +907,7 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
 def _evaluate_case(
     case: EvalCase,
     *,
-    retriever: RuleRetriever | Any,
+    retriever: Any,
     top_k: int,
     min_score: float,
     mode: RagEvalMode = "dense",
@@ -976,8 +1000,9 @@ def evaluate_cases(
     mode: str,
     embedding_backend: str | None = None,
 ) -> LegacyEvalSummary:
-    retriever = RuleRetriever(
-        store=ChromaRuleStore(
+    _R, _S = _get_retriever_classes()
+    retriever = _R(
+        store=_S(
             chunks_path=chunks_path,
             chroma_path=chroma_path,
             embedding_backend=embedding_backend,
@@ -997,7 +1022,7 @@ def evaluate_cases(
 
 
 def _evaluate_smoke_case(
-    retriever: RuleRetriever,
+    retriever: Any,
     case: SmokeCase,
     *,
     mode: str,

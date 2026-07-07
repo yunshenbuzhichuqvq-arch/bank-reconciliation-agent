@@ -299,3 +299,48 @@ def test_matrix_cli_writes_reports(tmp_path: Path) -> None:
     md = matrix_report_path.read_text(encoding="utf-8")
     assert "# RAG Quality Matrix Report" in md
     assert "| Backend | Eff Backend | Status |" in md
+
+
+def test_matrix_skip_policy_produces_no_real_embedding_fallback_warning(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.eval_rag",
+            "--top-k",
+            "5",
+            "--matrix-backends",
+            "hash,bge_small,bge_m3",
+            "--matrix-modes",
+            "dense,hybrid,hybrid_rerank",
+            "--real-backend-policy",
+            "skip",
+            "--matrix-report",
+            str(tmp_path / "rag_quality_matrix.md"),
+            "--matrix-json",
+            str(tmp_path / "rag_quality_matrix.json"),
+            "--chroma",
+            str(tmp_path / "chroma"),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+    stderr_lower = result.stderr.lower()
+    assert "fallback" not in stderr_lower, (
+        f"stderr should not contain 'fallback': {result.stderr}"
+    )
+    assert "bge_m3" not in stderr_lower and "bge_small" not in stderr_lower, (
+        f"stderr should not reference real embedding backends: {result.stderr}"
+    )
+
+    data = json.loads((tmp_path / "rag_quality_matrix.json").read_text(encoding="utf-8"))
+    assert data["rows"]["hash"]["status"] == "measured"
+    assert data["rows"]["bge_small"]["status"] == "not_run"
+    assert data["rows"]["bge_m3"]["status"] == "not_run"
