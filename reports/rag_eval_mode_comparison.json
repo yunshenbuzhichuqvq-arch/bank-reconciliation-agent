@@ -1,0 +1,47 @@
+{
+  "embedding_backend": "hash",
+  "top_k": 5,
+  "case_count": 120,
+  "evaluated_at": "2026-07-07T02:46:39.545377Z",
+  "baseline_mode": "dense",
+  "selected_mode": "hybrid_rerank",
+  "selection_reason": "Highest NDCG@5 among eligible modes with no negative ranking deltas",
+  "modes": {
+    "dense": {
+      "global_metrics": {
+        "hit_at_1": 0.16666666666666666,
+        "recall_at_5": 0.3875,
+        "mrr": 0.275,
+        "ndcg_at_5": 0.28242136175356597
+      }
+    },
+    "hybrid": {
+      "global_metrics": {
+        "hit_at_1": 0.30833333333333335,
+        "recall_at_5": 0.5625,
+        "mrr": 0.45152777777777775,
+        "ndcg_at_5": 0.4447569570496155
+      }
+    },
+    "hybrid_rerank": {
+      "global_metrics": {
+        "hit_at_1": 0.43333333333333335,
+        "recall_at_5": 0.6583333333333333,
+        "mrr": 0.5681944444444444,
+        "ndcg_at_5": 0.5528158133454631
+      }
+    }
+  },
+  "deltas_vs_dense": {
+    "hybrid": {
+      "hit_at_1": 0.1416666666666667,
+      "mrr": 0.17652777777777773,
+      "ndcg_at_5": 0.16233559529604952
+    },
+    "hybrid_rerank": {
+      "hit_at_1": 0.2666666666666667,
+      "mrr": 0.2931944444444444,
+      "ndcg_at_5": 0.2703944515918972
+    }
+  }
+}

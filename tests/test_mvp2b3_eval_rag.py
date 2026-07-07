@@ -397,3 +397,263 @@ def test_evalcase_input_format_unchanged() -> None:
     assert case.error_type == "AMOUNT_MISMATCH"
     assert case.query == "test query"
     assert case.expected_chunk_ids == ["chunk-1"]
+
+
+# ---------------------------------------------------------------------------
+# TASK-EO.1: RAG mode flags and mode comparison tests
+# ---------------------------------------------------------------------------
+
+
+def test_request_for_eval_mode_dense_disables_hybrid_and_reranker() -> None:
+    case = eval_rag.EvalCase(
+        id="case-1",
+        scenario_type="BANK_ENTERPRISE",
+        error_type="AMOUNT_MISMATCH",
+        query="q1",
+        expected_chunk_ids=["c1"],
+    )
+    request = eval_rag.request_for_eval_mode(case, mode="dense", top_k=5)
+    assert request.enable_hybrid is False
+    assert request.enable_reranker is False
+    assert request.query == "q1"
+    assert request.scenario_type == "BANK_ENTERPRISE"
+    assert request.top_k == 5
+
+
+def test_request_for_eval_mode_hybrid_enables_hybrid_only() -> None:
+    case = eval_rag.EvalCase(
+        id="case-1",
+        scenario_type="BANK_CLEARING",
+        error_type="AMOUNT_MISMATCH",
+        query="q1",
+        expected_chunk_ids=["c1"],
+    )
+    request = eval_rag.request_for_eval_mode(case, mode="hybrid", top_k=3)
+    assert request.enable_hybrid is True
+    assert request.enable_reranker is False
+    assert request.scenario_type == "BANK_CLEARING"
+
+
+def test_request_for_eval_mode_hybrid_rerank_enables_both() -> None:
+    case = eval_rag.EvalCase(
+        id="case-1",
+        scenario_type="BANK_ENTERPRISE",
+        error_type="SINGLE_SIDE_MISSING",
+        query="q1",
+        expected_chunk_ids=["c1"],
+    )
+    request = eval_rag.request_for_eval_mode(case, mode="hybrid_rerank", top_k=5)
+    assert request.enable_hybrid is True
+    assert request.enable_reranker is True
+
+
+def test_evaluate_eval_set_dense_mode_disables_hybrid_flags() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="d-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+        eval_rag.EvalCase(
+            id="d-2",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q2",
+            expected_chunk_ids=["c2"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"], "q2": ["c2"]})
+    eval_rag.evaluate_eval_set(cases, retriever=retriever, mode="dense")
+    assert [r.enable_hybrid for r in retriever.requests] == [False, False]
+    assert [r.enable_reranker for r in retriever.requests] == [False, False]
+
+
+def test_evaluate_eval_set_hybrid_mode_enables_hybrid_only() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="h-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})
+    eval_rag.evaluate_eval_set(cases, retriever=retriever, mode="hybrid")
+    assert [r.enable_hybrid for r in retriever.requests] == [True]
+    assert [r.enable_reranker for r in retriever.requests] == [False]
+
+
+def test_evaluate_eval_set_hybrid_rerank_mode_enables_both() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="hr-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})
+    eval_rag.evaluate_eval_set(cases, retriever=retriever, mode="hybrid_rerank")
+    assert [r.enable_hybrid for r in retriever.requests] == [True]
+    assert [r.enable_reranker for r in retriever.requests] == [True]
+
+
+def test_evaluate_mode_comparison_includes_all_modes_and_deltas() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="cmp-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"]})
+    report = eval_rag.evaluate_mode_comparison(
+        cases,
+        retriever=retriever,
+        modes=["dense", "hybrid", "hybrid_rerank"],
+        top_k=5,
+        embedding_backend="hash",
+    )
+    assert report["baseline_mode"] == "dense"
+    assert "selected_mode" in report
+    assert "selection_reason" in report
+    assert set(report["modes"]) == {"dense", "hybrid", "hybrid_rerank"}
+    for mode in ["dense", "hybrid", "hybrid_rerank"]:
+        assert "global_metrics" in report["modes"][mode]
+        gm = report["modes"][mode]["global_metrics"]
+        assert "hit_at_1" in gm
+        assert "mrr" in gm
+        assert "ndcg_at_5" in gm
+    assert set(report["deltas_vs_dense"]) == {"hybrid", "hybrid_rerank"}
+    for mode in ["hybrid", "hybrid_rerank"]:
+        for key in ["hit_at_1", "mrr", "ndcg_at_5"]:
+            assert key in report["deltas_vs_dense"][mode]
+
+
+def test_mode_comparison_no_improvement_keeps_dense() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="ni-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+        eval_rag.EvalCase(
+            id="ni-2",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="SINGLE_SIDE_MISSING",
+            query="q2",
+            expected_chunk_ids=["c2"],
+        ),
+    ]
+    retriever = StubRetriever({"q1": ["c1"], "q2": ["x"]})
+    report = eval_rag.evaluate_mode_comparison(
+        cases,
+        retriever=retriever,
+        modes=["dense", "hybrid", "hybrid_rerank"],
+        top_k=5,
+        embedding_backend="hash",
+    )
+    assert report["selected_mode"] == "dense"
+    assert "improve" in report["selection_reason"].lower() or "no" in report["selection_reason"].lower()
+
+
+def test_mode_comparison_selects_better_mode() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="best-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+        eval_rag.EvalCase(
+            id="best-2",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q2",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+    # dense: q1=["x"] (0 hits), q2=["c1"] (1 hit) → hit@1=0.5, mrr=0.5, ndcg>0
+    # hybrid: q1=["c1"] (1 hit), q2=["c1"] (1 hit) → hit@1=1.0, mrr=1.0, ndcg=1.0
+    class ModeAwareRetriever:
+        def __init__(self) -> None:
+            self.requests: list = []
+
+        def search(self, request):
+            self.requests.append(request)
+            if request.enable_hybrid and not request.enable_reranker:
+                ids = ["c1", "c1"]
+            elif request.enable_hybrid and request.enable_reranker:
+                ids = ["x", "c1"]
+            else:
+                ids = ["x", "c1"]
+            q_idx = 0 if request.query == "q1" else 1
+            return RagSearchResponse(items=[_item(ids[q_idx])])
+
+    retriever = ModeAwareRetriever()
+    report = eval_rag.evaluate_mode_comparison(
+        cases,
+        retriever=retriever,
+        modes=["dense", "hybrid", "hybrid_rerank"],
+        top_k=5,
+        embedding_backend="hash",
+    )
+    assert report["selected_mode"] == "hybrid"
+    deltas = report["deltas_vs_dense"]["hybrid"]
+    assert deltas["hit_at_1"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TASK-EO.4: Stricter RAG selection tests
+# ---------------------------------------------------------------------------
+
+
+def test_mode_with_negative_delta_is_rejected() -> None:
+    """A mode with positive delta but any negative ranking metric is NOT eligible."""
+    modes = ["dense", "hybrid"]
+    deltas = {
+        "hybrid": {"hit_at_1": 0.1, "mrr": -0.05, "ndcg_at_5": 0.0},
+    }
+    mode_reports = {
+        "dense": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+        "hybrid": {"global_metrics": {"hit_at_1": 0.6, "mrr": 0.45, "ndcg_at_5": 0.5}},
+    }
+    selected, _ = eval_rag._select_best_mode(modes, deltas, mode_reports)
+    assert selected == "dense"
+
+
+def test_mode_with_all_non_negative_deltas_remains_eligible() -> None:
+    modes = ["dense", "hybrid"]
+    deltas = {
+        "hybrid": {"hit_at_1": 0.0, "mrr": 0.1, "ndcg_at_5": 0.15},
+    }
+    mode_reports = {
+        "dense": {"global_metrics": {"hit_at_1": 0.2, "mrr": 0.2, "ndcg_at_5": 0.2}},
+        "hybrid": {"global_metrics": {"hit_at_1": 0.2, "mrr": 0.3, "ndcg_at_5": 0.35}},
+    }
+    selected, _ = eval_rag._select_best_mode(modes, deltas, mode_reports)
+    assert selected == "hybrid"
+
+
+def test_mode_with_zero_only_deltas_keeps_dense() -> None:
+    modes = ["dense", "hybrid", "hybrid_rerank"]
+    deltas = {
+        "hybrid": {"hit_at_1": 0.0, "mrr": 0.0, "ndcg_at_5": 0.0},
+        "hybrid_rerank": {"hit_at_1": 0.0, "mrr": 0.0, "ndcg_at_5": 0.0},
+    }
+    mode_reports = {
+        "dense": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+        "hybrid": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+        "hybrid_rerank": {"global_metrics": {"hit_at_1": 0.5, "mrr": 0.5, "ndcg_at_5": 0.5}},
+    }
+    selected, _ = eval_rag._select_best_mode(modes, deltas, mode_reports)
+    assert selected == "dense"

@@ -1,7 +1,7 @@
 {
   "agent_schema_pass_rate": 1.0,
   "agent_decision_accuracy": 1.0,
-  "agent_risk_accuracy": 0.8333333333333334,
+  "agent_risk_accuracy": 1.0,
   "agent_evidence_citation_rate": 1.0,
   "agent_no_evidence_to_human_rate": 1.0,
   "agent_hard_constraint_violation_rate": 0.0,
@@ -17,5 +17,5 @@
   "model_requested": "none",
   "model_effective": "none",
   "real_provider_call": false,
-  "evaluated_at": "2026-07-06T13:14:57.246914Z"
+  "evaluated_at": "2026-07-07T02:48:15.693814Z"
 }

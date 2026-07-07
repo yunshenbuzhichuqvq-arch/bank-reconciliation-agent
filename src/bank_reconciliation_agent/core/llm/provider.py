@@ -137,6 +137,16 @@ class FakeLLMProvider:
         }
 
     def _audit_payload(self, content: str) -> dict[str, object]:
+        if "be-r008" in content or "duplicate_booking" in content:
+            return {
+                "agent": "audit",
+                "decision": "PENDING_HUMAN",
+                "risk_level": "HIGH",
+                "reason": "疑似重复记账，高风险事项需挂账核实。",
+                "ai_suggestion": "FORCE_HOLD",
+                "evidence": ["fake-rag-evidence"],
+                "confidence": 0.88,
+            }
         reason = "Fake provider 返回固定审计结论，用于离线确定性测试"
         if '"related_flow_ids": []' in content:
             reason = "疑似跨日切，当前待 T+1 补齐后复核，建议先转人工跟进。"
