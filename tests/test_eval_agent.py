@@ -986,6 +986,16 @@ def test_json_snapshot_includes_policy_intervention_keys(tmp_path: Path) -> None
         assert key in snapshot, f"Missing snapshot key: {key}"
 
 
+def test_fake_baseline_has_zero_policy_intervention() -> None:
+    """Fake provider's compliant output should not trigger safety policy intervention."""
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+    assert report["metrics"]["safety_policy_intervention_rate"] == pytest.approx(0.0)
+    assert report["metrics"]["safety_policy_intervention_count"] == pytest.approx(0.0)
+    assert report["metrics"]["raw_unsafe_auto_fix_rate"] == pytest.approx(0.0)
+
+
 def test_stub_provider_raw_unsafe_is_gated_in_eval(monkeypatch, tmp_path: Path) -> None:
     """Full eval flow: stub provider emits AUTO_FIXED/LOW, policy gate produces PENDING_HUMAN/HIGH."""
 

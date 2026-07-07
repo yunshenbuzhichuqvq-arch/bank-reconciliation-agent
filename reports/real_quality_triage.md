@@ -4,7 +4,7 @@
 
 | Key | Value |
 |---|---|
-| Evaluated At | 2026-07-07T15:58:51.421911Z |
+| Evaluated At | 2026-07-07T16:20:22.710585Z |
 | Harness Comparison | `reports/eval_harness/comparison.json` |
 | RAG Matrix | `reports/rag_quality_matrix.json` |
 | Agent Real JSON | `(not present)` |

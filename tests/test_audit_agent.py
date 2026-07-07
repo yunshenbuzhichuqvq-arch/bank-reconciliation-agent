@@ -456,12 +456,14 @@ def test_safety_policy_rewrites_duplicate_booking_auto_fixed_to_pending_human() 
     assert decision.decision == "PENDING_HUMAN"
     assert decision.next_action == "PENDING_HUMAN"
     assert decision.risk_level == "HIGH"
+    assert decision.ai_suggestion == "PENDING_HUMAN"
     assert decision.safety_policy_applied is True
     assert decision.raw_decision == "AUTO_FIXED"
     assert decision.raw_risk_level == "LOW"
     assert decision.safety_policy_reason is not None
     assert "BE-R008" in decision.safety_policy_reason
     assert "AUTO_FIXED" in decision.safety_policy_reason
+    assert "[安全策略介入]" in decision.reason
     assert decision.evidence == _evidence()
     assert decision.confidence == 0.92
     assert decision.fallback_applied is False
@@ -541,3 +543,81 @@ def test_safety_policy_does_not_override_already_compliant_decision() -> None:
     assert decision.risk_level == "MEDIUM"
     assert decision.safety_policy_applied is False
     assert decision.raw_decision is None
+
+
+class CompliantHighRiskProvider:
+    """Provider that returns already-compliant PENDING_HUMAN/HIGH for BE-R008."""
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        return LLMResult(
+            text=(
+                '{"decision":"PENDING_HUMAN","risk_level":"HIGH","reason":"疑似重复记账需人工复核",'
+                '"ai_suggestion":"FORCE_HOLD","evidence":["rule"],"confidence":0.85}'
+            ),
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="compliant-high-risk",
+        )
+
+
+def test_safety_policy_does_not_mark_compliant_as_intervention() -> None:
+    decision = AuditAgent(provider=CompliantHighRiskProvider()).decide_with_llm(
+        flow_id="F-SAFETY-006",
+        error_type="DUPLICATE_BOOKING",
+        exception_branch="BE-R008",
+        bank_amount="100.00",
+        clear_amount="100.00",
+        amount_diff="0.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.risk_level == "HIGH"
+    assert decision.next_action == "PENDING_HUMAN"
+    assert decision.ai_suggestion == "FORCE_HOLD"
+    assert decision.safety_policy_applied is False
+    assert decision.raw_decision is None
+    assert decision.raw_risk_level is None
+    assert decision.safety_policy_reason is None
+
+
+def test_safety_policy_cleans_ai_suggestion_on_override() -> None:
+    decision = AuditAgent(provider=UnsafeHighRiskProvider()).decide_with_llm(
+        flow_id="F-SAFETY-007",
+        error_type="DUPLICATE_BOOKING",
+        exception_branch="BE-R008",
+        bank_amount="100.00",
+        clear_amount="100.00",
+        amount_diff="0.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.ai_suggestion == "PENDING_HUMAN"
+    assert decision.safety_policy_applied is True
+    assert "APPROVED_MATCH" not in decision.ai_suggestion
+    assert "安全策略介入" in decision.reason
+    assert decision.reason != "金额一致可自动平账"
+
+
+def test_safety_policy_overrides_reason_on_intervention() -> None:
+    decision = AuditAgent(provider=UnsafeHighRiskProvider()).decide_with_llm(
+        flow_id="F-SAFETY-008",
+        error_type="DUPLICATE_BOOKING",
+        exception_branch="BE-R008",
+        bank_amount="100.00",
+        clear_amount="100.00",
+        amount_diff="0.00",
+        evidence=_evidence(),
+    )
+
+    assert "[安全策略介入]" in decision.reason
+    assert "BE-R008" in decision.reason
+    assert "AUTO_FIXED" in decision.reason
+    assert "金额一致可自动平账" in decision.reason

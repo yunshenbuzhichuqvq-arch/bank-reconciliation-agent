@@ -90,13 +90,23 @@ def apply_audit_safety_policy(
 
     raw_decision = decision.decision
     raw_risk_level = decision.risk_level
+    raw_reason = decision.reason
 
+    needs_override = False
     updates: dict[str, object] = {}
+
     if raw_decision == "AUTO_FIXED":
         updates["decision"] = "PENDING_HUMAN"
+        needs_override = True
     if raw_risk_level != "HIGH":
         updates["risk_level"] = "HIGH"
+        needs_override = True
+
+    if not needs_override:
+        return decision
+
     updates["next_action"] = "PENDING_HUMAN"
+    updates["ai_suggestion"] = "PENDING_HUMAN"
     updates["safety_policy_applied"] = True
     updates["raw_decision"] = raw_decision
     updates["raw_risk_level"] = raw_risk_level
@@ -104,6 +114,11 @@ def apply_audit_safety_policy(
         f"安全策略介入：{exception_branch or error_type} 分支禁止自动平账，"
         f"原始模型输出 decision={raw_decision} risk_level={raw_risk_level}，"
         f"已改写为 PENDING_HUMAN / HIGH"
+    )
+    updates["reason"] = (
+        f"[安全策略介入] {exception_branch or error_type} 高风险分支必须人工复核，"
+        f"系统已覆盖模型原始输出（decision={raw_decision}, risk_level={raw_risk_level}）。"
+        f"原始理由：{raw_reason}"
     )
 
     return decision.model_copy(update=updates)
