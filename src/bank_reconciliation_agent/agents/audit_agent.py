@@ -55,6 +55,10 @@ class AuditDecision(BaseModel):
     fallback_applied: bool = False
     fallback_level: int = 0
     next_action: str = "PENDING_HUMAN"
+    safety_policy_applied: bool = False
+    raw_decision: str | None = None
+    raw_risk_level: str | None = None
+    safety_policy_reason: str | None = None
 
     @model_validator(mode="after")
     def _c2_evidence_required_unless_human(self) -> "AuditDecision":
@@ -70,6 +74,39 @@ class LLMAuditDecision(BaseModel):
     ai_suggestion: str
     evidence: list[str]
     confidence: float = Field(ge=0.0, le=1.0)
+
+
+def apply_audit_safety_policy(
+    decision: AuditDecision,
+    *,
+    task: str,
+    error_type: str,
+    exception_branch: str | None,
+) -> AuditDecision:
+    if task != "audit":
+        return decision
+    if exception_branch != "BE-R008" and error_type != "DUPLICATE_BOOKING":
+        return decision
+
+    raw_decision = decision.decision
+    raw_risk_level = decision.risk_level
+
+    updates: dict[str, object] = {}
+    if raw_decision == "AUTO_FIXED":
+        updates["decision"] = "PENDING_HUMAN"
+    if raw_risk_level != "HIGH":
+        updates["risk_level"] = "HIGH"
+    updates["next_action"] = "PENDING_HUMAN"
+    updates["safety_policy_applied"] = True
+    updates["raw_decision"] = raw_decision
+    updates["raw_risk_level"] = raw_risk_level
+    updates["safety_policy_reason"] = (
+        f"安全策略介入：{exception_branch or error_type} 分支禁止自动平账，"
+        f"原始模型输出 decision={raw_decision} risk_level={raw_risk_level}，"
+        f"已改写为 PENDING_HUMAN / HIGH"
+    )
+
+    return decision.model_copy(update=updates)
 
 
 class AuditAgent:
@@ -206,7 +243,8 @@ class AuditAgent:
             result = self.provider.complete(messages, temperature=0.0, response_format="json_object")
             self.last_llm_result = result
             llm_decision = LLMAuditDecision.model_validate(json.loads(result.text))
-            return AuditDecision(
+            task = user_payload.get("task", "audit")
+            decision = AuditDecision(
                 flow_id=flow_id,
                 decision=llm_decision.decision,
                 risk_level=llm_decision.risk_level,
@@ -217,6 +255,12 @@ class AuditAgent:
                 fallback_applied=False,
                 fallback_level=0,
                 next_action=llm_decision.decision,
+            )
+            return apply_audit_safety_policy(
+                decision,
+                task=str(task),
+                error_type=error_type,
+                exception_branch=exception_branch,
             )
         except LLMUnavailable:
             log.warning(

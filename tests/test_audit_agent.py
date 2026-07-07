@@ -120,6 +120,11 @@ def test_audit_agent_llm_path_returns_extended_decision_with_fake_provider() -> 
     assert decision.evidence == _evidence()
 
 
+def test_audit_agent_default_prompt_version_is_v3() -> None:
+    agent = AuditAgent(provider=FakeLLMProvider())
+    assert agent.prompt_version == "v3"
+
+
 def test_audit_agent_llm_unavailable_falls_back_to_deterministic_pending_human() -> None:
     decision = AuditAgent(provider=UnavailableProvider()).decide_with_llm(
         flow_id="F1008",
@@ -413,3 +418,126 @@ class RecordingProvider:
 
         assert self.messages is not None
         return json.loads(self.messages[-1]["content"])
+
+
+class UnsafeHighRiskProvider:
+    """Provider that returns unsafe AUTO_FIXED/LOW for DUPLICATE_BOOKING."""
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        return LLMResult(
+            text=(
+                '{"decision":"AUTO_FIXED","risk_level":"LOW","reason":"金额一致可自动平账",'
+                '"ai_suggestion":"APPROVED_MATCH","evidence":["rule"],"confidence":0.92}'
+            ),
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="unsafe-high-risk",
+        )
+
+
+def test_safety_policy_rewrites_duplicate_booking_auto_fixed_to_pending_human() -> None:
+    decision = AuditAgent(provider=UnsafeHighRiskProvider()).decide_with_llm(
+        flow_id="F-SAFETY-001",
+        error_type="DUPLICATE_BOOKING",
+        exception_branch="BE-R008",
+        bank_amount="100.00",
+        clear_amount="100.00",
+        amount_diff="0.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.flow_id == "F-SAFETY-001"
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.next_action == "PENDING_HUMAN"
+    assert decision.risk_level == "HIGH"
+    assert decision.safety_policy_applied is True
+    assert decision.raw_decision == "AUTO_FIXED"
+    assert decision.raw_risk_level == "LOW"
+    assert decision.safety_policy_reason is not None
+    assert "BE-R008" in decision.safety_policy_reason
+    assert "AUTO_FIXED" in decision.safety_policy_reason
+    assert decision.evidence == _evidence()
+    assert decision.confidence == 0.92
+    assert decision.fallback_applied is False
+
+
+def test_safety_policy_rewrites_duplicate_booking_by_error_type_only() -> None:
+    decision = AuditAgent(provider=UnsafeHighRiskProvider()).decide_with_llm(
+        flow_id="F-SAFETY-002",
+        error_type="DUPLICATE_BOOKING",
+        exception_branch=None,
+        bank_amount="100.00",
+        clear_amount="100.00",
+        amount_diff="0.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.risk_level == "HIGH"
+    assert decision.safety_policy_applied is True
+    assert decision.raw_decision == "AUTO_FIXED"
+    assert decision.raw_risk_level == "LOW"
+
+
+def test_safety_policy_does_not_apply_to_confirm_match_task() -> None:
+    decision = AuditAgent(provider=UnsafeHighRiskProvider()).decide_with_llm(
+        flow_id="F-SAFETY-003",
+        error_type="FUZZY_MATCH_CANDIDATE",
+        exception_branch="BE-R007",
+        bank_amount="100.00",
+        clear_amount=None,
+        amount_diff=None,
+        evidence=_evidence(),
+        match_candidate_context={
+            "flow_id": "CLEAR-009",
+            "amount": "100.00",
+            "trade_date": "2026-06-22",
+            "counterparty": "示例公司",
+        },
+    )
+
+    assert decision.decision == "AUTO_FIXED"
+    assert decision.safety_policy_applied is False
+
+
+def test_safety_policy_preserves_no_evidence_short_circuit() -> None:
+    decision = AuditAgent(provider=UnsafeHighRiskProvider()).decide_with_llm(
+        flow_id="F-SAFETY-004",
+        error_type="DUPLICATE_BOOKING",
+        exception_branch="BE-R008",
+        bank_amount="100.00",
+        clear_amount="100.00",
+        amount_diff="0.00",
+        evidence=[],
+    )
+
+    assert decision.flow_id == "F-SAFETY-004"
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.risk_level == "HIGH"
+    assert decision.evidence == []
+    assert decision.safety_policy_applied is False
+    assert decision.fallback_applied is False
+
+
+def test_safety_policy_does_not_override_already_compliant_decision() -> None:
+    provider = RecordingProvider()
+    decision = AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F-SAFETY-005",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.risk_level == "MEDIUM"
+    assert decision.safety_policy_applied is False
+    assert decision.raw_decision is None
