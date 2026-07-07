@@ -1009,3 +1009,111 @@ class TestDeepSeekBlockingSafetyGap:
 
         assert "unsafe_auto_fix_rate" in md.lower()
         assert "BLOCKING" in md
+
+
+# ---------------------------------------------------------------------------
+# TASK-18.3: Raw/effective safety policy boundary tests
+# ---------------------------------------------------------------------------
+
+
+def _policy_gated_deepseek_report() -> dict:
+    """Trusted DeepSeek: effective safe but raw was unsafe (policy gate intervened)."""
+    return {
+        "provider_effective": "deepseek",
+        "real_provider_call": True,
+        "agent_unsafe_auto_fix_rate": 0.0,
+        "agent_hard_constraint_violation_rate": 0.0,
+        "agent_safety_policy_intervention_rate": 0.167,
+        "agent_raw_unsafe_auto_fix_rate": 0.167,
+        "agent_risk_accuracy": 1.0,
+        "agent_decision_accuracy": 1.0,
+        "agent_case_count": 6,
+        "gates": {
+            "unsafe_auto_fix_pass": True,
+            "hard_constraint_violation_pass": True,
+        },
+    }
+
+
+def _raw_unsafe_deepseek_report() -> dict:
+    """Trusted DeepSeek: raw unsafe rate non-zero, effective may differ."""
+    return {
+        "provider_effective": "deepseek",
+        "real_provider_call": True,
+        "agent_unsafe_auto_fix_rate": 0.167,
+        "agent_hard_constraint_violation_rate": 0.0,
+        "agent_safety_policy_intervention_rate": 0.0,
+        "agent_raw_unsafe_auto_fix_rate": 0.167,
+        "agent_risk_accuracy": 0.83,
+        "agent_decision_accuracy": 0.83,
+        "agent_case_count": 6,
+        "gates": {
+            "unsafe_auto_fix_pass": False,
+            "hard_constraint_violation_pass": True,
+        },
+    }
+
+
+class TestRawEffectiveBoundary:
+    def test_policy_gated_pass_does_not_claim_raw_deepseek_safe(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_policy_gated_deepseek_report(),
+            performance_cost_report=None,
+        )
+
+        agent_eval_findings = [
+            f for f in summary["findings"]
+            if f["area"] == "real_llm_agent_eval"
+        ]
+        assert len(agent_eval_findings) == 1
+        assert agent_eval_findings[0]["category"] == "measured_pass"
+
+        boundaries = summary["claim_boundary"]
+        assert any("policy" in b.lower() for b in boundaries)
+        assert any("not safe" in b.lower() for b in boundaries)
+
+    def test_raw_unsafe_has_provider_caveat(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_raw_unsafe_deepseek_report(),
+            performance_cost_report=None,
+        )
+
+        safety_findings = [
+            f for f in summary["findings"]
+            if f["area"] == "real_llm_agent_safety"
+        ]
+        assert len(safety_findings) >= 1
+        assert safety_findings[0]["category"] == "measured_gap"
+
+    def test_policy_intervention_preserved_in_agent_facts(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_policy_gated_deepseek_report(),
+            performance_cost_report=None,
+        )
+
+        agent_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "agent"]
+        assert len(agent_facts) >= 1
+        assert agent_facts[0].get("blocking") is False
+        assert "policy" in agent_facts[0]["fact"].lower()
+
+    def test_missing_deepseek_is_environment_gap(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=None,
+        )
+
+        agent_findings = [
+            f for f in summary["findings"]
+            if f["area"] == "real_llm_agent_eval"
+        ]
+        assert len(agent_findings) == 1
+        assert agent_findings[0]["category"] == "environment_gap"
+        assert "not present" in agent_findings[0]["summary"]

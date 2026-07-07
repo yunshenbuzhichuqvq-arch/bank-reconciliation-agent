@@ -232,6 +232,8 @@ def _add_agent_real_findings(
     unsafe = agent_real_report.get("agent_unsafe_auto_fix_rate", 0.0)
     hard = agent_real_report.get("agent_hard_constraint_violation_rate", 0.0)
     gates = agent_real_report.get("gates", {})
+    policy_rate = agent_real_report.get("agent_safety_policy_intervention_rate", 0.0)
+    raw_unsafe = agent_real_report.get("agent_raw_unsafe_auto_fix_rate", 0.0)
 
     if unsafe > 0 or hard > 0:
         findings.append({
@@ -264,6 +266,36 @@ def _add_agent_real_findings(
                 "hard_constraint_violation_rate": hard,
                 "gates": gates,
                 "trusted": True,
+            },
+        })
+
+    if policy_rate > 0:
+        findings.append({
+            "category": "measured_pass",
+            "area": "real_llm_agent_safety_policy",
+            "summary": (
+                f"Safety policy gate intervened on {policy_rate:.3f} of cases; "
+                f"raw unsafe auto-fix rate was {raw_unsafe:.3f}. "
+                "Effective system is safe, but raw provider output was not."
+            ),
+            "evidence": {
+                "safety_policy_intervention_rate": policy_rate,
+                "raw_unsafe_auto_fix_rate": raw_unsafe,
+                "effective_unsafe_auto_fix_rate": unsafe,
+            },
+        })
+
+    if raw_unsafe > 0 and policy_rate == 0:
+        findings.append({
+            "category": "measured_gap",
+            "area": "real_llm_agent_raw_caveat",
+            "summary": (
+                f"Raw provider unsafe auto-fix rate is {raw_unsafe:.3f} with no "
+                "safety policy intervention. Raw provider output contains unsafe decisions."
+            ),
+            "evidence": {
+                "raw_unsafe_auto_fix_rate": raw_unsafe,
+                "safety_policy_intervention_rate": policy_rate,
             },
         })
 
@@ -564,7 +596,15 @@ def _build_resume_safe_facts(
         if provider_eff == "deepseek" and real_call:
             unsafe = agent_real_report.get("agent_unsafe_auto_fix_rate", 0.0)
             hard = agent_real_report.get("agent_hard_constraint_violation_rate", 0.0)
+            policy_rate = agent_real_report.get("agent_safety_policy_intervention_rate", 0.0)
+            raw_unsafe = agent_real_report.get("agent_raw_unsafe_auto_fix_rate", 0.0)
             blocking = unsafe > 0 or hard > 0
+            policy_note = ""
+            if policy_rate > 0:
+                policy_note = (
+                    f"; safety policy intervened on {policy_rate:.3f} of cases "
+                    f"(raw unsafe rate {raw_unsafe:.3f})"
+                )
             facts.append({
                 "area": "agent",
                 "fact": (
@@ -573,6 +613,7 @@ def _build_resume_safe_facts(
                     f"risk_accuracy={agent_real_report.get('agent_risk_accuracy', 0):.3f}, "
                     f"unsafe_auto_fix_rate={unsafe:.3f}, "
                     f"hard_constraint_violation_rate={hard:.3f}"
+                    f"{policy_note}"
                 ),
                 "source_report": "reports/agent_eval_deepseek_flash_metrics.json",
                 "boundary": "offline eval set; real DeepSeek provider",
@@ -674,11 +715,24 @@ def _build_claim_boundary(
         else:
             unsafe = agent_real_report.get("agent_unsafe_auto_fix_rate", 0.0)
             hard = agent_real_report.get("agent_hard_constraint_violation_rate", 0.0)
+            policy_rate = agent_real_report.get("agent_safety_policy_intervention_rate", 0.0)
+            raw_unsafe = agent_real_report.get("agent_raw_unsafe_auto_fix_rate", 0.0)
             if unsafe > 0 or hard > 0:
                 boundary.append(
                     "DeepSeek Agent Eval has blocking safety violations: "
                     f"unsafe_auto_fix_rate={unsafe:.3f}, "
                     f"hard_constraint_violation_rate={hard:.3f}"
+                )
+            elif policy_rate > 0:
+                boundary.append(
+                    "DeepSeek Agent effective safety pass via policy gate: "
+                    f"safety policy intervened on {policy_rate:.3f} of cases "
+                    f"(raw unsafe rate {raw_unsafe:.3f}). "
+                    "Raw DeepSeek output was not safe; effective system blocked unsafe decisions."
+                )
+            else:
+                boundary.append(
+                    "DeepSeek Agent Eval safety gates pass with no policy intervention."
                 )
 
     if performance_cost_report is None:
