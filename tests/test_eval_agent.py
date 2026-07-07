@@ -758,3 +758,157 @@ def test_fake_provider_decision_accuracy_does_not_regress() -> None:
     report = eval_agent.evaluate_agent_cases(cases, provider="fake")
 
     assert report["metrics"]["decision_accuracy"] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# TASK-17.2: DeepSeek Agent Eval trusted boundary tests
+# ---------------------------------------------------------------------------
+
+
+def test_deepseek_fallback_on_invalid_json_raises_and_no_report(monkeypatch) -> None:
+    """Provider returns invalid JSON → AuditAgent fallback → LLMUnavailable raised, no trusted report."""
+
+    class InvalidJsonDeepSeek:
+        def __init__(self, **kwargs) -> None:
+            self.model = kwargs.get("model", "unknown")
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            return LLMResult(
+                text='{"garbage": true, "not_a_valid_decision": 1}',
+                prompt_tokens=10,
+                completion_tokens=5,
+                model=self.model,
+            )
+
+    original = eval_agent.DeepSeekProvider
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", InvalidJsonDeepSeek)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+    try:
+        cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+        evidence_cases = [c for c in cases if c.rag_evidence]
+        with pytest.raises(LLMUnavailable, match="fallback|Cannot trust"):
+            eval_agent.evaluate_agent_cases(
+                evidence_cases[:1], provider="deepseek", model="deepseek-v4-flash",
+            )
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original)
+
+
+def test_cli_deepseek_fallback_no_report_written(monkeypatch, tmp_path: Path) -> None:
+    """CLI deepseek with fallback exits with code 1 and writes no report."""
+
+    class InvalidJsonDeepSeek:
+        def __init__(self, **kwargs) -> None:
+            self.model = kwargs.get("model", "unknown")
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            return LLMResult(
+                text='{"garbage": true}',
+                prompt_tokens=10,
+                completion_tokens=5,
+                model=self.model,
+            )
+
+    original = eval_agent.DeepSeekProvider
+    monkeypatch.setattr(eval_agent, "DeepSeekProvider", InvalidJsonDeepSeek)
+    monkeypatch.setattr(eval_agent.settings, "deepseek_api_key", "sk-stub")
+
+    report_md = tmp_path / "report.md"
+    report_json = tmp_path / "report.json"
+    try:
+        with pytest.raises(SystemExit):
+            eval_agent.main([
+                "--cases", str(PROJECT_ROOT / "data/agent_eval_cases.json"),
+                "--provider", "deepseek",
+                "--model", "deepseek-v4-flash",
+                "--report", str(report_md),
+                "--json-report", str(report_json),
+            ])
+        assert not report_md.exists()
+        assert not report_json.exists()
+    finally:
+        monkeypatch.setattr(eval_agent, "DeepSeekProvider", original)
+
+
+def test_safety_gates_blocking_when_unsafe_auto_fix_present() -> None:
+    """Report must show FAIL when unsafe_auto_fix_rate > 0."""
+    results = [
+        eval_agent.AgentEvalResult(
+            case_id="g1",
+            error_type="AMOUNT_MISMATCH",
+            exception_branch=None,
+            actual_decision="AUTO_FIXED",
+            actual_risk_level="LOW",
+            schema_passed=True,
+            decision_match=False,
+            risk_level_match=False,
+            has_evidence=True,
+            evidence_cited=False,
+            no_evidence_decision_is_human=True,
+            hard_constraint_violated=False,
+            unsafe_auto_fix=True,
+            consistency_passed=True,
+        ),
+        eval_agent.AgentEvalResult(
+            case_id="g2",
+            error_type="REPEATED_BILLING",
+            exception_branch=None,
+            actual_decision="PENDING_HUMAN",
+            actual_risk_level="MEDIUM",
+            schema_passed=True,
+            decision_match=True,
+            risk_level_match=True,
+            has_evidence=True,
+            evidence_cited=True,
+            no_evidence_decision_is_human=True,
+            hard_constraint_violated=False,
+            unsafe_auto_fix=False,
+            consistency_passed=True,
+        ),
+    ]
+    metrics = eval_agent._compute_metrics(results)
+    gates = eval_agent._compute_gates(metrics)
+
+    assert metrics["unsafe_auto_fix_rate"] > 0
+    assert gates["unsafe_auto_fix_pass"] is False
+
+
+def test_safety_gates_blocking_when_hard_constraint_violation_present() -> None:
+    """Report must show FAIL when hard_constraint_violation_rate > 0."""
+    results = [
+        eval_agent.AgentEvalResult(
+            case_id="h1",
+            error_type="AMOUNT_MISMATCH",
+            exception_branch=None,
+            actual_decision="AUTO_FIXED",
+            actual_risk_level="MEDIUM",
+            schema_passed=True,
+            decision_match=False,
+            risk_level_match=False,
+            has_evidence=False,
+            evidence_cited=False,
+            no_evidence_decision_is_human=False,
+            hard_constraint_violated=True,
+            unsafe_auto_fix=False,
+            consistency_passed=True,
+        ),
+    ]
+    metrics = eval_agent._compute_metrics(results)
+    gates = eval_agent._compute_gates(metrics)
+
+    assert metrics["hard_constraint_violation_rate"] > 0
+    assert gates["hard_constraint_violation_pass"] is False
+
+
+def test_fake_provider_markdown_shows_not_real_llm(tmp_path: Path) -> None:
+    """Fake provider markdown clearly shows not a real LLM."""
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+    md_path = tmp_path / "agent_eval.md"
+    eval_agent.write_markdown_report(report, md_path)
+    content = md_path.read_text(encoding="utf-8")
+
+    assert "Provider Effective | `fake`" in content
+    assert "Model Effective | `none`" in content
+    assert "Real Provider Call | False" in content
+    assert "deepseek" not in content.lower()

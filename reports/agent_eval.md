@@ -10,7 +10,7 @@
 | Model Effective | `none` |
 | Real Provider Call | False |
 | Case Count | 6 |
-| Evaluated At | 2026-07-07T02:48:15.693814Z |
+| Evaluated At | 2026-07-07T09:55:45.405297Z |
 
 ## Metrics
 
