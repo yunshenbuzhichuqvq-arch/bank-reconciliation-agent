@@ -12,11 +12,16 @@ from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.rag.scoring import representative_score
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
 
+RuleRetriever: Any | None = None
+ChromaRuleStore: Any | None = None
+
 _retriever_classes: tuple[Any, Any] | None = None
 
 
 def _get_retriever_classes() -> tuple[Any, Any]:
     global _retriever_classes
+    if RuleRetriever is not None and ChromaRuleStore is not None:
+        return RuleRetriever, ChromaRuleStore
     if _retriever_classes is None:
         from bank_reconciliation_agent.rag.retriever import ChromaRuleStore as _C
         from bank_reconciliation_agent.rag.retriever import RuleRetriever as _R
