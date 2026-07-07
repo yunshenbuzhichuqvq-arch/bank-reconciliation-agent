@@ -1,0 +1,117 @@
+{
+  "evaluated_at": "2026-07-07T08:06:58.400813Z",
+  "source_reports": {
+    "harness_comparison": "reports/eval_harness/comparison.json",
+    "rag_matrix": "reports/rag_quality_matrix.json",
+    "agent_real_json": "reports/agent_eval_deepseek_flash_metrics.json"
+  },
+  "findings": [
+    {
+      "category": "measured_pass",
+      "area": "default_fake_hash_gates",
+      "summary": "Default offline safety gates (system + agent) remain passing.",
+      "evidence": {
+        "gates": {
+          "system_unsafe_auto_fix_pass": true,
+          "system_hard_constraint_violation_pass": true,
+          "agent_unsafe_auto_fix_pass": true,
+          "agent_hard_constraint_violation_pass": true
+        },
+        "boundary": "offline, fake-provider, hash embedding"
+      }
+    },
+    {
+      "category": "measured_gap",
+      "area": "rag_hash",
+      "summary": "RAG hash baseline (hybrid_rerank) below PRD targets: Recall@5=0.658, MRR=0.568, NDCG@5=0.553",
+      "evidence": {
+        "backend": "hash",
+        "selected_mode": "hybrid_rerank",
+        "metrics": {
+          "hit_at_1": 0.43333333333333335,
+          "recall_at_5": 0.6583333333333333,
+          "mrr": 0.5681944444444444,
+          "ndcg_at_5": 0.5528158133454631
+        }
+      }
+    },
+    {
+      "category": "environment_gap",
+      "area": "rag_bge_small",
+      "summary": "RAG backend bge_small is not_run (real backend policy is skip).",
+      "evidence": {
+        "requested_backend": "bge_small",
+        "effective_backend": null,
+        "status": "not_run",
+        "reason": "real backend policy is skip"
+      }
+    },
+    {
+      "category": "environment_gap",
+      "area": "rag_bge_m3",
+      "summary": "RAG backend bge_m3 is not_run (real backend policy is skip).",
+      "evidence": {
+        "requested_backend": "bge_m3",
+        "effective_backend": null,
+        "status": "not_run",
+        "reason": "real backend policy is skip"
+      }
+    },
+    {
+      "category": "environment_gap",
+      "area": "real_llm_agent_eval",
+      "summary": "DeepSeek Agent Eval report is not present. Real LLM quality is not measured.",
+      "evidence": {
+        "report_present": false,
+        "hint": "Run: uv run python -m scripts.eval_agent --cases data/agent_eval_cases.json --provider deepseek --model deepseek-v4-flash --report reports/agent_eval_deepseek_flash.md --json-report reports/agent_eval_deepseek_flash_metrics.json"
+      }
+    },
+    {
+      "category": "deferred_online_metric",
+      "area": "online_adoption",
+      "summary": "Online human adoption / override rate is not measured in offline eval.",
+      "evidence": {}
+    },
+    {
+      "category": "deferred_online_metric",
+      "area": "production_latency",
+      "summary": "Production end-to-end latency and per-agent call latency are not measured.",
+      "evidence": {}
+    },
+    {
+      "category": "deferred_online_metric",
+      "area": "production_cost",
+      "summary": "Production LLM token usage, embedding compute cost, and infrastructure cost are not measured.",
+      "evidence": {}
+    },
+    {
+      "category": "out_of_scope",
+      "area": "llm_as_judge",
+      "summary": "LLM-as-Judge evaluation of explanation completeness, reasoning quality, or natural-language audit judgment is not included.",
+      "evidence": {}
+    },
+    {
+      "category": "out_of_scope",
+      "area": "immediate_remediation",
+      "summary": "Automatic remediation of observed misses is out of scope in this triage stage.",
+      "evidence": {}
+    }
+  ],
+  "next_stage_recommendations": [
+    {
+      "target": "rag",
+      "reason": "RAG hash baseline is below PRD targets. Consider tuning chunk structure or retrieval parameters.",
+      "scope_hint": "Pick one measured miss bucket; do not relabel eval data to fit output."
+    },
+    {
+      "target": "rag",
+      "reason": "Real embedding backends are not measured. Set up sentence-transformers and rerun with --real-backend-policy auto.",
+      "scope_hint": "Install sentence-transformers, then compare real embedding quality before changing production defaults."
+    },
+    {
+      "target": "agent",
+      "reason": "Real LLM (DeepSeek) agent quality is not measured. Run the DeepSeek eval command when credentials are available.",
+      "scope_hint": "Do not tune prompts before measuring real DeepSeek behavior on the existing eval set."
+    }
+  ]
+}

@@ -540,4 +540,9 @@ def _tokenize(text: str) -> set[str]:
     return tokens
 
 
-rule_retriever = RuleRetriever()
+def __getattr__(name: str) -> Any:
+    if name == "rule_retriever":
+        value = RuleRetriever()
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
