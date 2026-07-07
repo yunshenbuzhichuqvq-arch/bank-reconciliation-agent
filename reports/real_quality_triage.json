@@ -1,9 +1,10 @@
 {
-  "evaluated_at": "2026-07-07T08:06:58.400813Z",
+  "evaluated_at": "2026-07-07T10:08:23.052456Z",
   "source_reports": {
     "harness_comparison": "reports/eval_harness/comparison.json",
     "rag_matrix": "reports/rag_quality_matrix.json",
-    "agent_real_json": "reports/agent_eval_deepseek_flash_metrics.json"
+    "agent_real_json": null,
+    "performance_cost_json": "reports/performance_cost_benchmark.json"
   },
   "findings": [
     {
@@ -67,6 +68,48 @@
       }
     },
     {
+      "category": "measured_pass",
+      "area": "performance_latency_fake",
+      "summary": "Offline latency benchmark measured (fake provider); not representative of real LLM latency.",
+      "evidence": {
+        "latency": {
+          "extraction_agent": {
+            "avg_latency_ms": 0.063,
+            "p95_latency_ms": 0.11,
+            "min_latency_ms": 0.042,
+            "max_latency_ms": 0.11,
+            "samples_ms": [
+              0.062,
+              0.11,
+              0.06,
+              0.043,
+              0.042
+            ]
+          },
+          "rag_search": {
+            "avg_latency_ms": 32.755,
+            "p95_latency_ms": 160.644,
+            "min_latency_ms": 0.75,
+            "max_latency_ms": 160.644,
+            "samples_ms": [
+              160.644,
+              0.866,
+              0.762,
+              0.751,
+              0.75
+            ]
+          }
+        },
+        "boundary": "fake provider; offline benchmark"
+      }
+    },
+    {
+      "category": "deferred_online_metric",
+      "area": "performance_cost_real",
+      "summary": "Real LLM token usage, latency and cost are deferred (fake provider used).",
+      "evidence": {}
+    },
+    {
       "category": "deferred_online_metric",
       "area": "online_adoption",
       "summary": "Online human adoption / override rate is not measured in offline eval.",
@@ -96,6 +139,30 @@
       "summary": "Automatic remediation of observed misses is out of scope in this triage stage.",
       "evidence": {}
     }
+  ],
+  "resume_safe_facts": [
+    {
+      "area": "rag",
+      "fact": "RAG hash baseline (hybrid_rerank) measured Hit@1=0.433, Recall@5=0.658, MRR=0.568, NDCG@5=0.553",
+      "source_report": "reports/rag_quality_matrix.json",
+      "boundary": "offline eval set; hash embedding"
+    },
+    {
+      "area": "latency",
+      "fact": "Offline latency benchmark: ExtractionAgent avg=0ms, P95=0ms; RAG avg=33ms, P95=161ms",
+      "source_report": "reports/performance_cost_benchmark.json",
+      "boundary": "offline benchmark; fake provider"
+    }
+  ],
+  "resume_bullet_draft": [
+    "RAG quality measured on 120-case offline eval set with hash baseline."
+  ],
+  "claim_boundary": [
+    "offline benchmark only; not production SLA",
+    "no online adoption rate measured",
+    "no production traffic or real user data",
+    "DeepSeek Agent Eval not run; real LLM safety not verified",
+    "performance/cost benchmark uses fake provider; not real LLM latency/cost"
   ],
   "next_stage_recommendations": [
     {

@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_HARNESS_COMPARISON = PROJECT_ROOT / "reports/eval_harness/comparison.json"
 DEFAULT_RAG_MATRIX = PROJECT_ROOT / "reports/rag_quality_matrix.json"
 DEFAULT_AGENT_REAL_JSON = PROJECT_ROOT / "reports/agent_eval_deepseek_flash_metrics.json"
+DEFAULT_PERFORMANCE_COST_JSON = PROJECT_ROOT / "reports/performance_cost_benchmark.json"
 DEFAULT_OUTPUT = PROJECT_ROOT / "reports/real_quality_triage.md"
 DEFAULT_JSON_OUTPUT = PROJECT_ROOT / "reports/real_quality_triage.json"
 
@@ -28,23 +29,38 @@ def build_triage_summary(
     rag_matrix: dict[str, Any],
     agent_real_report: dict[str, Any] | None = None,
     agent_real_path: str | None = None,
+    performance_cost_report: dict[str, Any] | None = None,
+    performance_cost_path: str | None = None,
 ) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
 
     _add_system_eval_findings(harness_comparison, findings)
     _add_rag_matrix_findings(rag_matrix, findings)
     _add_agent_real_findings(agent_real_report, findings)
+    _add_performance_cost_findings(performance_cost_report, findings)
     _add_deferred_online_metrics(findings)
     _add_out_of_scope_findings(findings)
 
     recommendations = _build_recommendations(findings, rag_matrix, agent_real_report)
+    resume_safe_facts = _build_resume_safe_facts(
+        rag_matrix, agent_real_report, performance_cost_report
+    )
+    resume_bullet_draft = _build_resume_bullet_draft(resume_safe_facts)
+    claim_boundary = _build_claim_boundary(
+        agent_real_report, performance_cost_report
+    )
 
     return {
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "source_reports": _build_source_reports(
-            harness_comparison, rag_matrix, agent_real_report, agent_real_path,
+            harness_comparison, rag_matrix,
+            agent_real_report, agent_real_path,
+            performance_cost_report, performance_cost_path,
         ),
         "findings": findings,
+        "resume_safe_facts": resume_safe_facts,
+        "resume_bullet_draft": resume_bullet_draft,
+        "claim_boundary": claim_boundary,
         "next_stage_recommendations": recommendations,
     }
 
@@ -79,12 +95,10 @@ def _add_rag_matrix_findings(
     rows = rag_matrix.get("rows", {})
     for backend, row in rows.items():
         status = row.get("status")
-
         if backend == "hash":
             if status == "measured":
                 _add_hash_rag_finding(row, findings)
             continue
-
         if status != "measured":
             findings.append({
                 "category": "environment_gap",
@@ -217,8 +231,8 @@ def _add_agent_real_findings(
 
     unsafe = agent_real_report.get("agent_unsafe_auto_fix_rate", 0.0)
     hard = agent_real_report.get("agent_hard_constraint_violation_rate", 0.0)
-
     gates = agent_real_report.get("gates", {})
+
     if unsafe > 0 or hard > 0:
         findings.append({
             "category": "measured_gap",
@@ -272,29 +286,80 @@ def _add_agent_real_findings(
         })
 
 
+def _add_performance_cost_findings(
+    performance_cost_report: dict[str, Any] | None,
+    findings: list[dict[str, Any]],
+) -> None:
+    if performance_cost_report is None:
+        findings.append({
+            "category": "environment_gap",
+            "area": "performance_cost",
+            "summary": (
+                "Performance/cost benchmark report is not present."
+            ),
+            "evidence": {"report_present": False},
+        })
+        return
+
+    provider_eff = performance_cost_report.get("provider_effective", "unknown")
+    cost = performance_cost_report.get("cost", {})
+    tokens = performance_cost_report.get("tokens", {})
+
+    if provider_eff == "fake":
+        findings.append({
+            "category": "measured_pass",
+            "area": "performance_latency_fake",
+            "summary": (
+                "Offline latency benchmark measured (fake provider); "
+                "not representative of real LLM latency."
+            ),
+            "evidence": {
+                "latency": performance_cost_report.get("latency", {}),
+                "boundary": "fake provider; offline benchmark",
+            },
+        })
+        findings.append({
+            "category": "deferred_online_metric",
+            "area": "performance_cost_real",
+            "summary": (
+                "Real LLM token usage, latency and cost are deferred "
+                "(fake provider used)."
+            ),
+            "evidence": {},
+        })
+    else:
+        cost_available = cost.get("cost_available", False)
+        token_available = tokens.get("token_usage_available", False)
+
+        category: FindingCategory = "measured_pass" if cost_available else "deferred_online_metric"
+        findings.append({
+            "category": category,
+            "area": "performance_cost_real",
+            "summary": (
+                f"Real provider benchmark: "
+                f"cost_available={cost_available}, "
+                f"token_usage_available={token_available}"
+            ),
+            "evidence": {
+                "latency": performance_cost_report.get("latency", {}),
+                "tokens": tokens,
+                "cost": cost,
+            },
+        })
+
+
 def _add_deferred_online_metrics(findings: list[dict[str, Any]]) -> None:
     deferred = [
-        {
-            "area": "online_adoption",
-            "summary": (
-                "Online human adoption / override rate is not measured "
-                "in offline eval."
-            ),
-        },
-        {
-            "area": "production_latency",
-            "summary": (
-                "Production end-to-end latency and per-agent call latency "
-                "are not measured."
-            ),
-        },
-        {
-            "area": "production_cost",
-            "summary": (
-                "Production LLM token usage, embedding compute cost, and "
-                "infrastructure cost are not measured."
-            ),
-        },
+        {"area": "online_adoption", "summary": (
+            "Online human adoption / override rate is not measured in offline eval."
+        )},
+        {"area": "production_latency", "summary": (
+            "Production end-to-end latency and per-agent call latency are not measured."
+        )},
+        {"area": "production_cost", "summary": (
+            "Production LLM token usage, embedding compute cost, and "
+            "infrastructure cost are not measured."
+        )},
     ]
     for item in deferred:
         findings.append({
@@ -349,6 +414,10 @@ def _build_recommendations(
         f["area"] == "real_llm_agent_safety" and f["category"] == "measured_gap"
         for f in findings
     )
+    has_perf_cost_gap = any(
+        f["area"] == "performance_cost" and f["category"] == "environment_gap"
+        for f in findings
+    )
 
     if has_rag_gap:
         recommendations.append({
@@ -362,7 +431,6 @@ def _build_recommendations(
                 "fit output."
             ),
         })
-
     if non_hash_env_gaps:
         recommendations.append({
             "target": "rag",
@@ -375,7 +443,6 @@ def _build_recommendations(
                 "quality before changing production defaults."
             ),
         })
-
     if has_real_agent_env_gap:
         recommendations.append({
             "target": "agent",
@@ -388,7 +455,6 @@ def _build_recommendations(
                 "on the existing eval set."
             ),
         })
-
     if has_real_agent_safety_gap:
         recommendations.append({
             "target": "agent",
@@ -400,7 +466,15 @@ def _build_recommendations(
                 "Examine specific failing cases before changing safety logic."
             ),
         })
-
+    if has_perf_cost_gap:
+        recommendations.append({
+            "target": "performance",
+            "reason": (
+                "Performance/cost benchmark is not available. "
+                "Run scripts/bench_agent_latency with --report and --json-report."
+            ),
+            "scope_hint": "Generate offline benchmark before claiming latency or cost numbers.",
+        })
     if not recommendations:
         recommendations.append({
             "target": "general",
@@ -429,23 +503,174 @@ def _build_source_reports(
     rag_matrix: dict[str, Any],
     agent_real_report: dict[str, Any] | None,
     agent_real_path: str | None = None,
-) -> dict[str, str | None]:
+    performance_cost_report: dict[str, Any] | None = None,
+    performance_cost_path: str | None = None,
+) -> dict[str, Any]:
     agent_source: str | None = None
     if agent_real_report is not None:
         agent_source = agent_real_report.get("_source_path")
     elif agent_real_path is not None:
         agent_source = agent_real_path
+
+    perf_source: str | None = None
+    if performance_cost_report is not None:
+        perf_source = performance_cost_report.get("_source_path")
+    elif performance_cost_path is not None:
+        perf_source = performance_cost_path
+
     return {
         "harness_comparison": harness_comparison.get(
-            "_source_path",
-            "reports/eval_harness/comparison.json",
+            "_source_path", "reports/eval_harness/comparison.json",
         ),
         "rag_matrix": rag_matrix.get(
-            "_source_path",
-            "reports/rag_quality_matrix.json",
+            "_source_path", "reports/rag_quality_matrix.json",
         ),
         "agent_real_json": agent_source,
+        "performance_cost_json": perf_source,
     }
+
+
+def _build_resume_safe_facts(
+    rag_matrix: dict[str, Any],
+    agent_real_report: dict[str, Any] | None,
+    performance_cost_report: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+
+    rows = rag_matrix.get("rows", {})
+    for backend, row in rows.items():
+        if row.get("status") != "measured":
+            continue
+        selected_mode = row.get("selected_mode", "dense")
+        modes = row.get("modes", {})
+        mode_data = modes.get(selected_mode, {})
+        gm = mode_data.get("global_metrics", {})
+        facts.append({
+            "area": "rag",
+            "fact": (
+                f"RAG {backend} baseline ({selected_mode}) "
+                f"measured Hit@1={gm.get('hit_at_1', 0):.3f}, "
+                f"Recall@5={gm.get('recall_at_5', 0):.3f}, "
+                f"MRR={gm.get('mrr', 0):.3f}, "
+                f"NDCG@5={gm.get('ndcg_at_5', 0):.3f}"
+            ),
+            "source_report": "reports/rag_quality_matrix.json",
+            "boundary": f"offline eval set; {backend} embedding",
+        })
+
+    if agent_real_report is not None:
+        provider_eff = agent_real_report.get("provider_effective", "")
+        real_call = agent_real_report.get("real_provider_call", False)
+        if provider_eff == "deepseek" and real_call:
+            unsafe = agent_real_report.get("agent_unsafe_auto_fix_rate", 0.0)
+            hard = agent_real_report.get("agent_hard_constraint_violation_rate", 0.0)
+            facts.append({
+                "area": "agent",
+                "fact": (
+                    f"DeepSeek Agent Eval: decision_accuracy="
+                    f"{agent_real_report.get('agent_decision_accuracy', 0):.3f}, "
+                    f"risk_accuracy={agent_real_report.get('agent_risk_accuracy', 0):.3f}, "
+                    f"unsafe_auto_fix_rate={unsafe:.3f}, "
+                    f"hard_constraint_violation_rate={hard:.3f}"
+                ),
+                "source_report": "reports/agent_eval_deepseek_flash_metrics.json",
+                "boundary": "offline eval set; real DeepSeek provider",
+            })
+
+    if performance_cost_report is not None:
+        provider_eff = performance_cost_report.get("provider_effective", "")
+        latency = performance_cost_report.get("latency", {})
+        ext = latency.get("extraction_agent", {})
+        rag_l = latency.get("rag_search", {})
+        cost = performance_cost_report.get("cost", {})
+
+        if provider_eff != "fake" and cost.get("cost_available"):
+            facts.append({
+                "area": "cost",
+                "fact": (
+                    f"Estimated cost {cost.get('estimated_cost_usd')} USD "
+                    f"({performance_cost_report.get('run_count', 0)} runs)"
+                ),
+                "source_report": "reports/performance_cost_benchmark.json",
+                "boundary": "offline benchmark; estimated from token counts",
+            })
+
+        facts.append({
+            "area": "latency",
+            "fact": (
+                f"Offline latency benchmark: "
+                f"ExtractionAgent avg={ext.get('avg_latency_ms', 0):.0f}ms, "
+                f"P95={ext.get('p95_latency_ms', 0):.0f}ms; "
+                f"RAG avg={rag_l.get('avg_latency_ms', 0):.0f}ms, "
+                f"P95={rag_l.get('p95_latency_ms', 0):.0f}ms"
+            ),
+            "source_report": "reports/performance_cost_benchmark.json",
+            "boundary": "offline benchmark; "
+            + ("fake provider" if provider_eff == "fake" else "real provider"),
+        })
+
+    return facts
+
+
+def _build_resume_bullet_draft(
+    facts: list[dict[str, Any]],
+) -> list[str]:
+    bullets: list[str] = []
+    rag_facts = [f for f in facts if f["area"] == "rag"]
+    agent_facts = [f for f in facts if f["area"] == "agent"]
+    cost_facts = [f for f in facts if f["area"] == "cost"]
+
+    if rag_facts:
+        metrics = []
+        for f in rag_facts:
+            fact_str = f["fact"]
+            if "below PRD" in fact_str.lower():
+                metrics.append(fact_str)
+        if metrics:
+            bullets.append(f"RAG quality measured on 120-case offline eval set: {metrics[0]}")
+        else:
+            bullets.append("RAG quality measured on 120-case offline eval set with hash baseline.")
+
+    for f in agent_facts:
+        bullets.append(f"Agent safety evaluation: {f['fact']}")
+
+    for f in cost_facts:
+        bullets.append(f"Performance/cost benchmark: {f['fact']}")
+
+    if not bullets:
+        bullets.append(
+            "Offline quality evaluation infrastructure established "
+            "(RAG matrix, Agent eval, performance benchmark); "
+            "real embedding and LLM evaluations deferred."
+        )
+
+    return bullets
+
+
+def _build_claim_boundary(
+    agent_real_report: dict[str, Any] | None,
+    performance_cost_report: dict[str, Any] | None,
+) -> list[str]:
+    boundary = [
+        "offline benchmark only; not production SLA",
+        "no online adoption rate measured",
+        "no production traffic or real user data",
+    ]
+
+    if agent_real_report is None:
+        boundary.append("DeepSeek Agent Eval not run; real LLM safety not verified")
+    else:
+        provider_eff = agent_real_report.get("provider_effective", "")
+        real_call = agent_real_report.get("real_provider_call", False)
+        if provider_eff != "deepseek" or not real_call:
+            boundary.append("DeepSeek Agent report is not trusted (fake or fallback provider)")
+
+    if performance_cost_report is None:
+        boundary.append("performance/cost benchmark not run")
+    elif performance_cost_report.get("provider_effective") == "fake":
+        boundary.append("performance/cost benchmark uses fake provider; not real LLM latency/cost")
+
+    return boundary
 
 
 def write_triage_markdown(summary: dict[str, Any], output_path: Path) -> None:
@@ -472,14 +697,14 @@ def _format_triage_markdown(summary: dict[str, Any]) -> str:
         f"| Evaluated At | {summary.get('evaluated_at', 'N/A')} |",
     ]
     source_reports = summary.get("source_reports", {})
-    lines.append(
-        f"| Harness Comparison | `{source_reports.get('harness_comparison', 'N/A')}` |"
-    )
-    lines.append(
-        f"| RAG Matrix | `{source_reports.get('rag_matrix', 'N/A')}` |"
-    )
-    agent_src = source_reports.get("agent_real_json") or "(not present)"
-    lines.append(f"| Agent Real JSON | `{agent_src}` |")
+    for key, label in [
+        ("harness_comparison", "Harness Comparison"),
+        ("rag_matrix", "RAG Matrix"),
+        ("agent_real_json", "Agent Real JSON"),
+        ("performance_cost_json", "Performance/Cost JSON"),
+    ]:
+        val = source_reports.get(key) or "(not present)"
+        lines.append(f"| {label} | `{val}` |")
     lines.append("")
 
     findings = summary.get("findings", [])
@@ -502,7 +727,6 @@ def _format_triage_markdown(summary: dict[str, Any]) -> str:
         "deferred_online_metric": "Deferred Online Metric",
         "out_of_scope": "Out of Scope",
     }
-
     for cat in category_order:
         items = by_category.get(cat, [])
         if not items:
@@ -516,6 +740,34 @@ def _format_triage_markdown(summary: dict[str, Any]) -> str:
             lines.append(f"- **{area}**: {summary_text}")
             if evidence:
                 lines.append(f"  - Evidence: {json.dumps(evidence, ensure_ascii=False)}")
+        lines.append("")
+
+    resume_facts = summary.get("resume_safe_facts", [])
+    if resume_facts:
+        lines.append("## Resume-Safe Facts")
+        lines.append("")
+        for idx, f in enumerate(resume_facts, 1):
+            lines.append(
+                f"{idx}. **{f.get('area', 'unknown')}**: {f.get('fact', '')}"
+            )
+            lines.append(f"   - Source: `{f.get('source_report', 'N/A')}`")
+            lines.append(f"   - Boundary: {f.get('boundary', 'N/A')}")
+        lines.append("")
+
+    bullet_draft = summary.get("resume_bullet_draft", [])
+    if bullet_draft:
+        lines.append("## Resume Bullet Draft")
+        lines.append("")
+        for b in bullet_draft:
+            lines.append(f"- {b}")
+        lines.append("")
+
+    claim_boundary = summary.get("claim_boundary", [])
+    if claim_boundary:
+        lines.append("## Claim Boundary")
+        lines.append("")
+        for c in claim_boundary:
+            lines.append(f"- {c}")
         lines.append("")
 
     recommendations = summary.get("next_stage_recommendations", [])
@@ -546,6 +798,9 @@ def main(argv: list[str] | None = None) -> None:
         "--agent-real-json", type=Path, default=None,
     )
     parser.add_argument(
+        "--performance-cost-json", type=Path, default=None,
+    )
+    parser.add_argument(
         "--output", type=Path, default=DEFAULT_OUTPUT,
     )
     parser.add_argument(
@@ -572,11 +827,24 @@ def main(argv: list[str] | None = None) -> None:
         except (json.JSONDecodeError, OSError):
             pass
 
+    performance_cost_report: dict[str, Any] | None = None
+    performance_cost_path: Path | None = args.performance_cost_json
+    if performance_cost_path is not None and performance_cost_path.exists():
+        try:
+            performance_cost_report = json.loads(
+                performance_cost_path.read_text(encoding="utf-8")
+            )
+            performance_cost_report["_source_path"] = str(performance_cost_path)
+        except (json.JSONDecodeError, OSError):
+            pass
+
     summary = build_triage_summary(
         harness_comparison=harness_comparison,
         rag_matrix=rag_matrix,
         agent_real_report=agent_real_report,
         agent_real_path=str(agent_real_path) if agent_real_path is not None else None,
+        performance_cost_report=performance_cost_report,
+        performance_cost_path=str(performance_cost_path) if performance_cost_path is not None else None,
     )
 
     if args.output:

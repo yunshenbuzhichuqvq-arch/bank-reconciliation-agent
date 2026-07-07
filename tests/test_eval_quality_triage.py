@@ -553,3 +553,335 @@ def test_missing_agent_real_json_is_environment_gap(
     assert len(agent_findings) == 1
     assert agent_findings[0]["category"] == "environment_gap"
     assert "not present" in agent_findings[0]["summary"]
+
+
+# ---------------------------------------------------------------------------
+# TASK-17.4: Real Evidence Summary tests
+# ---------------------------------------------------------------------------
+
+
+def _performance_cost_fake() -> dict:
+    return {
+        "run_count": 5,
+        "provider_effective": "fake",
+        "model_effective": "fake-llm",
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": {
+                "avg_latency_ms": 0.06, "p95_latency_ms": 0.10,
+                "min_latency_ms": 0.03, "max_latency_ms": 0.12,
+                "samples_ms": [0.06, 0.10, 0.05, 0.04, 0.03],
+            },
+            "rag_search": {
+                "avg_latency_ms": 42.0, "p95_latency_ms": 206.0,
+                "min_latency_ms": 0.7, "max_latency_ms": 206.0,
+                "samples_ms": [206.0, 0.9, 0.8, 0.7, 0.7],
+            },
+        },
+        "tokens": {
+            "token_usage_available": False,
+            "input_tokens": None, "output_tokens": None, "total_tokens": None,
+        },
+        "cost": {
+            "cost_available": False,
+            "estimated_cost_usd": None,
+            "assumptions": "fake provider; no real LLM cost",
+        },
+    }
+
+
+def _performance_cost_real() -> dict:
+    return {
+        "run_count": 2,
+        "provider_effective": "deepseek",
+        "model_effective": "deepseek-v4-flash",
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": {
+                "avg_latency_ms": 1200.0, "p95_latency_ms": 1350.0,
+                "min_latency_ms": 1100.0, "max_latency_ms": 1400.0,
+                "samples_ms": [1100.0, 1350.0],
+            },
+            "rag_search": {
+                "avg_latency_ms": 50.0, "p95_latency_ms": 55.0,
+                "min_latency_ms": 45.0, "max_latency_ms": 56.0,
+                "samples_ms": [45.0, 56.0],
+            },
+        },
+        "tokens": {
+            "token_usage_available": True,
+            "input_tokens": 1000, "output_tokens": 60, "total_tokens": 1060,
+        },
+        "cost": {
+            "cost_available": True,
+            "estimated_cost_usd": "0.0004842",
+            "assumptions": "DeepSeek v4 Pro pricing",
+        },
+    }
+
+
+class TestBuildTriageSummaryExtended:
+    def test_performance_cost_optional_missing_is_not_error(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=None,
+        )
+        perf_findings = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost"
+        ]
+        assert len(perf_findings) == 1
+        assert perf_findings[0]["category"] == "environment_gap"
+
+    def test_source_reports_includes_performance_cost(self) -> None:
+        pc = _performance_cost_fake()
+        pc["_source_path"] = "reports/performance_cost_benchmark.json"
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=pc,
+        )
+        assert summary["source_reports"]["performance_cost_json"] == "reports/performance_cost_benchmark.json"
+
+    def test_source_reports_with_performance_cost_path(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=None,
+            performance_cost_path="reports/pc_bench.json",
+        )
+        assert summary["source_reports"]["performance_cost_json"] == "reports/pc_bench.json"
+
+    def test_resume_safe_facts_present(self) -> None:
+        pc = _performance_cost_fake()
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=pc,
+        )
+        assert "resume_safe_facts" in summary
+        assert len(summary["resume_safe_facts"]) >= 1
+
+    def test_resume_safe_facts_each_has_source_and_boundary(self) -> None:
+        pc = _performance_cost_fake()
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=pc,
+        )
+        for fact in summary["resume_safe_facts"]:
+            assert "area" in fact
+            assert "fact" in fact
+            assert "source_report" in fact
+            assert "boundary" in fact
+
+    def test_resume_safe_facts_no_deepseek_when_not_trusted(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_untrusted_deepseek_report(),
+            performance_cost_report=_performance_cost_fake(),
+        )
+        agent_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "agent"]
+        assert len(agent_facts) == 0
+
+    def test_resume_safe_facts_has_deepseek_when_trusted(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_trusted_deepseek_report(),
+            performance_cost_report=_performance_cost_fake(),
+        )
+        agent_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "agent"]
+        assert len(agent_facts) == 1
+
+    def test_bullet_draft_no_cost_when_fake(self) -> None:
+        pc = _performance_cost_fake()
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=pc,
+        )
+        cost_facts_in_safe = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts_in_safe) == 0
+
+    def test_bullet_draft_no_cost_number_when_not_available(self) -> None:
+        pc = _performance_cost_real()
+        pc["cost"]["cost_available"] = False
+        pc["cost"]["estimated_cost_usd"] = None
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=pc,
+        )
+        cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) == 0
+
+    def test_cost_fact_when_real_and_available(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_real(),
+        )
+        cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) == 1
+
+    def test_claim_boundary_present(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_fake(),
+        )
+        assert "claim_boundary" in summary
+        boundaries = summary["claim_boundary"]
+        assert any("offline benchmark" in b for b in boundaries)
+        assert any("production SLA" in b for b in boundaries)
+
+    def test_claim_boundary_notes_deepseek_gap(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=None,
+        )
+        boundaries = summary["claim_boundary"]
+        assert any("DeepSeek" in b for b in boundaries)
+        assert any("not run" in b for b in boundaries)
+
+    def test_claim_boundary_notes_fake_perf(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_fake(),
+        )
+        boundaries = summary["claim_boundary"]
+        assert any("fake provider" in b for b in boundaries)
+
+    def test_resume_bullet_draft_present(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_fake(),
+        )
+        assert "resume_bullet_draft" in summary
+        assert len(summary["resume_bullet_draft"]) >= 1
+
+    def test_triage_summary_has_all_required_top_level_keys(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_fake(),
+        )
+        required = {
+            "evaluated_at", "source_reports", "findings",
+            "resume_safe_facts", "resume_bullet_draft",
+            "claim_boundary", "next_stage_recommendations",
+        }
+        assert required <= set(summary)
+
+    def test_performance_cost_fake_is_deferred_for_real(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_fake(),
+        )
+        perf_deferred = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf_deferred) == 1
+        assert perf_deferred[0]["category"] == "deferred_online_metric"
+
+    def test_risky_deepseek_unsafe_rate_enters_measured_gap(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_risky_deepseek_report(),
+            performance_cost_report=None,
+        )
+        safety_findings = [
+            f for f in summary["findings"]
+            if f["area"] == "real_llm_agent_safety"
+        ]
+        assert len(safety_findings) == 1
+        assert safety_findings[0]["category"] == "measured_gap"
+        assert safety_findings[0]["evidence"]["unsafe_auto_fix_rate"] > 0
+
+    def test_bullet_draft_does_not_write_deepseek_measured_when_not_trusted(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=_untrusted_deepseek_report(),
+            performance_cost_report=None,
+        )
+        for bullet in summary["resume_bullet_draft"]:
+            assert "deepseek" not in bullet.lower()
+
+    def test_bullet_draft_does_not_write_cost_number_when_not_available(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_fake(),
+        )
+        bullets_text = " ".join(summary["resume_bullet_draft"])
+        assert "USD" not in bullets_text or "cost" not in bullets_text.lower()
+
+    def test_markdown_includes_resume_sections(self, tmp_path: Path) -> None:
+        harness_path = tmp_path / "comparison.json"
+        harness_path.write_text(json.dumps(_harness_comparison(), ensure_ascii=False))
+        rag_path = tmp_path / "rag_matrix.json"
+        rag_path.write_text(json.dumps(_rag_matrix_skip(), ensure_ascii=False))
+        pc_path = tmp_path / "perf.json"
+        pc_path.write_text(json.dumps(_performance_cost_fake(), ensure_ascii=False))
+
+        eval_quality_triage.main([
+            "--harness-comparison", str(harness_path),
+            "--rag-matrix", str(rag_path),
+            "--performance-cost-json", str(pc_path),
+            "--output", str(tmp_path / "triage.md"),
+            "--json-output", str(tmp_path / "triage.json"),
+        ])
+
+        md = (tmp_path / "triage.md").read_text(encoding="utf-8")
+        assert "Resume-Safe Facts" in md
+        assert "Resume Bullet Draft" in md
+        assert "Claim Boundary" in md
+
+    def test_cli_performance_cost_json_optional_missing(self, tmp_path: Path) -> None:
+        harness_path = tmp_path / "comparison.json"
+        harness_path.write_text(json.dumps(_harness_comparison(), ensure_ascii=False))
+        rag_path = tmp_path / "rag_matrix.json"
+        rag_path.write_text(json.dumps(_rag_matrix_skip(), ensure_ascii=False))
+        missing_path = tmp_path / "nonexistent_perf.json"
+
+        eval_quality_triage.main([
+            "--harness-comparison", str(harness_path),
+            "--rag-matrix", str(rag_path),
+            "--performance-cost-json", str(missing_path),
+            "--output", str(tmp_path / "triage.md"),
+            "--json-output", str(tmp_path / "triage.json"),
+        ])
+
+        js = json.loads((tmp_path / "triage.json").read_text(encoding="utf-8"))
+        assert js["source_reports"]["performance_cost_json"] == str(missing_path)
+        perf_findings = [
+            f for f in js["findings"]
+            if f["area"] == "performance_cost"
+        ]
+        assert len(perf_findings) == 1
+        assert perf_findings[0]["category"] == "environment_gap"
