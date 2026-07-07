@@ -48,7 +48,9 @@ class FakeLLMProvider:
         response_format: Literal["text", "json_object"] = "json_object",
     ) -> LLMResult:
         del temperature, response_format
-        content = "\n".join(message.get("content", "") for message in messages).lower()
+        content = "\n".join(
+            message.get("content", "") for message in messages if message.get("role") == "user"
+        ).lower()
         payload = self._payload_for(content)
         return LLMResult(
             text=json.dumps(payload, ensure_ascii=False, sort_keys=True),

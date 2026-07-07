@@ -331,3 +331,36 @@ def test_fake_provider_returns_medium_for_non_high_risk_case() -> None:
     payload = json.loads(result.text)
     assert payload["decision"] == "PENDING_HUMAN"
     assert payload["risk_level"] == "MEDIUM"
+
+
+def test_fake_provider_v3_prompt_does_not_contaminate_non_high_risk_case() -> None:
+    """v3 prompt text includes DUPLICATE_BOOKING/BE-R008; user payload is BE-R002."""
+    provider = FakeLLMProvider()
+    result = provider.complete([
+        {
+            "role": "system",
+            "content": (
+                "# Audit Prompt v3\n"
+                "BE-R008 / DUPLICATE_BOOKING 必须 PENDING_HUMAN / HIGH。\n"
+                "AUTO_FIXED 仅在 task=confirm_match 时允许。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps({
+                "task": "audit",
+                "flow_id": "test-v3-001",
+                "error_type": "AMOUNT_MISMATCH",
+                "exception_branch": "BE-R002",
+                "bank_amount": "300.00",
+                "clear_amount": "295.00",
+                "amount_diff": "5.00",
+                "evidence": [{"chunk_id": "rule-001"}],
+            }, sort_keys=True),
+        },
+    ])
+    payload = json.loads(result.text)
+    assert payload["agent"] == "audit"
+    assert payload["decision"] == "PENDING_HUMAN"
+    assert payload["risk_level"] == "MEDIUM"
+    assert "金额不一致" in payload["reason"]

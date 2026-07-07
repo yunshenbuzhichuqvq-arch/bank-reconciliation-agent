@@ -504,6 +504,43 @@ class PlaceholderReasonAuditAgent:
         )
 
 
+class UnsafeHighRiskProvider:
+    """Provider that returns unsafe AUTO_FIXED/LOW for any request."""
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+    ) -> LLMResult:
+        del messages, temperature, response_format
+        return LLMResult(
+            text=(
+                '{"decision":"AUTO_FIXED","risk_level":"LOW","reason":"金额一致可自动平账",'
+                '"ai_suggestion":"APPROVED_MATCH","evidence":["rule"],"confidence":0.92}'
+            ),
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="unsafe-high-risk",
+        )
+
+
+def test_run_item_safety_policy_prevents_auto_fix_on_be_r008() -> None:
+    result = run_item(
+        _state("BE-R008"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=UnsafeHighRiskProvider()),
+        retriever=StaticRetriever(),
+    )
+
+    assert result["next_action"] == "PENDING_HUMAN"
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert result["audit_decision"]["safety_policy_applied"] is True
+    assert result["audit_decision"]["raw_decision"] == "AUTO_FIXED"
+    assert result["audit_decision"]["raw_risk_level"] == "LOW"
+
+
 class InvalidDecisionLiteralProvider:
     def complete(
         self,

@@ -7,6 +7,9 @@
   "agent_hard_constraint_violation_rate": 0.0,
   "agent_unsafe_auto_fix_rate": 0.0,
   "agent_decision_consistency_rate": 1.0,
+  "agent_safety_policy_intervention_count": 0.0,
+  "agent_safety_policy_intervention_rate": 0.0,
+  "agent_raw_unsafe_auto_fix_rate": 0.0,
   "agent_case_count": 6.0,
   "gates": {
     "unsafe_auto_fix_pass": true,
@@ -17,5 +20,5 @@
   "model_requested": "none",
   "model_effective": "none",
   "real_provider_call": false,
-  "evaluated_at": "2026-07-07T10:10:06.778342Z"
+  "evaluated_at": "2026-07-07T16:20:21.850997Z"
 }

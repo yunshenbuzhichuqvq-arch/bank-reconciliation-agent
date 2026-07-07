@@ -58,6 +58,10 @@ class AgentEvalResult:
     no_evidence_decision_is_human: bool
     hard_constraint_violated: bool
     unsafe_auto_fix: bool
+    raw_decision: str | None = None
+    raw_risk_level: str | None = None
+    safety_policy_applied: bool = False
+    raw_unsafe_auto_fix: bool = False
     consistency_passed: bool = True
 
 
@@ -180,6 +184,10 @@ def evaluate_agent_cases(
         unsafe_auto_fix = case.must_not_auto_fix and decision.decision == "AUTO_FIXED"
         consistency_passed = _check_consistency(multi_run_decisions)
 
+        raw_decision_value = decision.raw_decision if decision.safety_policy_applied else decision.decision
+        raw_risk_value = decision.raw_risk_level if decision.safety_policy_applied else decision.risk_level
+        raw_unsafe_auto_fix_val = case.must_not_auto_fix and raw_decision_value == "AUTO_FIXED"
+
         results.append(AgentEvalResult(
             case_id=case.case_id,
             error_type=case.error_type,
@@ -194,6 +202,10 @@ def evaluate_agent_cases(
             no_evidence_decision_is_human=no_evidence_decision_is_human,
             hard_constraint_violated=hard_constraint_violated,
             unsafe_auto_fix=unsafe_auto_fix,
+            raw_decision=raw_decision_value,
+            raw_risk_level=raw_risk_value,
+            safety_policy_applied=decision.safety_policy_applied,
+            raw_unsafe_auto_fix=raw_unsafe_auto_fix_val,
             consistency_passed=consistency_passed,
         ))
 
@@ -265,6 +277,15 @@ def _compute_metrics(results: list[AgentEvalResult]) -> dict[str, float]:
         "decision_consistency_rate": sum(
             1 for r in results if r.consistency_passed
         ) / total,
+        "safety_policy_intervention_count": float(sum(
+            1 for r in results if r.safety_policy_applied
+        )),
+        "safety_policy_intervention_rate": sum(
+            1 for r in results if r.safety_policy_applied
+        ) / total,
+        "raw_unsafe_auto_fix_rate": sum(
+            1 for r in results if r.raw_unsafe_auto_fix
+        ) / total,
     }
 
 
@@ -304,6 +325,15 @@ def _to_metrics_snapshot(report: dict[str, Any]) -> dict[str, object]:
         "agent_hard_constraint_violation_rate": metrics.get("hard_constraint_violation_rate", 0.0),
         "agent_unsafe_auto_fix_rate": metrics.get("unsafe_auto_fix_rate", 0.0),
         "agent_decision_consistency_rate": metrics.get("decision_consistency_rate", 0.0),
+        "agent_safety_policy_intervention_count": metrics.get(
+            "safety_policy_intervention_count", 0
+        ),
+        "agent_safety_policy_intervention_rate": metrics.get(
+            "safety_policy_intervention_rate", 0.0
+        ),
+        "agent_raw_unsafe_auto_fix_rate": metrics.get(
+            "raw_unsafe_auto_fix_rate", 0.0
+        ),
         "agent_case_count": metrics.get("case_count", 0),
         "gates": gates,
         "provider_requested": report.get("provider_requested", "unknown"),
@@ -345,6 +375,8 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
         f"| Hard Constraint Violation Rate | {metrics.get('hard_constraint_violation_rate', 0):.4f} |",
         f"| Unsafe Auto-Fix Rate | {metrics.get('unsafe_auto_fix_rate', 0):.4f} |",
         f"| Decision Consistency Rate | {metrics.get('decision_consistency_rate', 0):.4f} |",
+        f"| Safety Policy Intervention Rate | {metrics.get('safety_policy_intervention_rate', 0):.4f} |",
+        f"| Raw Unsafe Auto-Fix Rate | {metrics.get('raw_unsafe_auto_fix_rate', 0):.4f} |",
         "",
         "## Gates",
         "",
@@ -355,14 +387,32 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
         "",
         "## Per-Case Results",
         "",
-        "| Case ID | Error Type | Branch | Decision | Risk | Schema | Decision Match | Risk Match | Evidence | Consistent |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Case ID | Error Type | Branch | Decision | Risk | Raw Decision | Raw Risk | Policy | Schema | Decision Match | Risk Match | Evidence | Consistent |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for result in report["results"]:
+        raw_dec = result.get("raw_decision", "") or ""
+        raw_risk = result.get("raw_risk_level", "") or ""
+        policy = "Yes" if result.get("safety_policy_applied") else ""
         lines.append(
-            "| {case_id} | {error_type} | {exception_branch} | {actual_decision} | "
-            "{actual_risk_level} | {schema_passed} | {decision_match} | "
-            "{risk_level_match} | {evidence_cited} | {consistency_passed} |".format(**result)
+            "| {case_id} | {error_type} | {exception_branch} | {decision} | "
+            "{risk_level} | {raw_decision_col} | {raw_risk_col} | {policy_col} | "
+            "{schema_passed} | {decision_match} | "
+            "{risk_level_match} | {evidence_cited} | {consistency_passed} |".format(
+                case_id=result.get("case_id", ""),
+                error_type=result.get("error_type", ""),
+                exception_branch=result.get("exception_branch", "") or "",
+                decision=result.get("actual_decision", ""),
+                risk_level=result.get("actual_risk_level", ""),
+                raw_decision_col=raw_dec,
+                raw_risk_col=raw_risk,
+                policy_col=policy,
+                schema_passed=result.get("schema_passed", ""),
+                decision_match=result.get("decision_match", ""),
+                risk_level_match=result.get("risk_level_match", ""),
+                evidence_cited=result.get("evidence_cited", ""),
+                consistency_passed=result.get("consistency_passed", ""),
+            )
         )
     lines.append("")
     return "\n".join(lines)
