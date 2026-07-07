@@ -6,7 +6,7 @@ import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever, rule_retriever
@@ -21,8 +21,12 @@ DEFAULT_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval.md"
 DEFAULT_JSON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_metrics.json"
 DEFAULT_COMPARISON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_mode_comparison.md"
 DEFAULT_COMPARISON_JSON_PATH = PROJECT_ROOT / "reports/rag_eval_mode_comparison.json"
+DEFAULT_MATRIX_REPORT_PATH = PROJECT_ROOT / "reports/rag_quality_matrix.md"
+DEFAULT_MATRIX_JSON_PATH = PROJECT_ROOT / "reports/rag_quality_matrix.json"
 
 RagEvalMode = Literal["dense", "hybrid", "hybrid_rerank"]
+RagBackendMatrixStatus = Literal["measured", "not_run", "unavailable"]
+RealBackendPolicy = Literal["skip", "auto"]
 
 
 @dataclass(frozen=True)
@@ -256,6 +260,273 @@ def _select_best_mode(
     return best, "Highest NDCG@5 among eligible modes with no negative ranking deltas"
 
 
+def evaluate_backend_mode_matrix(
+    cases: list[EvalCase],
+    *,
+    requested_backends: list[str] | None = None,
+    modes: list[RagEvalMode] | None = None,
+    top_k: int = 5,
+    real_backend_policy: RealBackendPolicy = "skip",
+    retriever_factory: Callable[[str], RuleRetriever | Any] | None = None,
+) -> dict[str, Any]:
+    if requested_backends is None:
+        requested_backends = ["hash", "bge_small", "bge_m3"]
+    if modes is None:
+        modes = ["dense", "hybrid", "hybrid_rerank"]
+
+    rows: dict[str, dict[str, Any]] = {}
+    for backend in requested_backends:
+        if real_backend_policy == "skip" and backend != "hash":
+            rows[backend] = {
+                "requested_backend": backend,
+                "effective_backend": None,
+                "status": "not_run",
+                "reason": "real backend policy is skip",
+            }
+            continue
+
+        retriever: Any = (
+            retriever_factory(backend)
+            if retriever_factory is not None
+            else RuleRetriever(store=ChromaRuleStore(embedding_backend=backend))
+        )
+
+        effective_backend: str = getattr(retriever.store, "embedding_backend", backend)
+        if effective_backend != backend:
+            rows[backend] = {
+                "requested_backend": backend,
+                "effective_backend": effective_backend,
+                "status": "unavailable",
+                "reason": f"effective backend is {effective_backend}, not {backend}",
+            }
+            continue
+
+        mode_report = evaluate_mode_comparison(
+            cases,
+            retriever=retriever,
+            modes=modes,
+            top_k=top_k,
+            embedding_backend=effective_backend,
+        )
+
+        rows[backend] = {
+            "requested_backend": backend,
+            "effective_backend": effective_backend,
+            "status": "measured",
+            "selected_mode": mode_report["selected_mode"],
+            "selection_reason": mode_report["selection_reason"],
+            "modes": mode_report["modes"],
+            "deltas_vs_dense": mode_report["deltas_vs_dense"],
+        }
+
+    best_real_backend = _find_best_real_backend(rows)
+    miss_buckets = (
+        _build_miss_buckets(cases, rows, best_real_backend, top_k, retriever_factory, modes)
+        if best_real_backend is not None
+        else []
+    )
+
+    return {
+        "case_count": len(cases),
+        "top_k": top_k,
+        "requested_backends": requested_backends,
+        "modes": [str(m) for m in modes],
+        "real_backend_policy": real_backend_policy,
+        "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "rows": rows,
+        "best_real_backend": best_real_backend,
+        "miss_buckets": miss_buckets,
+    }
+
+
+def _find_best_real_backend(rows: dict[str, dict[str, Any]]) -> str | None:
+    best: str | None = None
+    best_ndcg: float = -1.0
+    for backend, row in rows.items():
+        if backend == "hash":
+            continue
+        if row.get("status") != "measured":
+            continue
+        selected_mode = row["selected_mode"]
+        modes_data = row.get("modes", {})
+        mode_entry = modes_data.get(selected_mode, {})
+        gm = mode_entry.get("global_metrics", {})
+        ndcg = gm.get("ndcg_at_5", 0.0)
+        if ndcg > best_ndcg:
+            best_ndcg = ndcg
+            best = backend
+    return best
+
+
+def _build_miss_buckets(
+    cases: list[EvalCase],
+    rows: dict[str, dict[str, Any]],
+    best_real_backend: str,
+    top_k: int,
+    retriever_factory: Callable[[str], RuleRetriever | Any] | None,
+    modes: list[RagEvalMode],
+) -> list[dict[str, Any]]:
+    row = rows[best_real_backend]
+    selected_mode: str = row["selected_mode"]
+    effective_backend: str = row["effective_backend"]
+
+    retriever: Any = (
+        retriever_factory(effective_backend)
+        if retriever_factory is not None
+        else RuleRetriever(store=ChromaRuleStore(embedding_backend=effective_backend))
+    )
+
+    report = evaluate_eval_set(
+        cases,
+        retriever=retriever,
+        top_k=top_k,
+        embedding_backend=effective_backend,
+        mode=selected_mode,  # type: ignore[arg-type]
+    )
+
+    results: list[EvalCaseResult] = [EvalCaseResult(**r) for r in report["results"]]
+    groups: dict[tuple[str, str], list[EvalCaseResult]] = {}
+    for r in results:
+        key = (r.scenario_type, r.error_type)
+        groups.setdefault(key, []).append(r)
+
+    buckets: list[dict[str, Any]] = []
+    for (scenario_type, error_type), group in sorted(groups.items()):
+        case_count = len(group)
+        miss_count = sum(1 for r in group if r.recall_at_5 < 1.0)
+        buckets.append(
+            {
+                "scenario_type": scenario_type,
+                "error_type": error_type,
+                "case_count": case_count,
+                "miss_count": miss_count,
+                "hit_at_1": sum(r.hit_at_1 for r in group) / case_count,
+                "recall_at_5": sum(r.recall_at_5 for r in group) / case_count,
+                "mrr": sum(r.reciprocal_rank for r in group) / case_count,
+                "ndcg_at_5": sum(r.ndcg_at_5 for r in group) / case_count,
+            }
+        )
+    return buckets
+
+
+def write_matrix_markdown(
+    report: dict[str, Any],
+    output_path: Path = DEFAULT_MATRIX_REPORT_PATH,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(_format_matrix_markdown(report), encoding="utf-8")
+
+
+def write_matrix_json(
+    report: dict[str, Any],
+    output_path: Path = DEFAULT_MATRIX_JSON_PATH,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _format_matrix_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# RAG Quality Matrix Report",
+        "",
+        "## Metadata",
+        "",
+        "| Key | Value |",
+        "|---|---|",
+        f"| Case Count | {report['case_count']} |",
+        f"| Top K | {report.get('top_k', 5)} |",
+        f"| Real Backend Policy | `{report.get('real_backend_policy', 'skip')}` |",
+        f"| Evaluated At | {report.get('evaluated_at', 'N/A')} |",
+        f"| Best Real Backend | `{report.get('best_real_backend') or 'N/A'}` |",
+        "",
+        "## Row Summary",
+        "",
+        "| Backend | Eff Backend | Status | Selected Mode | Reason |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    rows = report.get("rows", {})
+    for backend in report.get("requested_backends", rows.keys()):
+        row = rows.get(backend, {})
+        status = row.get("status", "N/A")
+        eff = row.get("effective_backend") or "-"
+        sel_mode = row.get("selected_mode") or "-"
+        reason = (row.get("selection_reason") or row.get("reason") or "")[:60]
+        lines.append(
+            f"| {backend} | {eff} | {status} | {sel_mode} | {reason} |"
+        )
+    lines.append("")
+
+    lines.extend([
+        "## Global Metrics by Backend × Mode",
+        "",
+    ])
+    modes_list: list[str] = report.get("modes", [])
+    for mode_name in modes_list:
+        header = (
+            f"### {mode_name}"
+            + " | Backend | Hit@1 | Recall@5 | MRR | NDCG@5 |"
+            + "\n| --- | ---: | ---: | ---: | ---: |"
+        )
+        lines.append(header)
+        for backend in report.get("requested_backends", rows.keys()):
+            row = rows.get(backend, {})
+            if row.get("status") != "measured":
+                lines.append(f"| {backend} | - | - | - | - |")
+                continue
+            mode_data = row.get("modes", {}).get(mode_name, {})
+            gm = mode_data.get("global_metrics", {})
+            lines.append(
+                f"| {backend} | {gm.get('hit_at_1', 0):.4f} | "
+                f"{gm.get('recall_at_5', 0):.4f} | "
+                f"{gm.get('mrr', 0):.4f} | "
+                f"{gm.get('ndcg_at_5', 0):.4f} |"
+            )
+        lines.append("")
+
+    deltas = report.get("deltas_vs_dense", {})
+    if deltas:
+        lines.extend([
+            "## Deltas vs Dense",
+            "",
+            "| Mode | Δ Hit@1 | Δ MRR | Δ NDCG@5 |",
+            "| --- | ---: | ---: | ---: |",
+        ])
+        for mode_name in sorted(deltas):
+            d = deltas[mode_name]
+            sign_h = "+" if d.get("hit_at_1", 0) > 0 else ""
+            sign_m = "+" if d.get("mrr", 0) > 0 else ""
+            sign_n = "+" if d.get("ndcg_at_5", 0) > 0 else ""
+            lines.append(
+                f"| {mode_name} | {sign_h}{d.get('hit_at_1', 0):.4f} | "
+                f"{sign_m}{d.get('mrr', 0):.4f} | {sign_n}{d.get('ndcg_at_5', 0):.4f} |"
+            )
+        lines.append("")
+
+    miss = report.get("miss_buckets", [])
+    if miss:
+        lines.extend([
+            "## Miss Buckets",
+            "",
+            f"Best real backend: `{report.get('best_real_backend', 'N/A')}`",
+            "",
+            "| Scenario | Error Type | Cases | Misses | Hit@1 | Recall@5 | MRR | NDCG@5 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ])
+        for bucket in miss:
+            lines.append(
+                f"| {bucket['scenario_type']} | {bucket['error_type']} | "
+                f"{bucket['case_count']} | {bucket['miss_count']} | "
+                f"{bucket['hit_at_1']:.4f} | {bucket['recall_at_5']:.4f} | "
+                f"{bucket['mrr']:.4f} | {bucket['ndcg_at_5']:.4f} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def write_mode_comparison_markdown(
     report: dict[str, Any],
     output_path: Path = DEFAULT_COMPARISON_REPORT_PATH,
@@ -343,6 +614,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--compare-modes", type=str, default=None)
     parser.add_argument("--comparison-report", type=Path, default=DEFAULT_COMPARISON_REPORT_PATH)
     parser.add_argument("--comparison-json", type=Path, default=DEFAULT_COMPARISON_JSON_PATH)
+    parser.add_argument("--matrix-backends", type=str, default=None)
+    parser.add_argument("--matrix-modes", type=str, default=None)
+    parser.add_argument("--real-backend-policy", choices=["skip", "auto"], default="skip")
+    parser.add_argument("--matrix-report", type=Path, default=DEFAULT_MATRIX_REPORT_PATH)
+    parser.add_argument("--matrix-json", type=Path, default=DEFAULT_MATRIX_JSON_PATH)
     args = parser.parse_args(argv)
 
     if args.chunks is not None:
@@ -388,6 +664,27 @@ def main(argv: list[str] | None = None) -> None:
         if args.comparison_json:
             write_mode_comparison_json(report, args.comparison_json)
         print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+
+    if args.matrix_backends is not None:
+        matrix_backends: list[str] = [
+            b.strip() for b in args.matrix_backends.split(",")
+        ]
+        matrix_modes: list[RagEvalMode] = [
+            m.strip() for m in (args.matrix_modes or "dense,hybrid,hybrid_rerank").split(",")  # type: ignore[assignment]
+        ]
+        matrix_report = evaluate_backend_mode_matrix(
+            load_eval_set(args.eval_set),
+            requested_backends=matrix_backends,
+            modes=matrix_modes,
+            top_k=args.top_k,
+            real_backend_policy=args.real_backend_policy,
+        )
+        if args.matrix_report:
+            write_matrix_markdown(matrix_report, args.matrix_report)
+        if args.matrix_json:
+            write_matrix_json(matrix_report, args.matrix_json)
+        print(json.dumps(matrix_report, ensure_ascii=False, indent=2))
         return
 
     report = evaluate_eval_set(
