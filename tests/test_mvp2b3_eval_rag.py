@@ -631,6 +631,259 @@ def test_mode_with_negative_delta_is_rejected() -> None:
     assert selected == "dense"
 
 
+# ---------------------------------------------------------------------------
+# TASK-17.1: RAG backend-by-mode matrix tests
+# ---------------------------------------------------------------------------
+
+class _StubStore:
+    def __init__(self, embedding_backend: str) -> None:
+        self.embedding_backend = embedding_backend
+
+
+class _StubRetrieverWithStore(StubRetriever):
+    def __init__(self, responses: dict[str, list[str]], embedding_backend: str = "hash") -> None:
+        super().__init__(responses)
+        self.store = _StubStore(embedding_backend)
+
+
+def test_matrix_real_backend_policy_skip_marks_not_run() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="skip-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash", "bge_small", "bge_m3"],
+        modes=["dense"],
+        real_backend_policy="skip",
+        retriever_factory=factory,
+    )
+
+    assert report["real_backend_policy"] == "skip"
+    assert report["requested_backends"] == ["hash", "bge_small", "bge_m3"]
+
+    assert report["rows"]["hash"]["status"] == "measured"
+
+    bge_small = report["rows"]["bge_small"]
+    assert bge_small["status"] == "not_run"
+    assert bge_small["effective_backend"] is None
+    assert bge_small["reason"] == "real backend policy is skip"
+
+    bge_m3 = report["rows"]["bge_m3"]
+    assert bge_m3["status"] == "not_run"
+    assert bge_m3["effective_backend"] is None
+    assert bge_m3["reason"] == "real backend policy is skip"
+
+
+def test_matrix_unavailable_when_effective_backend_differs() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="unav-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"]}, embedding_backend="hash")
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash", "bge_small"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+    )
+
+    assert report["rows"]["hash"]["status"] == "measured"
+    assert report["rows"]["bge_small"]["status"] == "unavailable"
+    assert report["rows"]["bge_small"]["effective_backend"] == "hash"
+    assert "not bge_small" in report["rows"]["bge_small"]["reason"]
+
+
+def test_matrix_measured_row_has_required_fields() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="req-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash"],
+        modes=["dense", "hybrid"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+    )
+
+    row = report["rows"]["hash"]
+    assert row["requested_backend"] == "hash"
+    assert row["effective_backend"] == "hash"
+    assert row["status"] == "measured"
+    assert row["selected_mode"] in ("dense", "hybrid")
+    assert row["selection_reason"] is not None
+    assert row["modes"] is not None
+    assert row["deltas_vs_dense"] is not None
+
+    for mode_name in ["dense", "hybrid"]:
+        gm = row["modes"][mode_name]["global_metrics"]
+        assert "hit_at_1" in gm
+        assert "recall_at_5" in gm
+        assert "mrr" in gm
+        assert "ndcg_at_5" in gm
+
+
+def test_matrix_markdown_shows_per_backend_mode_metrics() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="md-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+    )
+
+    md = eval_rag._format_matrix_markdown(report)
+
+    assert "RAG Quality Matrix Report" in md
+    assert "hash" in md
+    assert "measured" in md
+    assert "Hit@1" in md
+    assert "Recall@5" in md
+    assert "MRR" in md
+    assert "NDCG@5" in md
+    assert "Global Metrics" in md
+
+
+def test_matrix_json_has_required_structure() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="json-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash", "bge_small"],
+        modes=["dense", "hybrid", "hybrid_rerank"],
+        real_backend_policy="skip",
+        retriever_factory=factory,
+    )
+
+    assert report["case_count"] == 1
+    assert report["top_k"] == 5
+    assert report["requested_backends"] == ["hash", "bge_small"]
+    assert report["modes"] == ["dense", "hybrid", "hybrid_rerank"]
+    assert "evaluated_at" in report
+    assert "rows" in report
+    assert report["real_backend_policy"] == "skip"
+
+    bge_row = report["rows"]["bge_small"]
+    assert "modes" not in bge_row
+    assert "deltas_vs_dense" not in bge_row
+    assert "selected_mode" not in bge_row
+
+    hash_row = report["rows"]["hash"]
+    assert "modes" in hash_row
+    assert "deltas_vs_dense" in hash_row
+
+
+def test_evaluate_eval_set_uses_min_score_zero_for_matrix() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="ms-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+
+    retrievers_captured: list[_StubRetrieverWithStore] = []
+
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        r = _StubRetrieverWithStore({"q1": ["c1"]}, embedding_backend=backend)
+        retrievers_captured.append(r)
+        return r
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+    )
+
+    assert report["rows"]["hash"]["status"] == "measured"
+
+    for r in retrievers_captured:
+        for request in r.requests:
+            assert request.min_score == 0.0
+
+
+def test_matrix_not_run_row_does_not_count_as_measured() -> None:
+    cases = [
+        eval_rag.EvalCase(
+            id="nr-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+    ]
+
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash", "bge_small"],
+        modes=["dense"],
+        real_backend_policy="skip",
+        retriever_factory=factory,
+    )
+
+    assert report["best_real_backend"] is None
+    assert len(report["miss_buckets"]) == 0
+
+
 def test_mode_with_all_non_negative_deltas_remains_eligible() -> None:
     modes = ["dense", "hybrid"]
     deltas = {

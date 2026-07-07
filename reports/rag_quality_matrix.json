@@ -12,7 +12,7 @@
     "hybrid_rerank"
   ],
   "real_backend_policy": "skip",
-  "evaluated_at": "2026-07-07T07:31:52.775503Z",
+  "evaluated_at": "2026-07-07T10:10:06.597536Z",
   "rows": {
     "hash": {
       "requested_backend": "hash",

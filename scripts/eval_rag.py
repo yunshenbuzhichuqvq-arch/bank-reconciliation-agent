@@ -514,24 +514,34 @@ def _format_matrix_markdown(report: dict[str, Any]) -> str:
             )
         lines.append("")
 
+    rows = report.get("rows", {})
     deltas = report.get("deltas_vs_dense", {})
-    if deltas:
+    if deltas or any(
+        row.get("deltas_vs_dense") for row in rows.values() if row.get("status") == "measured"
+    ):
         lines.extend([
             "## Deltas vs Dense",
             "",
-            "| Mode | Δ Hit@1 | Δ MRR | Δ NDCG@5 |",
-            "| --- | ---: | ---: | ---: |",
         ])
-        for mode_name in sorted(deltas):
-            d = deltas[mode_name]
-            sign_h = "+" if d.get("hit_at_1", 0) > 0 else ""
-            sign_m = "+" if d.get("mrr", 0) > 0 else ""
-            sign_n = "+" if d.get("ndcg_at_5", 0) > 0 else ""
+        for backend in report.get("requested_backends", rows.keys()):
+            row = rows.get(backend, {})
+            if row.get("status") != "measured" or not row.get("deltas_vs_dense"):
+                continue
+            lines.append(f"### {backend}")
             lines.append(
-                f"| {mode_name} | {sign_h}{d.get('hit_at_1', 0):.4f} | "
-                f"{sign_m}{d.get('mrr', 0):.4f} | {sign_n}{d.get('ndcg_at_5', 0):.4f} |"
+                "| Mode | Δ Hit@1 | Δ MRR | Δ NDCG@5 |\n"
+                "| --- | ---: | ---: | ---: |"
             )
-        lines.append("")
+            for mode_name in sorted(row["deltas_vs_dense"]):
+                d = row["deltas_vs_dense"][mode_name]
+                sign_h = "+" if d.get("hit_at_1", 0) > 0 else ""
+                sign_m = "+" if d.get("mrr", 0) > 0 else ""
+                sign_n = "+" if d.get("ndcg_at_5", 0) > 0 else ""
+                lines.append(
+                    f"| {mode_name} | {sign_h}{d.get('hit_at_1', 0):.4f} | "
+                    f"{sign_m}{d.get('mrr', 0):.4f} | {sign_n}{d.get('ndcg_at_5', 0):.4f} |"
+                )
+            lines.append("")
 
     miss = report.get("miss_buckets", [])
     if miss:

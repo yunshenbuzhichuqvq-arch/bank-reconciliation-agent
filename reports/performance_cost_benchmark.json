@@ -1,0 +1,48 @@
+{
+  "evaluated_at": "2026-07-07T10:10:07.347082Z",
+  "run_count": 5,
+  "provider_requested": "fake",
+  "provider_effective": "fake",
+  "model_requested": "deepseek-v4-flash",
+  "model_effective": "fake-llm",
+  "boundary": "offline benchmark; not production SLA",
+  "latency": {
+    "extraction_agent": {
+      "avg_latency_ms": 0.062,
+      "p95_latency_ms": 0.108,
+      "min_latency_ms": 0.04,
+      "max_latency_ms": 0.108,
+      "samples_ms": [
+        0.066,
+        0.108,
+        0.057,
+        0.04,
+        0.04
+      ]
+    },
+    "rag_search": {
+      "avg_latency_ms": 49.342,
+      "p95_latency_ms": 243.564,
+      "min_latency_ms": 0.707,
+      "max_latency_ms": 243.564,
+      "samples_ms": [
+        243.564,
+        0.88,
+        0.782,
+        0.779,
+        0.707
+      ]
+    }
+  },
+  "tokens": {
+    "token_usage_available": false,
+    "input_tokens": null,
+    "output_tokens": null,
+    "total_tokens": null
+  },
+  "cost": {
+    "cost_available": false,
+    "estimated_cost_usd": null,
+    "assumptions": "fake provider; no real LLM cost"
+  }
+}
