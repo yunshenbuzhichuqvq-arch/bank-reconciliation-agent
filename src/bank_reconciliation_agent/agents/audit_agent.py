@@ -90,7 +90,6 @@ def apply_audit_safety_policy(
 
     raw_decision = decision.decision
     raw_risk_level = decision.risk_level
-    raw_reason = decision.reason
 
     needs_override = False
     updates: dict[str, object] = {}
@@ -117,8 +116,8 @@ def apply_audit_safety_policy(
     )
     updates["reason"] = (
         f"[安全策略介入] {exception_branch or error_type} 高风险分支必须人工复核，"
-        f"系统已覆盖模型原始输出（decision={raw_decision}, risk_level={raw_risk_level}）。"
-        f"原始理由：{raw_reason}"
+        f"系统已覆盖模型原始输出（decision={raw_decision}, risk_level={raw_risk_level}），"
+        f"已改写为 PENDING_HUMAN / HIGH"
     )
 
     return decision.model_copy(update=updates)

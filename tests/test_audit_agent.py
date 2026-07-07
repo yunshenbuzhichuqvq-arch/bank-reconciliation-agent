@@ -620,4 +620,10 @@ def test_safety_policy_overrides_reason_on_intervention() -> None:
     assert "[安全策略介入]" in decision.reason
     assert "BE-R008" in decision.reason
     assert "AUTO_FIXED" in decision.reason
-    assert "金额一致可自动平账" in decision.reason
+    assert "PENDING_HUMAN" in decision.reason
+    assert "HIGH" in decision.reason
+    assert "金额一致可自动平账" not in decision.reason
+    assert decision.safety_policy_reason is not None
+    assert "BE-R008" in decision.safety_policy_reason
+    assert "AUTO_FIXED" in decision.safety_policy_reason
+    assert "金额一致可自动平账" not in decision.safety_policy_reason
