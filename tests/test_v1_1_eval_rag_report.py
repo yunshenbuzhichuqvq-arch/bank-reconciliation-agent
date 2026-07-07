@@ -304,9 +304,11 @@ def test_matrix_cli_writes_reports(tmp_path: Path) -> None:
 def test_matrix_skip_policy_produces_no_real_embedding_fallback_warning(
     tmp_path: Path,
 ) -> None:
+    import os
     import subprocess
     import sys
 
+    env = {**os.environ, "EMBEDDING_BACKEND": "bge_m3"}
     result = subprocess.run(
         [
             sys.executable,
@@ -324,20 +326,19 @@ def test_matrix_skip_policy_produces_no_real_embedding_fallback_warning(
             str(tmp_path / "rag_quality_matrix.md"),
             "--matrix-json",
             str(tmp_path / "rag_quality_matrix.json"),
-            "--chroma",
-            str(tmp_path / "chroma"),
         ],
         text=True,
         capture_output=True,
+        env=env,
     )
     assert result.returncode == 0, result.stderr
 
-    stderr_lower = result.stderr.lower()
-    assert "fallback" not in stderr_lower, (
-        f"stderr should not contain 'fallback': {result.stderr}"
+    combined = (result.stdout + result.stderr).lower()
+    assert "rag_embedding_backend_fallback" not in combined, (
+        f"should not contain rag_embedding_backend_fallback: {result.stderr}"
     )
-    assert "bge_m3" not in stderr_lower and "bge_small" not in stderr_lower, (
-        f"stderr should not reference real embedding backends: {result.stderr}"
+    assert "sentence_transformers" not in combined, (
+        f"should not contain sentence_transformers: {result.stderr}"
     )
 
     data = json.loads((tmp_path / "rag_quality_matrix.json").read_text(encoding="utf-8"))

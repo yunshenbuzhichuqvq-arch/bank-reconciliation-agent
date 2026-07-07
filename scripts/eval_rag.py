@@ -660,6 +660,27 @@ def main(argv: list[str] | None = None) -> None:
         _print_legacy_report(dense_summary, hybrid_summary)
         return
 
+    if args.matrix_backends is not None:
+        matrix_backends: list[str] = [
+            b.strip() for b in args.matrix_backends.split(",")
+        ]
+        matrix_modes: list[RagEvalMode] = [
+            m.strip() for m in (args.matrix_modes or "dense,hybrid,hybrid_rerank").split(",")  # type: ignore[assignment]
+        ]
+        matrix_report = evaluate_backend_mode_matrix(
+            load_eval_set(args.eval_set),
+            requested_backends=matrix_backends,
+            modes=matrix_modes,
+            top_k=args.top_k,
+            real_backend_policy=args.real_backend_policy,
+        )
+        if args.matrix_report:
+            write_matrix_markdown(matrix_report, args.matrix_report)
+        if args.matrix_json:
+            write_matrix_json(matrix_report, args.matrix_json)
+        print(json.dumps(matrix_report, ensure_ascii=False, indent=2))
+        return
+
     retriever: Any
     if args.chroma is None and args.embedding_backend == settings.embedding_backend:
         retriever = _get_rule_retriever()
@@ -688,27 +709,6 @@ def main(argv: list[str] | None = None) -> None:
         if args.comparison_json:
             write_mode_comparison_json(report, args.comparison_json)
         print(json.dumps(report, ensure_ascii=False, indent=2))
-        return
-
-    if args.matrix_backends is not None:
-        matrix_backends: list[str] = [
-            b.strip() for b in args.matrix_backends.split(",")
-        ]
-        matrix_modes: list[RagEvalMode] = [
-            m.strip() for m in (args.matrix_modes or "dense,hybrid,hybrid_rerank").split(",")  # type: ignore[assignment]
-        ]
-        matrix_report = evaluate_backend_mode_matrix(
-            load_eval_set(args.eval_set),
-            requested_backends=matrix_backends,
-            modes=matrix_modes,
-            top_k=args.top_k,
-            real_backend_policy=args.real_backend_policy,
-        )
-        if args.matrix_report:
-            write_matrix_markdown(matrix_report, args.matrix_report)
-        if args.matrix_json:
-            write_matrix_json(matrix_report, args.matrix_json)
-        print(json.dumps(matrix_report, ensure_ascii=False, indent=2))
         return
 
     report = evaluate_eval_set(
