@@ -7,7 +7,7 @@
 | Case Count | 120 |
 | Top K | 5 |
 | Real Backend Policy | `skip` |
-| Evaluated At | 2026-07-07T07:31:52.775503Z |
+| Evaluated At | 2026-07-07T09:48:20.042063Z |
 | Best Real Backend | `N/A` |
 
 ## Row Summary
@@ -37,3 +37,11 @@
 | hash | 0.4333 | 0.6583 | 0.5682 | 0.5528 |
 | bge_small | - | - | - | - |
 | bge_m3 | - | - | - | - |
+
+## Deltas vs Dense
+
+### hash
+| Mode | Δ Hit@1 | Δ MRR | Δ NDCG@5 |
+| --- | ---: | ---: | ---: |
+| hybrid | +0.1417 | +0.1765 | +0.1623 |
+| hybrid_rerank | +0.2667 | +0.2932 | +0.2704 |
