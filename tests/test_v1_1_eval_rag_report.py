@@ -651,40 +651,13 @@ def _make_matrix(
     global_ndcg: float = 0.65,
     clearing_single_side_recall: float = 0.40,
     clearing_single_side_miss_count: int = 7,
+    bucket_metrics: list[dict] | None = None,
+    extra_buckets: list[dict] | None = None,
+    selected_mode: str | None = None,
 ) -> dict:
-    return {
-        "case_count": case_count,
-        "top_k": top_k,
-        "real_backend_policy": real_backend_policy,
-        "requested_backends": ["hash", "bge_small", "bge_m3"],
-        "modes": ["dense", "hybrid", "hybrid_rerank"],
-        "best_real_backend": best_real_backend,
-        "best_real_mode": best_real_mode,
-        "rows": {
-            "bge_m3": {
-                "requested_backend": backend,
-                "effective_backend": effective_backend,
-                "status": status,
-                "selected_mode": mode,
-                "selection_reason": "test",
-                "modes": {
-                    mode: {
-                        "global_metrics": {
-                            "hit_at_1": global_hit1,
-                            "recall_at_5": global_recall,
-                            "mrr": global_mrr,
-                            "ndcg_at_5": global_ndcg,
-                        }
-                    }
-                },
-                "deltas_vs_dense": {},
-            }
-        },
-        "real_backend_requirement": {
-            "required_backend": "bge_small",
-            "satisfied": status == "measured" and effective_backend == backend,
-        },
-        "miss_buckets": [
+    selected = selected_mode or mode
+    if bucket_metrics is None:
+        bucket_metrics = [
             {
                 "scenario_type": "BANK_ENTERPRISE",
                 "error_type": "AMOUNT_MISMATCH",
@@ -715,7 +688,44 @@ def _make_matrix(
                 "mrr": 0.30,
                 "ndcg_at_5": 0.30,
             },
-        ],
+        ]
+        if extra_buckets:
+            bucket_metrics.extend(extra_buckets)
+
+    return {
+        "case_count": case_count,
+        "top_k": top_k,
+        "real_backend_policy": real_backend_policy,
+        "requested_backends": ["hash", "bge_small", "bge_m3"],
+        "modes": ["dense", "hybrid", "hybrid_rerank"],
+        "best_real_backend": best_real_backend,
+        "best_real_mode": best_real_mode,
+        "rows": {
+            "bge_m3": {
+                "requested_backend": backend,
+                "effective_backend": effective_backend,
+                "status": status,
+                "selected_mode": selected,
+                "selection_reason": "test",
+                "modes": {
+                    mode: {
+                        "global_metrics": {
+                            "hit_at_1": global_hit1,
+                            "recall_at_5": global_recall,
+                            "mrr": global_mrr,
+                            "ndcg_at_5": global_ndcg,
+                        },
+                        "bucket_metrics": bucket_metrics,
+                    }
+                },
+                "deltas_vs_dense": {},
+            }
+        },
+        "real_backend_requirement": {
+            "required_backend": "bge_small",
+            "satisfied": status == "measured" and effective_backend == backend,
+        },
+        "miss_buckets": bucket_metrics,
     }
 
 
@@ -917,3 +927,86 @@ def test_build_optimization_comparison_side_effect_buckets_capped_and_sorted() -
     if len(se["largest_improvements"]) > 1:
         for i in range(len(se["largest_improvements"]) - 1):
             assert se["largest_improvements"][i]["delta"]["ndcg_at_5"] >= se["largest_improvements"][i + 1]["delta"]["ndcg_at_5"]
+
+
+def test_build_optimization_comparison_uses_requested_mode_not_selected_mode() -> None:
+    dense_target = {
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "SINGLE_SIDE_MISSING",
+        "case_count": 10,
+        "miss_count": 8,
+        "hit_at_1": 0.10,
+        "recall_at_5": 0.20,
+        "mrr": 0.15,
+        "ndcg_at_5": 0.15,
+    }
+
+    baseline = _make_matrix(
+        selected_mode="hybrid",
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
+    )
+    baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"] = [
+        b for b in baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+        if b["error_type"] == "SINGLE_SIDE_MISSING"
+    ]
+
+    after = _make_matrix(
+        selected_mode="dense",
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+    after["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"] = [
+        b for b in after["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+        if b["error_type"] == "SINGLE_SIDE_MISSING"
+    ]
+    after["rows"]["bge_m3"]["modes"]["dense"] = {
+        "global_metrics": {"hit_at_1": 0.50, "recall_at_5": 0.70, "mrr": 0.60, "ndcg_at_5": 0.55},
+        "bucket_metrics": [dict(dense_target)],
+    }
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+        backend="bge_m3",
+        mode="hybrid",
+    )
+
+    assert report["trust"]["trusted"] is True
+    assert report["target_bucket"]["before"]["recall_at_5"] == 0.40
+    assert report["target_bucket"]["after"]["recall_at_5"] == 0.60
+
+
+def test_build_optimization_comparison_trust_fails_when_bucket_metrics_missing() -> None:
+    baseline = _make_matrix()
+    del baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+
+    after = _make_matrix()
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert any("bucket_metrics" in r for r in report["trust"]["reasons"])
+
+
+def test_optimization_cli_rejects_missing_args() -> None:
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "scripts.eval_rag",
+            "--optimization-baseline-json", "/tmp/nonexistent.json",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "both be provided" in result.stderr

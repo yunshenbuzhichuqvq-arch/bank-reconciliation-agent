@@ -253,9 +253,38 @@ def evaluate_mode_comparison(
         "baseline_mode": "dense",
         "selected_mode": selected_mode,
         "selection_reason": selection_reason,
-        "modes": {m: {"global_metrics": mode_reports[m]["global_metrics"]} for m in modes},
+        "modes": {m: {
+            "global_metrics": mode_reports[m]["global_metrics"],
+            "bucket_metrics": _compute_bucket_metrics(mode_reports[m]),
+        } for m in modes},
         "deltas_vs_dense": deltas,
     }
+
+
+def _compute_bucket_metrics(report: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[EvalCaseResult] = [EvalCaseResult(**r) for r in report.get("results", [])]
+    groups: dict[tuple[str, str], list[EvalCaseResult]] = {}
+    for r in results:
+        key = (r.scenario_type, r.error_type)
+        groups.setdefault(key, []).append(r)
+
+    buckets: list[dict[str, Any]] = []
+    for (scenario_type, error_type), group in sorted(groups.items()):
+        case_count = len(group)
+        miss_count = sum(1 for r in group if r.recall_at_5 < 1.0)
+        buckets.append(
+            {
+                "scenario_type": scenario_type,
+                "error_type": error_type,
+                "case_count": case_count,
+                "miss_count": miss_count,
+                "hit_at_1": sum(r.hit_at_1 for r in group) / case_count,
+                "recall_at_5": sum(r.recall_at_5 for r in group) / case_count,
+                "mrr": sum(r.reciprocal_rank for r in group) / case_count,
+                "ndcg_at_5": sum(r.ndcg_at_5 for r in group) / case_count,
+            }
+        )
+    return buckets
 
 
 def _select_best_mode(
@@ -766,8 +795,13 @@ def _global_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) ->
     return row.get("modes", {}).get(mode, {}).get("global_metrics", {})
 
 
-def _bucket_by_key(matrix: dict[str, Any], scenario_type: str, error_type: str) -> dict[str, Any]:
-    for bucket in matrix.get("miss_buckets", []):
+def _bucket_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) -> list[dict[str, Any]]:
+    row = _matrix_row_for_backend(matrix, backend)
+    return row.get("modes", {}).get(mode, {}).get("bucket_metrics", [])
+
+
+def _bucket_by_key(matrix: dict[str, Any], backend: str, mode: str, scenario_type: str, error_type: str) -> dict[str, Any]:
+    for bucket in _bucket_metrics_for_mode(matrix, backend, mode):
         if bucket.get("scenario_type") == scenario_type and bucket.get("error_type") == error_type:
             return bucket
     return {}
@@ -781,9 +815,9 @@ def _metric_delta(after: dict[str, Any], before: dict[str, Any]) -> dict[str, An
     return delta
 
 
-def _bucket_deltas(baseline_matrix: dict[str, Any], after_matrix: dict[str, Any]) -> list[dict[str, Any]]:
-    baseline_buckets = baseline_matrix.get("miss_buckets", [])
-    after_buckets = after_matrix.get("miss_buckets", [])
+def _bucket_deltas(baseline_matrix: dict[str, Any], after_matrix: dict[str, Any], backend: str, mode: str) -> list[dict[str, Any]]:
+    baseline_buckets = _bucket_metrics_for_mode(baseline_matrix, backend, mode)
+    after_buckets = _bucket_metrics_for_mode(after_matrix, backend, mode)
     after_by_key: dict[tuple[str, str], dict[str, Any]] = {
         (b["scenario_type"], b["error_type"]): b for b in after_buckets
     }
@@ -868,10 +902,28 @@ def build_optimization_comparison_report(
         trust_reasons.append(f"top_k mismatch: baseline={baseline_source['top_k']}, after={after_source['top_k']}")
         trusted = False
 
+    baseline_buckets = _bucket_metrics_for_mode(baseline_matrix, backend, mode)
+    after_buckets = _bucket_metrics_for_mode(after_matrix, backend, mode)
+    if not baseline_buckets:
+        trust_reasons.append(f"baseline matrix lacks bucket_metrics for {backend}/{mode}")
+        trusted = False
+    if not after_buckets:
+        trust_reasons.append(f"after matrix lacks bucket_metrics for {backend}/{mode}")
+        trusted = False
+
+    baseline_global = _global_metrics_for_mode(baseline_matrix, backend, mode)
+    after_global = _global_metrics_for_mode(after_matrix, backend, mode)
+    if not baseline_global:
+        trust_reasons.append(f"baseline matrix lacks global_metrics for {backend}/{mode}")
+        trusted = False
+    if not after_global:
+        trust_reasons.append(f"after matrix lacks global_metrics for {backend}/{mode}")
+        trusted = False
+
     trust = {"trusted": trusted, "reasons": trust_reasons}
 
-    target_before = _bucket_by_key(baseline_matrix, target_scenario_type, target_error_type)
-    target_after = _bucket_by_key(after_matrix, target_scenario_type, target_error_type)
+    target_before = _bucket_by_key(baseline_matrix, backend, mode, target_scenario_type, target_error_type)
+    target_after = _bucket_by_key(after_matrix, backend, mode, target_scenario_type, target_error_type)
 
     if target_before and target_after:
         target_delta = _metric_delta(target_after, target_before)
@@ -904,8 +956,6 @@ def build_optimization_comparison_report(
         "improved": target_improved,
     }
 
-    baseline_global = _global_metrics_for_mode(baseline_matrix, backend, mode)
-    after_global = _global_metrics_for_mode(after_matrix, backend, mode)
     if baseline_global and after_global:
         global_delta = _metric_delta(after_global, baseline_global)
         within_regression_limit = True
@@ -935,7 +985,7 @@ def build_optimization_comparison_report(
         "max_global_regression": max_global_regression,
     }
 
-    all_deltas = _bucket_deltas(baseline_matrix, after_matrix)
+    all_deltas = _bucket_deltas(baseline_matrix, after_matrix, backend, mode)
     non_target_deltas = [
         d for d in all_deltas
         if not (d["scenario_type"] == target_scenario_type and d["error_type"] == target_error_type)
@@ -1174,7 +1224,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--optimization-mode", default="hybrid")
     args = parser.parse_args(argv)
 
-    if args.optimization_baseline_json is not None and args.optimization_after_json is not None:
+    has_baseline = args.optimization_baseline_json is not None
+    has_after = args.optimization_after_json is not None
+    if has_baseline != has_after:
+        parser.error("--optimization-baseline-json and --optimization-after-json must both be provided, or neither")
+
+    if has_baseline and has_after:
         baseline_matrix = json.loads(args.optimization_baseline_json.read_text(encoding="utf-8"))
         after_matrix = json.loads(args.optimization_after_json.read_text(encoding="utf-8"))
         comparison = build_optimization_comparison_report(
