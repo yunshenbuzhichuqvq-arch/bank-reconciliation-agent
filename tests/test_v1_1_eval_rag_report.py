@@ -250,7 +250,8 @@ def test_matrix_json_structure_has_required_keys() -> None:
 
     required_top = {
         "case_count", "top_k", "requested_backends", "modes",
-        "real_backend_policy", "rows", "best_real_backend", "miss_buckets",
+        "real_backend_policy", "rows", "best_real_backend", "best_real_mode",
+        "real_backend_requirement", "miss_buckets",
     }
     assert required_top.issubset(set(report))
 
@@ -294,6 +295,8 @@ def test_matrix_cli_writes_reports(tmp_path: Path) -> None:
     assert "requested_backends" in payload
     assert "modes" in payload
     assert "best_real_backend" in payload
+    assert "best_real_mode" in payload
+    assert "real_backend_requirement" in payload
     assert "miss_buckets" in payload
 
     md = matrix_report_path.read_text(encoding="utf-8")
@@ -345,3 +348,140 @@ def test_matrix_skip_policy_produces_no_real_embedding_fallback_warning(
     assert data["rows"]["hash"]["status"] == "measured"
     assert data["rows"]["bge_small"]["status"] == "not_run"
     assert data["rows"]["bge_m3"]["status"] == "not_run"
+
+
+def test_real_backend_requirement_skip_policy_not_satisfied() -> None:
+    def factory(_backend: str) -> _FakeRetriever:
+        return _FakeRetriever("hash")
+
+    cases = [
+        eval_rag.EvalCase(
+            id="c1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["chunk-1"],
+        )
+    ]
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash", "bge_small"],
+        modes=["dense"],
+        real_backend_policy="skip",
+        retriever_factory=factory,
+    )
+
+    req = report["real_backend_requirement"]
+    assert req["required_backend"] == "bge_small"
+    assert req["satisfied"] is False
+    assert "reason" in req
+    assert "measured_real_backends" in req
+    assert "unavailable_real_backends" in req
+    assert "not_run_real_backends" in req
+
+
+def test_real_backend_requirement_bge_small_fallback_unavailable() -> None:
+    def factory(backend: str) -> _FakeRetriever:
+        return _FakeRetriever("hash")
+
+    cases = [
+        eval_rag.EvalCase(
+            id="c1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["chunk-1"],
+        )
+    ]
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash", "bge_small"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+    )
+
+    rows = report["rows"]
+    assert rows["bge_small"]["status"] == "unavailable"
+    assert rows["bge_small"]["effective_backend"] == "hash"
+    req = report["real_backend_requirement"]
+    assert req["satisfied"] is False
+
+
+def test_real_backend_requirement_bge_small_measured_satisfied() -> None:
+    def factory(backend: str) -> _FakeRetriever:
+        if backend == "bge_m3":
+            return _FakeRetriever("hash")
+        return _FakeRetriever(backend)
+
+    cases = [
+        eval_rag.EvalCase(
+            id="c1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["chunk-1"],
+        )
+    ]
+    report = eval_rag.evaluate_backend_mode_matrix(
+        cases,
+        requested_backends=["hash", "bge_small", "bge_m3"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+    )
+
+    rows = report["rows"]
+    assert rows["bge_small"]["status"] == "measured"
+    assert rows["bge_small"]["effective_backend"] == "bge_small"
+    assert rows["bge_m3"]["status"] == "unavailable"
+    assert rows["bge_m3"]["effective_backend"] == "hash"
+    req = report["real_backend_requirement"]
+    assert req["satisfied"] is True
+    assert req["required_backend"] == "bge_small"
+    assert "bge_small" in req["measured_real_backends"]
+    assert "bge_m3" in req["unavailable_real_backends"]
+
+
+def test_matrix_markdown_contains_real_backend_requirement_section() -> None:
+    from scripts.eval_rag import _format_matrix_markdown
+
+    report = {
+        "case_count": 1,
+        "top_k": 5,
+        "requested_backends": ["hash", "bge_small"],
+        "modes": ["dense"],
+        "real_backend_policy": "skip",
+        "evaluated_at": "2025-01-01T00:00:00Z",
+        "rows": {
+            "hash": {
+                "requested_backend": "hash",
+                "effective_backend": "hash",
+                "status": "measured",
+                "selected_mode": "dense",
+                "selection_reason": "test",
+                "modes": {"dense": {"global_metrics": {"hit_at_1": 1.0, "recall_at_5": 1.0, "mrr": 1.0, "ndcg_at_5": 1.0}}},
+                "deltas_vs_dense": {},
+            },
+            "bge_small": {
+                "requested_backend": "bge_small",
+                "effective_backend": None,
+                "status": "not_run",
+                "reason": "real backend policy is skip",
+            },
+        },
+        "best_real_backend": None,
+        "best_real_mode": None,
+        "real_backend_requirement": {
+            "required_backend": "bge_small",
+            "satisfied": False,
+            "measured_real_backends": [],
+            "unavailable_real_backends": [],
+            "not_run_real_backends": ["bge_small"],
+            "reason": "bge_small is not a trusted measured backend",
+        },
+        "miss_buckets": [],
+    }
+    md = _format_matrix_markdown(report)
+    assert "Real Backend Requirement" in md
+    assert "`bge_small`" in md
