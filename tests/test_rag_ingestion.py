@@ -6,7 +6,11 @@ from fastapi.testclient import TestClient
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.rag.retriever import RuleRetriever
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest
-from scripts.build_rule_chunks import build_rule_chunks, build_sources_manifest
+from scripts.build_rule_chunks import (
+    _build_searchable_content,
+    build_rule_chunks,
+    build_sources_manifest,
+)
 from tests.auth_helpers import demo_bearer_headers
 
 
@@ -116,3 +120,49 @@ def test_rag_search_api_returns_traceable_rule_chunks() -> None:
     assert items
     assert any("single_side_missing" in item["business_tags"] for item in items)
     assert all(item["source_url"].startswith("https://") for item in items)
+
+
+def test_build_rule_chunks_content_prefixed_with_searchable_metadata(tmp_path: Path) -> None:
+    chunks = build_rule_chunks(
+        sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
+        output_path=tmp_path / "rule_chunks.jsonl",
+    )
+
+    for chunk in chunks:
+        content = chunk["content"]
+        assert content.startswith("source_name: "), f"Missing source_name prefix in {chunk['chunk_id']}"
+        assert (
+            f"section_title: {chunk['section_title']}" in content
+        ), f"Missing section_title prefix in {chunk['chunk_id']}"
+        assert "business_tags: " in content, f"Missing business_tags prefix in chunk {chunk['chunk_id']}"
+        for tag in chunk["business_tags"]:
+            assert tag in content, f"Missing tag {tag!r} in content of chunk {chunk['chunk_id']}"
+
+    for chunk in chunks:
+        assert "chunk_id" in chunk
+        assert "source_file" in chunk
+        assert "source_url" in chunk
+        assert "section_title" in chunk
+        assert "business_tags" in chunk
+
+
+def test_build_searchable_content_exact_prefix_shape() -> None:
+    source = {
+        "source_name": "手续费差异处理规则",
+        "business_tags": ["amount_mismatch", "fee_difference", "audit_trail"],
+    }
+    section = {
+        "section_title": "手续费差异审计",
+        "content": "手续费差异需要保留手续费、净额和渠道来源。",
+    }
+
+    result = _build_searchable_content(source, section)
+
+    expected = (
+        "source_name: 手续费差异处理规则\n"
+        "section_title: 手续费差异审计\n"
+        "business_tags: amount_mismatch, fee_difference, audit_trail\n"
+        "\n"
+        "手续费差异需要保留手续费、净额和渠道来源。"
+    )
+    assert result == expected

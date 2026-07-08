@@ -14,6 +14,19 @@ HEADING_PATTERN = re.compile(r"^##\s+(?P<title>.+)$", re.MULTILINE)
 FRONT_MATTER_PATTERN = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
 
 
+def _build_searchable_content(source: dict[str, Any], section: dict[str, str]) -> str:
+    business_tags = ", ".join(source["business_tags"])
+    return "\n".join(
+        [
+            f"source_name: {source['source_name']}",
+            f"section_title: {section['section_title']}",
+            f"business_tags: {business_tags}",
+            "",
+            section["content"],
+        ]
+    )
+
+
 def build_rule_chunks(
     sources_path: Path = DEFAULT_SOURCES_PATH,
     output_path: Path = DEFAULT_OUTPUT_PATH,
@@ -37,7 +50,7 @@ def build_rule_chunks(
                     "page_no": None,
                     "element_type": "paragraph",
                     "business_tags": source["business_tags"],
-                    "content": section["content"],
+                    "content": _build_searchable_content(source, section),
                 }
             )
 
