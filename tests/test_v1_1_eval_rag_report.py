@@ -632,3 +632,288 @@ def test_matrix_markdown_miss_buckets_show_miss_sample_ids() -> None:
     assert "c2" in md
     assert "chunk-x" in md
     assert "BANK_ENTERPRISE_chunk_1" in md
+
+
+def _make_matrix(
+    *,
+    case_count: int = 120,
+    top_k: int = 5,
+    real_backend_policy: str = "auto",
+    best_real_backend: str | None = "bge_m3",
+    best_real_mode: str | None = "hybrid",
+    backend: str = "bge_m3",
+    mode: str = "hybrid",
+    status: str = "measured",
+    effective_backend: str = "bge_m3",
+    global_hit1: float = 0.55,
+    global_recall: float = 0.75,
+    global_mrr: float = 0.66,
+    global_ndcg: float = 0.65,
+    clearing_single_side_recall: float = 0.40,
+    clearing_single_side_miss_count: int = 7,
+) -> dict:
+    return {
+        "case_count": case_count,
+        "top_k": top_k,
+        "real_backend_policy": real_backend_policy,
+        "requested_backends": ["hash", "bge_small", "bge_m3"],
+        "modes": ["dense", "hybrid", "hybrid_rerank"],
+        "best_real_backend": best_real_backend,
+        "best_real_mode": best_real_mode,
+        "rows": {
+            "bge_m3": {
+                "requested_backend": backend,
+                "effective_backend": effective_backend,
+                "status": status,
+                "selected_mode": mode,
+                "selection_reason": "test",
+                "modes": {
+                    mode: {
+                        "global_metrics": {
+                            "hit_at_1": global_hit1,
+                            "recall_at_5": global_recall,
+                            "mrr": global_mrr,
+                            "ndcg_at_5": global_ndcg,
+                        }
+                    }
+                },
+                "deltas_vs_dense": {},
+            }
+        },
+        "real_backend_requirement": {
+            "required_backend": "bge_small",
+            "satisfied": status == "measured" and effective_backend == backend,
+        },
+        "miss_buckets": [
+            {
+                "scenario_type": "BANK_ENTERPRISE",
+                "error_type": "AMOUNT_MISMATCH",
+                "case_count": 70,
+                "miss_count": 5,
+                "hit_at_1": 0.60,
+                "recall_at_5": 0.80,
+                "mrr": 0.72,
+                "ndcg_at_5": 0.70,
+            },
+            {
+                "scenario_type": "BANK_ENTERPRISE",
+                "error_type": "TIMING_DIFFERENCE",
+                "case_count": 40,
+                "miss_count": 4,
+                "hit_at_1": 0.50,
+                "recall_at_5": 0.70,
+                "mrr": 0.62,
+                "ndcg_at_5": 0.60,
+            },
+            {
+                "scenario_type": "BANK_CLEARING",
+                "error_type": "SINGLE_SIDE_MISSING",
+                "case_count": 10,
+                "miss_count": clearing_single_side_miss_count,
+                "hit_at_1": 0.20,
+                "recall_at_5": clearing_single_side_recall,
+                "mrr": 0.30,
+                "ndcg_at_5": 0.30,
+            },
+        ],
+    }
+
+
+def test_build_optimization_comparison_target_improved() -> None:
+    baseline = _make_matrix(clearing_single_side_recall=0.40, clearing_single_side_miss_count=7)
+    after = _make_matrix(clearing_single_side_recall=0.60, clearing_single_side_miss_count=4)
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["target_bucket"]["improved"] is True
+    assert report["target_bucket"]["before"]["recall_at_5"] == 0.40
+    assert report["target_bucket"]["after"]["recall_at_5"] == 0.60
+    assert report["target_bucket"]["before"]["miss_count"] == 7
+    assert report["target_bucket"]["after"]["miss_count"] == 4
+
+
+def test_build_optimization_comparison_success_true_when_target_improves_and_global_within_limit() -> None:
+    baseline = _make_matrix(
+        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+        global_mrr=0.66, global_ndcg=0.65,
+    )
+    after = _make_matrix(
+        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+        global_mrr=0.67, global_ndcg=0.66,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["success"] is True
+    assert report["global"]["within_regression_limit"] is True
+
+
+def test_build_optimization_comparison_success_false_when_after_effective_backend_is_hash() -> None:
+    baseline = _make_matrix()
+    after = _make_matrix(
+        effective_backend="hash",
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["success"] is False
+    assert report["trust"]["trusted"] is False
+    assert "after effective backend" in " ".join(report["failure_reasons"]).lower() or any("hash" in r.lower() for r in report["failure_reasons"])
+
+
+def test_build_optimization_comparison_success_false_when_recall_up_but_miss_count_not_down() -> None:
+    baseline = _make_matrix(clearing_single_side_recall=0.40, clearing_single_side_miss_count=7)
+    after = _make_matrix(clearing_single_side_recall=0.50, clearing_single_side_miss_count=7)
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["success"] is False
+    assert report["target_bucket"]["improved"] is False
+    assert "miss_count" in " ".join(report["failure_reasons"]).lower()
+
+
+def test_build_optimization_comparison_success_false_when_global_ndcg_regresses() -> None:
+    baseline = _make_matrix(
+        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+        global_mrr=0.66, global_ndcg=0.65,
+    )
+    after = _make_matrix(
+        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+        global_mrr=0.60, global_ndcg=0.60,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+    assert report["success"] is False
+    assert report["global"]["within_regression_limit"] is False
+
+
+def test_build_optimization_comparison_side_effect_buckets_capped_and_sorted() -> None:
+    baseline = _make_matrix()
+    baseline["miss_buckets"].append({
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "EXTRA_BUCKET",
+        "case_count": 5,
+        "miss_count": 3,
+        "hit_at_1": 0.10,
+        "recall_at_5": 0.30,
+        "mrr": 0.20,
+        "ndcg_at_5": 0.20,
+    })
+    baseline["miss_buckets"].append({
+        "scenario_type": "BANK_ENTERPRISE",
+        "error_type": "EXTRA_BUCKET_2",
+        "case_count": 5,
+        "miss_count": 3,
+        "hit_at_1": 0.10,
+        "recall_at_5": 0.30,
+        "mrr": 0.20,
+        "ndcg_at_5": 0.20,
+    })
+    baseline["miss_buckets"].append({
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "EXTRA_BUCKET_3",
+        "case_count": 5,
+        "miss_count": 3,
+        "hit_at_1": 0.10,
+        "recall_at_5": 0.30,
+        "mrr": 0.20,
+        "ndcg_at_5": 0.20,
+    })
+    baseline["miss_buckets"].append({
+        "scenario_type": "BANK_ENTERPRISE",
+        "error_type": "EXTRA_BUCKET_4",
+        "case_count": 5,
+        "miss_count": 3,
+        "hit_at_1": 0.10,
+        "recall_at_5": 0.30,
+        "mrr": 0.20,
+        "ndcg_at_5": 0.20,
+    })
+
+    after = _make_matrix(clearing_single_side_recall=0.60, clearing_single_side_miss_count=4)
+    after["miss_buckets"].append({
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "EXTRA_BUCKET",
+        "case_count": 5,
+        "miss_count": 2,
+        "hit_at_1": 0.80,
+        "recall_at_5": 0.90,
+        "mrr": 0.85,
+        "ndcg_at_5": 0.85,
+    })
+    after["miss_buckets"].append({
+        "scenario_type": "BANK_ENTERPRISE",
+        "error_type": "EXTRA_BUCKET_2",
+        "case_count": 5,
+        "miss_count": 3,
+        "hit_at_1": 0.05,
+        "recall_at_5": 0.10,
+        "mrr": 0.05,
+        "ndcg_at_5": 0.05,
+    })
+    after["miss_buckets"].append({
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "EXTRA_BUCKET_3",
+        "case_count": 5,
+        "miss_count": 3,
+        "hit_at_1": 0.90,
+        "recall_at_5": 1.00,
+        "mrr": 0.95,
+        "ndcg_at_5": 0.95,
+    })
+    after["miss_buckets"].append({
+        "scenario_type": "BANK_ENTERPRISE",
+        "error_type": "EXTRA_BUCKET_4",
+        "case_count": 5,
+        "miss_count": 4,
+        "hit_at_1": 0.01,
+        "recall_at_5": 0.05,
+        "mrr": 0.02,
+        "ndcg_at_5": 0.02,
+    })
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    se = report["side_effect_buckets"]
+    assert len(se["largest_regressions"]) <= 3
+    assert len(se["largest_improvements"]) <= 3
+
+    if len(se["largest_regressions"]) > 1:
+        for i in range(len(se["largest_regressions"]) - 1):
+            assert se["largest_regressions"][i]["delta"]["ndcg_at_5"] <= se["largest_regressions"][i + 1]["delta"]["ndcg_at_5"]
+
+    if len(se["largest_improvements"]) > 1:
+        for i in range(len(se["largest_improvements"]) - 1):
+            assert se["largest_improvements"][i]["delta"]["ndcg_at_5"] >= se["largest_improvements"][i + 1]["delta"]["ndcg_at_5"]
