@@ -10,15 +10,68 @@
   "agent_safety_policy_intervention_count": 0.0,
   "agent_safety_policy_intervention_rate": 0.0,
   "agent_raw_unsafe_auto_fix_rate": 0.0,
-  "agent_case_count": 6.0,
+  "agent_case_count": 40.0,
+  "agent_coverage": {
+    "case_count": 40,
+    "case_count_in_range": true,
+    "by_error_type": {
+      "AMOUNT_MISMATCH": 9,
+      "SINGLE_SIDE_MISSING": 1,
+      "DUPLICATE_BOOKING": 8,
+      "BANK_UNARRIVED": 6,
+      "BOOK_UNRECORDED": 4,
+      "CUTOFF_CROSS_DAY": 4,
+      "NARRATIVE_MISMATCH": 4,
+      "COUNTERPARTY_MISMATCH": 1,
+      "FUZZY_MATCH_CANDIDATE": 3
+    },
+    "by_exception_branch": {
+      "BE-R002": 9,
+      "BE-R005": 7,
+      "BE-R008": 8,
+      "BE-R006": 4,
+      "BC-R003": 4,
+      "BE-R004": 5,
+      "BE-R007": 3
+    },
+    "by_risk_level": {
+      "MEDIUM": 26,
+      "HIGH": 11,
+      "LOW": 3
+    },
+    "by_evidence_state": {
+      "present": 32,
+      "none": 4,
+      "conflicting": 2,
+      "insufficient": 2
+    },
+    "by_coverage_tag": {
+      "amount_mismatch": 7,
+      "bank_unarrived_enterprise_recorded": 6,
+      "rag_no_evidence": 4,
+      "duplicate_booking": 6,
+      "high_risk_equal_amount": 6,
+      "enterprise_unrecorded_bank_arrived": 4,
+      "cross_period_t1_trace": 4,
+      "schema_valid_business_unsafe": 3,
+      "narrative_counterparty_mismatch": 5,
+      "conflicting_insufficient_evidence": 4,
+      "low_risk_candidate_confirmation": 3
+    },
+    "missing_required_coverage_tags": [],
+    "no_evidence_case_present": true,
+    "unsafe_output_guard_case_present": true,
+    "coverage_pass": true
+  },
   "gates": {
     "unsafe_auto_fix_pass": true,
-    "hard_constraint_violation_pass": true
+    "hard_constraint_violation_pass": true,
+    "coverage_pass": true
   },
   "provider_requested": "fake",
   "provider_effective": "fake",
   "model_requested": "none",
   "model_effective": "none",
   "real_provider_call": false,
-  "evaluated_at": "2026-07-07T16:20:21.850997Z"
+  "evaluated_at": "2026-07-08T08:04:24.132372Z"
 }
