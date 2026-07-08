@@ -62,6 +62,8 @@ class FakeLLMProvider:
     def _payload_for(self, content: str) -> dict[str, object]:
         if '"task": "report"' in content:
             return self._report_payload()
+        if '"task": "confirm_match"' in content:
+            return self._confirm_match_payload()
         if '"task": "query_rewrite"' in content or "query_rewrite" in content or "改写" in content:
             return self._query_rewrite_payload(content)
         if '"task": "memory_summary"' in content or "memory_summary" in content:
@@ -83,6 +85,17 @@ class FakeLLMProvider:
             "risk_summary": "存在需要关注的异常事项，建议结合业务依据审慎判断。",
             "review_advice": "建议优先复核待人工处理事项，并核对相关审计证据。",
             "followup": "建议完成复核后更新处理状态，并持续跟踪未决事项。",
+        }
+
+    def _confirm_match_payload(self) -> dict[str, object]:
+        return {
+            "agent": "audit",
+            "decision": "AUTO_FIXED",
+            "risk_level": "LOW",
+            "reason": "候选匹配确认为同一笔交易，金额、日期与对手方一致，规则证据支持自动平账。",
+            "ai_suggestion": "APPROVED_MATCH",
+            "evidence": ["fake-rag-evidence"],
+            "confidence": 0.92,
         }
 
     def _query_rewrite_payload(self, content: str) -> dict[str, object]:

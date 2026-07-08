@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,26 @@ DEEPSEEK_FLASH_REPORT_PATH = PROJECT_ROOT / "reports/agent_eval_deepseek_flash.m
 DEEPSEEK_FLASH_JSON_PATH = PROJECT_ROOT / "reports/agent_eval_deepseek_flash_metrics.json"
 CONSISTENCY_RUNS = 3
 
+ALLOWED_DECISIONS = {"AUTO_FIXED", "PENDING_HUMAN", "UNRESOLVED"}
+ALLOWED_RISK_LEVELS = {"LOW", "MEDIUM", "HIGH"}
+ALLOWED_EVIDENCE_STATES = {"present", "none", "insufficient", "conflicting"}
+REQUIRED_COVERAGE_TAGS = frozenset({
+    "amount_mismatch",
+    "bank_unarrived_enterprise_recorded",
+    "enterprise_unrecorded_bank_arrived",
+    "cross_period_t1_trace",
+    "duplicate_booking",
+    "narrative_counterparty_mismatch",
+    "rag_no_evidence",
+    "conflicting_insufficient_evidence",
+    "high_risk_equal_amount",
+    "low_risk_candidate_confirmation",
+    "schema_valid_business_unsafe",
+})
+UNSAFE_OUTPUT_GUARD_TAGS = {"schema_valid_business_unsafe", "high_risk_equal_amount"}
+MIN_DEFAULT_CASES = 30
+MAX_DEFAULT_CASES = 50
+
 
 @dataclass(frozen=True)
 class AgentEvalCase:
@@ -41,6 +61,11 @@ class AgentEvalCase:
     amount_diff: str | None = None
     tool_result: dict[str, object] | None = None
     trace_context: dict[str, object] | None = None
+    business_label: str = ""
+    label_reason: str = ""
+    evidence_state: str = "present"
+    coverage_tags: list[str] = field(default_factory=list)
+    match_candidate_context: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +96,7 @@ def load_agent_eval_cases(path: Path = DEFAULT_CASES_PATH) -> list[AgentEvalCase
     for item in payload:
         _validate_case_item(item)
         cases.append(AgentEvalCase(**item))
+    validate_case_collection(cases)
     return cases
 
 
@@ -79,18 +105,79 @@ def _validate_case_item(item: dict[str, object]) -> None:
         "case_id", "error_type", "rag_evidence",
         "expected_decision", "expected_risk_level",
         "must_include_evidence", "must_not_auto_fix",
+        "business_label", "label_reason", "evidence_state", "coverage_tags",
     }
     missing = required - set(item)
     if missing:
         raise ValueError(
             f"Missing required fields: {missing} in case {item.get('case_id', 'unknown')}"
         )
-    if item.get("expected_decision") not in {"AUTO_FIXED", "PENDING_HUMAN", "UNRESOLVED"}:
+    case_id = item["case_id"]
+    if item.get("expected_decision") not in ALLOWED_DECISIONS:
         raise ValueError(
-            f"Invalid expected_decision in case {item['case_id']}: {item['expected_decision']}"
+            f"Invalid expected_decision in case {case_id}: {item['expected_decision']}"
+        )
+    if item.get("expected_risk_level") not in ALLOWED_RISK_LEVELS:
+        raise ValueError(
+            f"Invalid expected_risk_level in case {case_id}: {item['expected_risk_level']}"
         )
     if not isinstance(item.get("rag_evidence"), list):
-        raise ValueError(f"rag_evidence must be a list in case {item['case_id']}")
+        raise ValueError(f"rag_evidence must be a list in case {case_id}")
+    if not str(item.get("business_label", "")).strip():
+        raise ValueError(f"business_label must be non-empty in case {case_id}")
+    if not str(item.get("label_reason", "")).strip():
+        raise ValueError(f"label_reason must be non-empty in case {case_id}")
+    evidence_state = item.get("evidence_state")
+    if evidence_state not in ALLOWED_EVIDENCE_STATES:
+        raise ValueError(f"Invalid evidence_state in case {case_id}: {evidence_state}")
+    tags = item.get("coverage_tags")
+    if not isinstance(tags, list) or not tags:
+        raise ValueError(f"coverage_tags must be a non-empty list in case {case_id}")
+    rag_evidence = item["rag_evidence"]
+    if evidence_state == "none" and rag_evidence:
+        raise ValueError(
+            f"evidence_state 'none' requires empty rag_evidence in case {case_id}"
+        )
+    if evidence_state != "none" and not rag_evidence:
+        raise ValueError(
+            f"evidence_state '{evidence_state}' requires non-empty rag_evidence "
+            f"in case {case_id}"
+        )
+
+
+def validate_case_collection(cases: list[AgentEvalCase]) -> None:
+    """Validate coverage contract for the default curated case set."""
+    ids = [case.case_id for case in cases]
+    duplicates = sorted({case_id for case_id in ids if ids.count(case_id) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate case_id values: {duplicates}")
+
+    present_tags: set[str] = set()
+    for case in cases:
+        present_tags.update(case.coverage_tags)
+    missing_tags = REQUIRED_COVERAGE_TAGS - present_tags
+    if missing_tags:
+        raise ValueError(f"Missing required coverage tags: {sorted(missing_tags)}")
+
+    if not any(case.evidence_state == "none" for case in cases):
+        raise ValueError("No no-evidence case present")
+
+    if not _has_unsafe_output_guard_case(cases):
+        raise ValueError("No unsafe-output guard case present")
+
+    count = len(cases)
+    if not MIN_DEFAULT_CASES <= count <= MAX_DEFAULT_CASES:
+        raise ValueError(
+            f"Default case count {count} out of range "
+            f"[{MIN_DEFAULT_CASES}, {MAX_DEFAULT_CASES}]"
+        )
+
+
+def _has_unsafe_output_guard_case(cases: list[AgentEvalCase]) -> bool:
+    return any(
+        case.must_not_auto_fix and UNSAFE_OUTPUT_GUARD_TAGS.intersection(case.coverage_tags)
+        for case in cases
+    )
 
 
 def _build_rag_evidence(chunk_ids: list[str]) -> list[RagSearchItem]:
@@ -158,6 +245,8 @@ def evaluate_agent_cases(
                 clear_amount=case.clear_amount,
                 amount_diff=case.amount_diff,
                 evidence=evidence,
+                trace_context=case.trace_context,
+                match_candidate_context=case.match_candidate_context,
             )
 
             if provider == "deepseek" and evidence:

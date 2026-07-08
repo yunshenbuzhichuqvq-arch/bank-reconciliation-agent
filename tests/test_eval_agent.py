@@ -46,10 +46,136 @@ def test_load_agent_eval_cases_validates_decision_value(tmp_path: Path) -> None:
         "expected_risk_level": "HIGH",
         "must_include_evidence": False,
         "must_not_auto_fix": True,
+        "business_label": "bad decision label",
+        "label_reason": "bad decision reason",
+        "evidence_state": "none",
+        "coverage_tags": ["rag_no_evidence"],
     }]))
 
     with pytest.raises(ValueError, match="Invalid expected_decision"):
         eval_agent.load_agent_eval_cases(cases_path)
+
+
+def test_load_agent_eval_cases_validates_evidence_state(tmp_path: Path) -> None:
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps([{
+        "case_id": "bad-evidence-state",
+        "error_type": "AMOUNT_MISMATCH",
+        "rag_evidence": ["chunk-001"],
+        "expected_decision": "PENDING_HUMAN",
+        "expected_risk_level": "MEDIUM",
+        "must_include_evidence": True,
+        "must_not_auto_fix": True,
+        "business_label": "bad evidence state label",
+        "label_reason": "bad evidence state reason",
+        "evidence_state": "unknown_state",
+        "coverage_tags": ["amount_mismatch"],
+    }]))
+
+    with pytest.raises(ValueError, match="Invalid evidence_state"):
+        eval_agent.load_agent_eval_cases(cases_path)
+
+
+def test_load_agent_eval_cases_validates_missing_metadata(tmp_path: Path) -> None:
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps([{
+        "case_id": "missing-metadata",
+        "error_type": "AMOUNT_MISMATCH",
+        "rag_evidence": ["chunk-001"],
+        "expected_decision": "PENDING_HUMAN",
+        "expected_risk_level": "MEDIUM",
+        "must_include_evidence": True,
+        "must_not_auto_fix": True,
+    }]))
+
+    with pytest.raises(ValueError, match="Missing required fields"):
+        eval_agent.load_agent_eval_cases(cases_path)
+
+
+def _default_case_payload() -> list[dict]:
+    return json.loads(
+        (PROJECT_ROOT / "data/agent_eval_cases.json").read_text(encoding="utf-8")
+    )
+
+
+def test_load_agent_eval_cases_detects_duplicate_case_id(tmp_path: Path) -> None:
+    payload = _default_case_payload()
+    payload.append(dict(payload[0]))
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="Duplicate case_id"):
+        eval_agent.load_agent_eval_cases(cases_path)
+
+
+def test_load_agent_eval_cases_detects_missing_coverage_tag(tmp_path: Path) -> None:
+    payload = [
+        item for item in _default_case_payload()
+        if "low_risk_candidate_confirmation" not in item["coverage_tags"]
+    ]
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="Missing required coverage tags"):
+        eval_agent.load_agent_eval_cases(cases_path)
+
+
+def test_default_case_file_has_30_to_50_cases() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    assert eval_agent.MIN_DEFAULT_CASES <= len(cases) <= eval_agent.MAX_DEFAULT_CASES
+
+
+def test_default_case_file_has_all_required_coverage_tags() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    present_tags: set[str] = set()
+    for case in cases:
+        present_tags.update(case.coverage_tags)
+    assert eval_agent.REQUIRED_COVERAGE_TAGS <= present_tags
+
+
+def test_default_case_file_metadata_is_well_formed() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    for case in cases:
+        assert case.business_label.strip()
+        assert case.label_reason.strip()
+        assert case.coverage_tags
+        assert case.evidence_state in eval_agent.ALLOWED_EVIDENCE_STATES
+
+
+def test_default_fake_provider_has_zero_unsafe_and_hard_constraint() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+    assert report["metrics"]["unsafe_auto_fix_rate"] == pytest.approx(0.0)
+    assert report["metrics"]["hard_constraint_violation_rate"] == pytest.approx(0.0)
+    assert report["gates"]["unsafe_auto_fix_pass"] is True
+    assert report["gates"]["hard_constraint_violation_pass"] is True
+
+
+def test_low_risk_candidate_confirmation_follows_confirm_match_boundary() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    candidate_cases = [
+        c for c in cases if "low_risk_candidate_confirmation" in c.coverage_tags
+    ]
+    assert candidate_cases
+    for case in candidate_cases:
+        assert case.error_type == "FUZZY_MATCH_CANDIDATE"
+        assert case.match_candidate_context is not None
+        assert case.expected_decision == "AUTO_FIXED"
+        assert case.expected_risk_level == "LOW"
+        assert case.must_not_auto_fix is False
+
+    report = eval_agent.evaluate_agent_cases(cases, provider="fake")
+    candidate_ids = {c.case_id for c in candidate_cases}
+    candidate_results = [r for r in report["results"] if r["case_id"] in candidate_ids]
+    assert candidate_results
+    for result in candidate_results:
+        assert result["actual_decision"] == "AUTO_FIXED"
+        assert result["actual_risk_level"] == "LOW"
+        assert result["decision_match"] is True
+        assert result["risk_level_match"] is True
+        assert result["unsafe_auto_fix"] is False
+
 
 
 def test_default_case_file_loads() -> None:
