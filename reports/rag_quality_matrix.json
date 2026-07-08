@@ -11,8 +11,8 @@
     "hybrid",
     "hybrid_rerank"
   ],
-  "real_backend_policy": "skip",
-  "evaluated_at": "2026-07-07T10:10:06.597536Z",
+  "real_backend_policy": "auto",
+  "evaluated_at": "2026-07-08T09:44:49.643516Z",
   "rows": {
     "hash": {
       "requested_backend": "hash",
@@ -61,17 +61,840 @@
     },
     "bge_small": {
       "requested_backend": "bge_small",
-      "effective_backend": null,
-      "status": "not_run",
-      "reason": "real backend policy is skip"
+      "effective_backend": "bge_small",
+      "status": "measured",
+      "selected_mode": "dense",
+      "selection_reason": "No mode improved ranking metrics over dense baseline; RAG has no proven improvement",
+      "modes": {
+        "dense": {
+          "global_metrics": {
+            "hit_at_1": 0.5416666666666666,
+            "recall_at_5": 0.6666666666666666,
+            "mrr": 0.6388888888888891,
+            "ndcg_at_5": 0.6044553438198553
+          }
+        },
+        "hybrid": {
+          "global_metrics": {
+            "hit_at_1": 0.5333333333333333,
+            "recall_at_5": 0.7541666666666667,
+            "mrr": 0.6602777777777776,
+            "ndcg_at_5": 0.6528115145380317
+          }
+        },
+        "hybrid_rerank": {
+          "global_metrics": {
+            "hit_at_1": 0.45,
+            "recall_at_5": 0.6708333333333333,
+            "mrr": 0.5852777777777779,
+            "ndcg_at_5": 0.5702960952873805
+          }
+        }
+      },
+      "deltas_vs_dense": {
+        "hybrid": {
+          "hit_at_1": -0.008333333333333304,
+          "mrr": 0.02138888888888857,
+          "ndcg_at_5": 0.04835617071817633
+        },
+        "hybrid_rerank": {
+          "hit_at_1": -0.09166666666666662,
+          "mrr": -0.053611111111111165,
+          "ndcg_at_5": -0.03415924853247487
+        }
+      }
     },
     "bge_m3": {
       "requested_backend": "bge_m3",
-      "effective_backend": null,
-      "status": "not_run",
-      "reason": "real backend policy is skip"
+      "effective_backend": "bge_m3",
+      "status": "measured",
+      "selected_mode": "hybrid",
+      "selection_reason": "Highest NDCG@5 among eligible modes with no negative ranking deltas",
+      "modes": {
+        "dense": {
+          "global_metrics": {
+            "hit_at_1": 0.5083333333333333,
+            "recall_at_5": 0.7333333333333333,
+            "mrr": 0.6348611111111111,
+            "ndcg_at_5": 0.6270661427830345
+          }
+        },
+        "hybrid": {
+          "global_metrics": {
+            "hit_at_1": 0.5583333333333333,
+            "recall_at_5": 0.7541666666666667,
+            "mrr": 0.6675,
+            "ndcg_at_5": 0.6551831198479162
+          }
+        },
+        "hybrid_rerank": {
+          "global_metrics": {
+            "hit_at_1": 0.44166666666666665,
+            "recall_at_5": 0.675,
+            "mrr": 0.5845833333333333,
+            "ndcg_at_5": 0.568861278045852
+          }
+        }
+      },
+      "deltas_vs_dense": {
+        "hybrid": {
+          "hit_at_1": 0.050000000000000044,
+          "mrr": 0.032638888888888884,
+          "ndcg_at_5": 0.0281169770648817
+        },
+        "hybrid_rerank": {
+          "hit_at_1": -0.06666666666666665,
+          "mrr": -0.050277777777777755,
+          "ndcg_at_5": -0.05820486473718256
+        }
+      }
     }
   },
-  "best_real_backend": null,
-  "miss_buckets": []
+  "best_real_backend": "bge_m3",
+  "best_real_mode": "hybrid",
+  "real_backend_requirement": {
+    "required_backend": "bge_small",
+    "satisfied": true,
+    "measured_real_backends": [
+      "bge_small",
+      "bge_m3"
+    ],
+    "unavailable_real_backends": [],
+    "not_run_real_backends": [],
+    "reason": "bge_small measured with trusted effective backend"
+  },
+  "miss_buckets": [
+    {
+      "scenario_type": "BANK_CLEARING",
+      "error_type": "AMOUNT_MISMATCH",
+      "case_count": 10,
+      "miss_count": 2,
+      "hit_at_1": 0.5,
+      "recall_at_5": 0.85,
+      "mrr": 0.6533333333333333,
+      "ndcg_at_5": 0.6718472371875508,
+      "miss_cases": [
+        {
+          "id": "bc-r002-01",
+          "query": "清算文件金额和核心系统入账金额不一致，运营人员应该先核对哪些字段",
+          "expected_chunk_ids": [
+            "clearing_amount_mismatch_playbook_001",
+            "clearing_amount_mismatch_playbook_002"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_amount_mismatch_playbook_001",
+            "clearing_file_exception_playbook_004",
+            "clearing_reference_match_playbook_001",
+            "clearing_reconciliation_scope_001",
+            "clearing_single_side_playbook_001"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "bc-r002-07",
+          "query": "文件字段口径不同导致金额不一致，应参考清算对账字段还是自动结论边界",
+          "expected_chunk_ids": [
+            "clearing_amount_mismatch_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_file_exception_playbook_004",
+            "clearing_amount_mismatch_playbook_001",
+            "clearing_reconciliation_scope_001",
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_file_exception_playbook_003"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_CLEARING",
+      "error_type": "CLEARING_FILE_EXCEPTION",
+      "case_count": 10,
+      "miss_count": 4,
+      "hit_at_1": 0.5,
+      "recall_at_5": 0.7,
+      "mrr": 0.6083333333333334,
+      "ndcg_at_5": 0.6121292261674965,
+      "miss_cases": [
+        {
+          "id": "bc-r004-05",
+          "query": "清算文件校验失败后，报告需要说明是文件问题还是交易问题",
+          "expected_chunk_ids": [
+            "clearing_file_exception_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_file_exception_playbook_001",
+            "clearing_amount_mismatch_playbook_001",
+            "clearing_reconciliation_scope_001",
+            "clearing_file_exception_playbook_004"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "bc-r004-06",
+          "query": "渠道上传的文件少了明细行，和单边缺失的边界怎么区分",
+          "expected_chunk_ids": [
+            "clearing_file_exception_playbook_001",
+            "clearing_file_exception_playbook_004"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_single_side_playbook_001",
+            "clearing_file_exception_playbook_001",
+            "clearing_query_reply_playbook_001",
+            "clearing_reconciliation_scope_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "bc-r004-08",
+          "query": "字段缺损导致参考号无法匹配，系统应怎样提示补充文件",
+          "expected_chunk_ids": [
+            "clearing_file_exception_playbook_002"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_query_reply_playbook_002",
+            "clearing_reference_match_playbook_002",
+            "clearing_file_exception_playbook_003",
+            "clearing_query_reply_playbook_001",
+            "clearing_reference_match_playbook_004"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "bc-r004-10",
+          "query": "收到补发文件后，原异常批次如何做证据归档",
+          "expected_chunk_ids": [
+            "clearing_file_exception_playbook_004",
+            "clearing_query_reply_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_query_reply_playbook_004",
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_file_exception_playbook_001",
+            "clearing_query_reply_playbook_003",
+            "clearing_file_exception_playbook_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_CLEARING",
+      "error_type": "CUTOFF_T1",
+      "case_count": 10,
+      "miss_count": 3,
+      "hit_at_1": 0.6,
+      "recall_at_5": 0.8,
+      "mrr": 0.7166666666666666,
+      "ndcg_at_5": 0.689411621468678,
+      "miss_cases": [
+        {
+          "id": "bc-r003-07",
+          "query": "清算日期和核心入账日期跨了一天，如何区分正常 T+1 和异常缺失",
+          "expected_chunk_ids": [
+            "clearing_t1_supplement_playbook_001",
+            "clearing_cutoff_t1_guideline_001"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_t1_supplement_playbook_002",
+            "clearing_reconciliation_scope_001",
+            "clearing_file_exception_playbook_004",
+            "clearing_amount_mismatch_playbook_001"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "bc-r003-08",
+          "query": "日切窗口内金额一致但日期不同，自动审核能否直接判定通过",
+          "expected_chunk_ids": [
+            "clearing_cutoff_t1_guideline_002",
+            "clearing_reconciliation_scope_002"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_file_exception_playbook_004",
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_t1_supplement_playbook_001",
+            "clearing_single_side_playbook_001",
+            "clearing_t1_supplement_playbook_003"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "bc-r003-10",
+          "query": "夜间批处理延迟导致清算单边，系统应如何记录追溯结果",
+          "expected_chunk_ids": [
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_t1_supplement_playbook_001"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_single_side_playbook_001",
+            "clearing_single_side_playbook_002",
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_cutoff_t1_guideline_002",
+            "clearing_query_reply_playbook_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_CLEARING",
+      "error_type": "QUERY_REPLY",
+      "case_count": 10,
+      "miss_count": 1,
+      "hit_at_1": 0.6,
+      "recall_at_5": 0.9,
+      "mrr": 0.7033333333333334,
+      "ndcg_at_5": 0.7238463548111184,
+      "miss_cases": [
+        {
+          "id": "bc-r005-05",
+          "query": "发起清算查询时，必须带上哪些交易要素",
+          "expected_chunk_ids": [
+            "clearing_query_reply_playbook_002"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_query_reply_playbook_001",
+            "clearing_reconciliation_scope_001",
+            "clearing_cutoff_t1_guideline_002",
+            "clearing_reference_match_playbook_001",
+            "clearing_single_side_playbook_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_CLEARING",
+      "error_type": "REFERENCE_MATCH",
+      "case_count": 10,
+      "miss_count": 1,
+      "hit_at_1": 0.6,
+      "recall_at_5": 0.95,
+      "mrr": 0.7833333333333333,
+      "ndcg_at_5": 0.8130929753571458,
+      "miss_cases": [
+        {
+          "id": "bc-r006-08",
+          "query": "参考号一致而日期跨日，是否需要结合 T+1 规则判断",
+          "expected_chunk_ids": [
+            "clearing_reference_match_playbook_001",
+            "clearing_cutoff_t1_guideline_001"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_t1_supplement_playbook_002",
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_file_exception_playbook_004",
+            "clearing_t1_supplement_playbook_001",
+            "clearing_cutoff_t1_guideline_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_CLEARING",
+      "error_type": "SINGLE_SIDE_MISSING",
+      "case_count": 10,
+      "miss_count": 7,
+      "hit_at_1": 0.1,
+      "recall_at_5": 0.4,
+      "mrr": 0.2833333333333333,
+      "ndcg_at_5": 0.2937503349954187,
+      "miss_cases": [
+        {
+          "id": "bc-r001-02",
+          "query": "核心有流水而清算文件缺少明细，单边缺失时应保留哪些证据",
+          "expected_chunk_ids": [
+            "clearing_single_side_playbook_001",
+            "clearing_query_reply_playbook_001"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_file_exception_playbook_002",
+            "clearing_single_side_playbook_001",
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_file_exception_playbook_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "bc-r001-04",
+          "query": "清算单边发生在普通工作日，不能用日切解释时下一步怎么处理",
+          "expected_chunk_ids": [
+            "clearing_single_side_playbook_001",
+            "clearing_query_reply_playbook_001"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_single_side_playbook_001",
+            "clearing_reconciliation_scope_001",
+            "clearing_t1_supplement_playbook_001",
+            "clearing_reconciliation_scope_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "bc-r001-05",
+          "query": "只有一侧有参考号，另一侧查不到记录，人工复核前要收集什么材料",
+          "expected_chunk_ids": [
+            "clearing_query_reply_playbook_002"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_single_side_playbook_001",
+            "clearing_reference_match_playbook_002",
+            "clearing_query_reply_playbook_001",
+            "clearing_reference_match_playbook_004",
+            "clearing_single_side_playbook_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "bc-r001-07",
+          "query": "核心入账已完成但渠道清算未出现，应如何判断是否在正常延迟范围内",
+          "expected_chunk_ids": [
+            "clearing_single_side_playbook_001"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_t1_supplement_playbook_003",
+            "clearing_query_reply_playbook_003",
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_file_exception_playbook_001",
+            "clearing_reconciliation_scope_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "bc-r001-08",
+          "query": "非日切窗口内出现单边交易，系统结论应避免自动平账还是直接挂起",
+          "expected_chunk_ids": [
+            "clearing_single_side_playbook_002"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_single_side_playbook_001",
+            "clearing_cutoff_t1_guideline_001",
+            "clearing_t1_supplement_playbook_003",
+            "clearing_reconciliation_scope_001",
+            "clearing_reconciliation_scope_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_ENTERPRISE",
+      "error_type": "AMOUNT_MISMATCH",
+      "case_count": 12,
+      "miss_count": 6,
+      "hit_at_1": 0.5833333333333334,
+      "recall_at_5": 0.625,
+      "mrr": 0.6527777777777778,
+      "ndcg_at_5": 0.5669111397163823,
+      "miss_cases": [
+        {
+          "id": "be-r002-02",
+          "query": "客户付款在两边都有记录，只是银行入账金额比企业登记金额少了一部分，这类差额怎么判断",
+          "expected_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_001",
+            "bank_enterprise_amount_mismatch_playbook_004"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_004",
+            "bank_enterprise_cross_period_playbook_003",
+            "bank_enterprise_fee_tax_diff_playbook_001",
+            "bank_enterprise_amount_mismatch_playbook_003",
+            "bank_enterprise_amount_mismatch_playbook_002"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r002-06",
+          "query": "银行扣了手续费后到账净额小于企业应收金额，怎么区分普通金额差异和手续费差异",
+          "expected_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_002",
+            "bank_enterprise_amount_mismatch_advanced_005"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_002",
+            "bank_enterprise_fee_tax_diff_playbook_005",
+            "bank_enterprise_fee_tax_diff_playbook_001",
+            "bank_enterprise_fee_tax_diff_playbook_002",
+            "bank_enterprise_fee_tax_diff_playbook_003"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r002-07",
+          "query": "同一笔资金两边日期和对手方一致但金额不相等，系统应给出什么处理路径",
+          "expected_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_001"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_cross_period_playbook_001",
+            "unionpay_reconciliation_faq_001",
+            "bank_enterprise_duplicate_booking_advanced_002",
+            "bank_enterprise_fuzzy_match_playbook_003",
+            "bank_enterprise_exact_match_playbook_007"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "be-r002-09",
+          "query": "企业说差额是四舍五入造成的，银行流水金额仍不一致时如何处理",
+          "expected_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_005"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_003",
+            "bank_enterprise_amount_mismatch_playbook_001",
+            "bank_enterprise_cross_period_playbook_001",
+            "bank_enterprise_fee_tax_diff_playbook_001",
+            "bank_enterprise_amount_mismatch_advanced_003"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "be-r002-11",
+          "query": "收款金额方向记反后看起来差额很大，应该按金额不平还是重复记账处理",
+          "expected_chunk_ids": [
+            "bank_enterprise_amount_mismatch_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_fee_tax_diff_playbook_009",
+            "bank_enterprise_narrative_mismatch_advanced_004",
+            "bank_enterprise_amount_mismatch_advanced_003",
+            "bank_enterprise_amount_mismatch_advanced_002",
+            "bank_enterprise_duplicate_booking_playbook_004"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_ENTERPRISE",
+      "error_type": "BANK_UNARRIVED",
+      "case_count": 12,
+      "miss_count": 5,
+      "hit_at_1": 0.5833333333333334,
+      "recall_at_5": 0.7083333333333334,
+      "mrr": 0.6597222222222222,
+      "ndcg_at_5": 0.6117299879437573,
+      "miss_cases": [
+        {
+          "id": "be-r005-02",
+          "query": "客户说款项已经汇出，企业账上也登记了，银行侧未达时能不能先自动平账",
+          "expected_chunk_ids": [
+            "bank_enterprise_bank_unarrived_playbook_001",
+            "bank_enterprise_bank_unarrived_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_bank_unarrived_playbook_001",
+            "bank_enterprise_exact_match_playbook_001",
+            "pbc_small_payment_query_reply_001",
+            "bank_enterprise_exact_match_playbook_006",
+            "bank_enterprise_amount_mismatch_playbook_004"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r005-03",
+          "query": "跨行转账在途导致银行未到账，规则要求保留哪些查询查复材料",
+          "expected_chunk_ids": [
+            "bank_enterprise_bank_unarrived_advanced_002",
+            "bank_enterprise_bank_unarrived_playbook_004"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_bank_unarrived_playbook_002",
+            "bank_enterprise_bank_unarrived_advanced_003",
+            "bank_enterprise_bank_unarrived_advanced_002",
+            "bank_enterprise_cross_period_playbook_002",
+            "pbc_small_payment_query_reply_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r005-07",
+          "query": "只有企业账簿记录，没有银行回单，审核结论应要求补哪些字段",
+          "expected_chunk_ids": [
+            "bank_enterprise_bank_unarrived_playbook_003",
+            "bank_enterprise_bank_unarrived_playbook_005"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_book_unrecorded_playbook_001",
+            "bank_enterprise_book_unrecorded_playbook_005",
+            "bank_enterprise_book_unrecorded_playbook_002",
+            "bank_enterprise_narrative_mismatch_playbook_004",
+            "bank_enterprise_bank_unarrived_playbook_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "be-r005-11",
+          "query": "付款渠道返回处理中，企业已做账但银行未落账，是否可以等待 T+1 再确认",
+          "expected_chunk_ids": [
+            "bank_enterprise_bank_unarrived_playbook_002",
+            "bank_enterprise_bank_unarrived_playbook_004"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_bank_unarrived_playbook_002",
+            "bank_enterprise_cross_period_playbook_004",
+            "bank_enterprise_bank_unarrived_playbook_001",
+            "bank_enterprise_bank_unarrived_advanced_002",
+            "bank_enterprise_bank_unarrived_advanced_001"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r005-12",
+          "query": "银行端缺失的流水如果无法查复，最终应转入哪类人工处理",
+          "expected_chunk_ids": [
+            "bank_enterprise_bank_unarrived_advanced_005",
+            "bank_enterprise_bank_unarrived_playbook_004"
+          ],
+          "retrieved_chunk_ids": [
+            "pbc_small_payment_query_reply_001",
+            "unionpay_reconciliation_faq_002",
+            "unionpay_reconciliation_faq_001",
+            "bank_enterprise_book_unrecorded_playbook_001",
+            "bank_enterprise_amount_mismatch_playbook_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_ENTERPRISE",
+      "error_type": "BOOK_UNRECORDED",
+      "case_count": 12,
+      "miss_count": 3,
+      "hit_at_1": 0.9166666666666666,
+      "recall_at_5": 0.875,
+      "mrr": 0.9583333333333334,
+      "ndcg_at_5": 0.8844289327304549,
+      "miss_cases": [
+        {
+          "id": "be-r006-09",
+          "query": "月末银行已入账但企业下月才记账，应按企业未入账还是跨期处理",
+          "expected_chunk_ids": [
+            "bank_enterprise_book_unrecorded_advanced_004",
+            "bank_enterprise_cross_period_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_cross_period_playbook_003",
+            "bank_enterprise_bank_unarrived_advanced_003",
+            "bank_enterprise_bank_unarrived_playbook_002",
+            "bank_enterprise_cross_period_playbook_004",
+            "bank_enterprise_cross_period_playbook_001"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r006-11",
+          "query": "银行流水存在但企业系统漏导入批次文件，怎样避免误判为清算文件异常",
+          "expected_chunk_ids": [
+            "bank_enterprise_book_unrecorded_playbook_001",
+            "bank_enterprise_book_unrecorded_playbook_004"
+          ],
+          "retrieved_chunk_ids": [
+            "unionpay_reconciliation_faq_001",
+            "bank_enterprise_book_unrecorded_playbook_004",
+            "bank_enterprise_duplicate_booking_playbook_003",
+            "bank_enterprise_book_unrecorded_playbook_002",
+            "bank_enterprise_narrative_mismatch_playbook_005"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r006-12",
+          "query": "长期未补记的银行已入账项目，什么时候需要升级人工复核",
+          "expected_chunk_ids": [
+            "bank_enterprise_book_unrecorded_advanced_005",
+            "bank_enterprise_book_unrecorded_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_book_unrecorded_advanced_005",
+            "bank_enterprise_bank_unarrived_advanced_004",
+            "bank_enterprise_amount_mismatch_advanced_006",
+            "bank_enterprise_book_unrecorded_playbook_002",
+            "bank_enterprise_book_unrecorded_advanced_001"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_ENTERPRISE",
+      "error_type": "DUPLICATE_BOOKING",
+      "case_count": 12,
+      "miss_count": 2,
+      "hit_at_1": 0.6666666666666666,
+      "recall_at_5": 0.875,
+      "mrr": 0.7777777777777777,
+      "ndcg_at_5": 0.8077855336347725,
+      "miss_cases": [
+        {
+          "id": "be-r008-05",
+          "query": "同日同额同对手的两条企业记录都没有独立银行流水，应按什么规则处理",
+          "expected_chunk_ids": [
+            "bank_enterprise_duplicate_booking_advanced_001",
+            "bank_enterprise_duplicate_booking_playbook_002"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_book_unrecorded_playbook_001",
+            "bank_enterprise_exact_match_playbook_005",
+            "bank_enterprise_duplicate_booking_advanced_001",
+            "bank_enterprise_book_unrecorded_advanced_001",
+            "bank_enterprise_cross_period_playbook_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r008-12",
+          "query": "银行只有一笔资金，企业有两笔同额应收确认，系统要怎么给出解释",
+          "expected_chunk_ids": [
+            "bank_enterprise_duplicate_booking_advanced_004"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_amount_mismatch_advanced_003",
+            "bank_enterprise_duplicate_booking_advanced_001",
+            "pbc_small_payment_query_reply_001",
+            "bank_enterprise_amount_mismatch_playbook_003",
+            "bank_enterprise_fuzzy_match_playbook_004"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        }
+      ]
+    },
+    {
+      "scenario_type": "BANK_ENTERPRISE",
+      "error_type": "NARRATIVE_NAME_MISMATCH",
+      "case_count": 12,
+      "miss_count": 5,
+      "hit_at_1": 0.4166666666666667,
+      "recall_at_5": 0.625,
+      "mrr": 0.5027777777777778,
+      "ndcg_at_5": 0.5109108127976215,
+      "miss_cases": [
+        {
+          "id": "be-r004-06",
+          "query": "银行摘要包含特殊字符和英文缩写，企业名称是中文全称，规范化后还要保留什么证据",
+          "expected_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_advanced_002",
+            "bank_enterprise_narrative_mismatch_playbook_005"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_advanced_002",
+            "bank_enterprise_narrative_mismatch_advanced_005",
+            "bank_enterprise_narrative_mismatch_playbook_002",
+            "bank_enterprise_exact_match_playbook_003",
+            "bank_enterprise_narrative_mismatch_playbook_001"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
+        {
+          "id": "be-r004-08",
+          "query": "只凭摘要里几个关键词相似就匹配两笔流水，会有什么审计风险",
+          "expected_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_playbook_002",
+            "pbc_small_payment_query_reply_002"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_playbook_005",
+            "bank_enterprise_narrative_mismatch_playbook_001",
+            "bank_enterprise_exact_match_playbook_005",
+            "bank_enterprise_duplicate_booking_playbook_004",
+            "bank_enterprise_fuzzy_match_playbook_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "be-r004-10",
+          "query": "客户名称和备注都不一致但流水号相同，复核闭环要记录哪些处理依据",
+          "expected_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_advanced_005",
+            "pbc_epayment_guideline_002"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_book_unrecorded_playbook_005",
+            "bank_enterprise_duplicate_booking_playbook_002",
+            "bank_enterprise_narrative_mismatch_playbook_001",
+            "bank_enterprise_exact_match_playbook_003",
+            "unionpay_reconciliation_faq_002"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "be-r004-11",
+          "query": "银行端摘要缺少合同信息，企业端凭证有合同号，应该如何补充核对",
+          "expected_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_playbook_001",
+            "bank_enterprise_narrative_mismatch_playbook_002"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_playbook_004",
+            "bank_enterprise_amount_mismatch_playbook_001",
+            "bank_enterprise_bank_unarrived_playbook_005",
+            "bank_enterprise_amount_mismatch_playbook_003",
+            "bank_enterprise_bank_unarrived_playbook_001"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "be-r004-12",
+          "query": "代付代收场景下实际付款人和账面客户不同，是否需要转人工确认",
+          "expected_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_playbook_003"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_advanced_003",
+            "bank_enterprise_book_unrecorded_advanced_003",
+            "bank_enterprise_book_unrecorded_advanced_005",
+            "bank_enterprise_amount_mismatch_playbook_004",
+            "bank_enterprise_bank_unarrived_playbook_003"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        }
+      ]
+    }
+  ]
 }
