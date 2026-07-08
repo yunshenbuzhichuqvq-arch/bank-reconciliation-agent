@@ -17,7 +17,7 @@
 ## ADR-DSR.1: DeepSeek re-eval evidence must be freshly regenerated
 
 **Slug**: `deepseek-safety-reeval-fresh-provider-evidence`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-07-08
 
 ### Context
@@ -100,7 +100,7 @@ DeepSeek safety closure from the stale 2026-07-07 report.
 ## ADR-DSR.2: Effective safety gates are the release gate; raw provider output is a diagnostic caveat
 
 **Slug**: `effective-safety-gate-raw-provider-caveat`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-07-08
 
 ### Context
@@ -173,7 +173,7 @@ and require a new ADR/spec revision before prompt, policy, or eval-label changes
 ## ADR-DSR.3: Refresh triage summary only; do not expand eval scope in this stage
 
 **Slug**: `deepseek-reeval-triage-refresh-only`
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-07-08
 
 ### Context
