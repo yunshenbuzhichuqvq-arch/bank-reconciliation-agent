@@ -12,7 +12,7 @@
     "hybrid_rerank"
   ],
   "real_backend_policy": "auto",
-  "evaluated_at": "2026-07-08T14:47:32.825285Z",
+  "evaluated_at": "2026-07-08T16:21:23.821487Z",
   "rows": {
     "hash": {
       "requested_backend": "hash",
@@ -27,7 +27,119 @@
             "recall_at_5": 0.37916666666666665,
             "mrr": 0.2808333333333333,
             "ndcg_at_5": 0.2826732892557119
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.35,
+              "mrr": 0.30333333333333334,
+              "ndcg_at_5": 0.2737197712769296
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.6,
+              "mrr": 0.39166666666666666,
+              "ndcg_at_5": 0.43078918734114424
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.5,
+              "mrr": 0.395,
+              "ndcg_at_5": 0.4132195588913345
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.1,
+              "recall_at_5": 0.45,
+              "mrr": 0.26,
+              "ndcg_at_5": 0.2879030793579133
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 5,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.65,
+              "mrr": 0.4083333333333333,
+              "ndcg_at_5": 0.43991268531884603
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.1,
+              "recall_at_5": 0.35,
+              "mrr": 0.2333333333333333,
+              "ndcg_at_5": 0.25884242797613194
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 11,
+              "hit_at_1": 0.0,
+              "recall_at_5": 0.16666666666666666,
+              "mrr": 0.10416666666666667,
+              "ndcg_at_5": 0.1084868216345221
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.375,
+              "mrr": 0.32916666666666666,
+              "ndcg_at_5": 0.2923454224091256
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.2916666666666667,
+              "mrr": 0.2777777777777778,
+              "ndcg_at_5": 0.25942893273045486
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 8,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.4166666666666667,
+              "mrr": 0.375,
+              "ndcg_at_5": 0.3382329676357627
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 11,
+              "hit_at_1": 0.0,
+              "recall_at_5": 0.125,
+              "mrr": 0.0625,
+              "ndcg_at_5": 0.07458315634533737
+            }
+          ]
         },
         "hybrid": {
           "global_metrics": {
@@ -35,7 +147,119 @@
             "recall_at_5": 0.5666666666666667,
             "mrr": 0.46777777777777774,
             "ndcg_at_5": 0.45899185783572205
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.55,
+              "mrr": 0.5,
+              "ndcg_at_5": 0.4668703490613132
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.4,
+              "recall_at_5": 0.7,
+              "mrr": 0.5583333333333333,
+              "ndcg_at_5": 0.5814718665292237
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 5,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.6,
+              "mrr": 0.4666666666666666,
+              "ndcg_at_5": 0.48243561571887283
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.55,
+              "mrr": 0.4083333333333334,
+              "ndcg_at_5": 0.41418855224966633
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.8,
+              "mrr": 0.77,
+              "ndcg_at_5": 0.7163797735485103
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.5,
+              "mrr": 0.3733333333333334,
+              "ndcg_at_5": 0.37444611202215344
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.16666666666666666,
+              "recall_at_5": 0.375,
+              "mrr": 0.27361111111111114,
+              "ndcg_at_5": 0.260341913474222
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 7,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.5416666666666666,
+              "mrr": 0.4236111111111111,
+              "ndcg_at_5": 0.43494616944439807
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5347222222222222,
+              "ndcg_at_5": 0.5239917247646473
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.6527777777777778,
+              "ndcg_at_5": 0.6060177659568414
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.16666666666666666,
+              "recall_at_5": 0.2916666666666667,
+              "mrr": 0.22916666666666666,
+              "ndcg_at_5": 0.2347941137756612
+            }
+          ]
         },
         "hybrid_rerank": {
           "global_metrics": {
@@ -43,7 +267,119 @@
             "recall_at_5": 0.7,
             "mrr": 0.6443055555555556,
             "ndcg_at_5": 0.6168479692395881
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.8,
+              "mrr": 0.7833333333333333,
+              "ndcg_at_5": 0.7270065694682942
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.75,
+              "mrr": 0.675,
+              "ndcg_at_5": 0.6569149295968335
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.4,
+              "recall_at_5": 0.75,
+              "mrr": 0.625,
+              "ndcg_at_5": 0.6027193465057393
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.65,
+              "mrr": 0.55,
+              "ndcg_at_5": 0.5545089586180738
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.95,
+              "mrr": 0.8333333333333333,
+              "ndcg_at_5": 0.8561553869958025
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.4,
+              "mrr": 0.3416666666666667,
+              "ndcg_at_5": 0.3043823750838851
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 7,
+              "hit_at_1": 0.3333333333333333,
+              "recall_at_5": 0.5833333333333334,
+              "mrr": 0.46388888888888896,
+              "ndcg_at_5": 0.45961737303014544
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.711072331826137
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.736111111111111,
+              "ndcg_at_5": 0.7098152134004999
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.6666666666666666
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5277777777777778,
+              "ndcg_at_5": 0.5365684689152417
+            }
+          ]
         }
       },
       "deltas_vs_dense": {
@@ -72,7 +408,119 @@
             "recall_at_5": 0.7875,
             "mrr": 0.712638888888889,
             "ndcg_at_5": 0.6947968918851234
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.8,
+              "mrr": 0.6833333333333333,
+              "ndcg_at_5": 0.6674701062723483
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.8,
+              "mrr": 0.6583333333333333,
+              "ndcg_at_5": 0.6755032715262121
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.85,
+              "mrr": 0.4916666666666666,
+              "ndcg_at_5": 0.584345699502344
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.9,
+              "mrr": 0.77,
+              "ndcg_at_5": 0.7787848255488942
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.9,
+              "recall_at_5": 0.95,
+              "mrr": 0.95,
+              "ndcg_at_5": 0.9237197712769296
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.7,
+              "mrr": 0.495,
+              "ndcg_at_5": 0.5019100837834712
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.875,
+              "mrr": 0.7569444444444445,
+              "ndcg_at_5": 0.7374545472611495
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.8125,
+              "ndcg_at_5": 0.7075302090086256
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.8333333333333334,
+              "mrr": 0.85,
+              "ndcg_at_5": 0.7901062215921844
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.769766476064108
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 7,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.5,
+              "mrr": 0.5416666666666666,
+              "ndcg_at_5": 0.5
+            }
+          ]
         },
         "hybrid": {
           "global_metrics": {
@@ -80,7 +528,119 @@
             "recall_at_5": 0.7875,
             "mrr": 0.6869444444444445,
             "ndcg_at_5": 0.6849834198341831
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.75,
+              "mrr": 0.7,
+              "ndcg_at_5": 0.6568433103525645
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.75,
+              "mrr": 0.675,
+              "ndcg_at_5": 0.6914989052379724
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.85,
+              "mrr": 0.5866666666666667,
+              "ndcg_at_5": 0.6162854955397314
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.9,
+              "mrr": 0.72,
+              "ndcg_at_5": 0.7550650542719646
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 0,
+              "hit_at_1": 0.7,
+              "recall_at_5": 1.0,
+              "mrr": 0.8333333333333333,
+              "ndcg_at_5": 0.8718472371875509
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.4,
+              "mrr": 0.4,
+              "ndcg_at_5": 0.36131471927654585
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.6700844209019294
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 2,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.875,
+              "mrr": 0.6805555555555555,
+              "ndcg_at_5": 0.7187763629454772
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.875,
+              "mrr": 0.875,
+              "ndcg_at_5": 0.8342419439365316
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 2,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.875,
+              "mrr": 0.7777777777777777,
+              "ndcg_at_5": 0.8020042100003199
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5236111111111111,
+              "ndcg_at_5": 0.5306816590022984
+            }
+          ]
         },
         "hybrid_rerank": {
           "global_metrics": {
@@ -88,7 +648,119 @@
             "recall_at_5": 0.7166666666666667,
             "mrr": 0.6605555555555557,
             "ndcg_at_5": 0.633644491092255
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.7833333333333333,
+              "ndcg_at_5": 0.7032867981913646
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.725,
+              "ndcg_at_5": 0.6980725016207016
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.75,
+              "mrr": 0.575,
+              "ndcg_at_5": 0.5658123218628851
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 5,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.65,
+              "mrr": 0.6583333333333333,
+              "ndcg_at_5": 0.5963544539987039
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.95,
+              "mrr": 0.8166666666666667,
+              "ndcg_at_5": 0.8481274659106213
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.45,
+              "mrr": 0.4033333333333333,
+              "ndcg_at_5": 0.3543771309152025
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.3333333333333333,
+              "recall_at_5": 0.625,
+              "mrr": 0.4777777777777778,
+              "ndcg_at_5": 0.4860737833319045
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.75,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.7330780087071863
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.6944444444444443,
+              "ndcg_at_5": 0.6909573479395902
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.75,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.7061996187948827
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5902777777777778,
+              "ndcg_at_5": 0.5817772583994198
+            }
+          ]
         }
       },
       "deltas_vs_dense": {
@@ -117,7 +789,119 @@
             "recall_at_5": 0.825,
             "mrr": 0.7352777777777778,
             "ndcg_at_5": 0.7209402917441399
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.9,
+              "mrr": 0.6733333333333335,
+              "ndcg_at_5": 0.7019048396147887
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.8,
+              "mrr": 0.7083333333333333,
+              "ndcg_at_5": 0.7070641718955321
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.9,
+              "mrr": 0.7166666666666666,
+              "ndcg_at_5": 0.7384531164477114
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 0,
+              "hit_at_1": 0.5,
+              "recall_at_5": 1.0,
+              "mrr": 0.6833333333333333,
+              "ndcg_at_5": 0.759100839213192
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.95,
+              "mrr": 0.7583333333333333,
+              "ndcg_at_5": 0.8019048396147888
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.35,
+              "mrr": 0.38333333333333336,
+              "ndcg_at_5": 0.31131471927654586
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.8333333333333334,
+              "mrr": 0.7777777777777777,
+              "ndcg_at_5": 0.7372988872671568
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.8333333333333334,
+              "recall_at_5": 0.875,
+              "mrr": 0.8958333333333334,
+              "ndcg_at_5": 0.8259457610494652
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 1.0,
+              "recall_at_5": 0.875,
+              "mrr": 1.0,
+              "ndcg_at_5": 0.893054741136202
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 0,
+              "hit_at_1": 0.8333333333333334,
+              "recall_at_5": 1.0,
+              "mrr": 0.8819444444444443,
+              "ndcg_at_5": 0.9043052652136224
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.5833333333333334,
+              "mrr": 0.5277777777777778,
+              "ndcg_at_5": 0.499012824389486
+            }
+          ]
         },
         "hybrid": {
           "global_metrics": {
@@ -125,7 +909,119 @@
             "recall_at_5": 0.7875,
             "mrr": 0.7220833333333334,
             "ndcg_at_5": 0.7007177543097192
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.75,
+              "mrr": 0.6666666666666667,
+              "ndcg_at_5": 0.6357224139102374
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.85,
+              "mrr": 0.6916666666666667,
+              "ndcg_at_5": 0.7281021463608147
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.85,
+              "mrr": 0.7366666666666666,
+              "ndcg_at_5": 0.7227560220872804
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.95,
+              "mrr": 0.7,
+              "ndcg_at_5": 0.7414989052379723
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.8,
+              "recall_at_5": 0.95,
+              "mrr": 0.8833333333333332,
+              "ndcg_at_5": 0.8734439454440424
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.45,
+              "mrr": 0.395,
+              "ndcg_at_5": 0.3528136245145182
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.7361111111111112,
+              "ndcg_at_5": 0.6669366094817898
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.75,
+              "mrr": 0.7083333333333334,
+              "ndcg_at_5": 0.6851302207302044
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 1.0,
+              "recall_at_5": 0.875,
+              "mrr": 1.0,
+              "ndcg_at_5": 0.8965968639537136
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 2,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.875,
+              "mrr": 0.8333333333333334,
+              "ndcg_at_5": 0.8266433990956822
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5486111111111112,
+              "ndcg_at_5": 0.553256235206747
+            }
+          ]
         },
         "hybrid_rerank": {
           "global_metrics": {
@@ -133,7 +1029,119 @@
             "recall_at_5": 0.7208333333333333,
             "mrr": 0.6730555555555555,
             "ndcg_at_5": 0.6411735168673882
-          }
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.7833333333333333,
+              "ndcg_at_5": 0.7032867981913646
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.7333333333333333,
+              "ndcg_at_5": 0.7023230490017154
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.4,
+              "recall_at_5": 0.75,
+              "mrr": 0.625,
+              "ndcg_at_5": 0.6027193465057393
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.75,
+              "mrr": 0.6833333333333333,
+              "ndcg_at_5": 0.6394221098060432
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.95,
+              "mrr": 0.8166666666666667,
+              "ndcg_at_5": 0.8481274659106213
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.4,
+              "mrr": 0.42000000000000004,
+              "ndcg_at_5": 0.33868528072345416
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.3333333333333333,
+              "recall_at_5": 0.625,
+              "mrr": 0.4777777777777778,
+              "ndcg_at_5": 0.48383458251496325
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.75,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.7366201315246977
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.736111111111111,
+              "ndcg_at_5": 0.7098152134004999
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.75,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.708438819611824
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5902777777777778,
+              "ndcg_at_5": 0.5775563798394494
+            }
+          ]
         }
       },
       "deltas_vs_dense": {

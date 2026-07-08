@@ -24,33 +24,22 @@
     "mode": "hybrid"
   },
   "trust": {
-    "trusted": true,
-    "reasons": []
+    "trusted": false,
+    "reasons": [
+      "baseline matrix lacks bucket_metrics for bge_m3/hybrid"
+    ]
   },
   "target_bucket": {
-    "before": {
-      "case_count": 10,
-      "miss_count": 7,
-      "hit_at_1": 0.1,
-      "recall_at_5": 0.4,
-      "mrr": 0.2833333333333333,
-      "ndcg_at_5": 0.2937503349954187
-    },
+    "before": {},
     "after": {
       "case_count": 10,
-      "miss_count": 8,
+      "miss_count": 7,
       "hit_at_1": 0.3,
-      "recall_at_5": 0.35,
-      "mrr": 0.38333333333333336,
-      "ndcg_at_5": 0.31131471927654586
+      "recall_at_5": 0.45,
+      "mrr": 0.395,
+      "ndcg_at_5": 0.3528136245145182
     },
-    "delta": {
-      "miss_count": 1,
-      "hit_at_1": 0.19999999999999998,
-      "recall_at_5": -0.050000000000000044,
-      "mrr": 0.10000000000000003,
-      "ndcg_at_5": 0.017564384281127166
-    },
+    "delta": {},
     "improved": false
   },
   "global": {
@@ -76,148 +65,12 @@
     "max_global_regression": 0.02
   },
   "side_effect_buckets": {
-    "largest_regressions": [
-      {
-        "scenario_type": "BANK_ENTERPRISE",
-        "error_type": "NARRATIVE_NAME_MISMATCH",
-        "before": {
-          "case_count": 12,
-          "miss_count": 5,
-          "hit_at_1": 0.4166666666666667,
-          "recall_at_5": 0.625,
-          "mrr": 0.5027777777777778,
-          "ndcg_at_5": 0.5109108127976215
-        },
-        "after": {
-          "case_count": 12,
-          "miss_count": 6,
-          "hit_at_1": 0.4166666666666667,
-          "recall_at_5": 0.5833333333333334,
-          "mrr": 0.5277777777777778,
-          "ndcg_at_5": 0.499012824389486
-        },
-        "delta": {
-          "miss_count": 1,
-          "hit_at_1": 0.0,
-          "recall_at_5": -0.04166666666666663,
-          "mrr": 0.025000000000000022,
-          "ndcg_at_5": -0.011897988408135496
-        }
-      },
-      {
-        "scenario_type": "BANK_CLEARING",
-        "error_type": "REFERENCE_MATCH",
-        "before": {
-          "case_count": 10,
-          "miss_count": 1,
-          "hit_at_1": 0.6,
-          "recall_at_5": 0.95,
-          "mrr": 0.7833333333333333,
-          "ndcg_at_5": 0.8130929753571458
-        },
-        "after": {
-          "case_count": 10,
-          "miss_count": 1,
-          "hit_at_1": 0.6,
-          "recall_at_5": 0.95,
-          "mrr": 0.7583333333333333,
-          "ndcg_at_5": 0.8019048396147888
-        },
-        "delta": {
-          "miss_count": 0,
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0,
-          "mrr": -0.025000000000000022,
-          "ndcg_at_5": -0.011188135742356997
-        }
-      }
-    ],
-    "largest_improvements": [
-      {
-        "scenario_type": "BANK_ENTERPRISE",
-        "error_type": "BANK_UNARRIVED",
-        "before": {
-          "case_count": 12,
-          "miss_count": 5,
-          "hit_at_1": 0.5833333333333334,
-          "recall_at_5": 0.7083333333333334,
-          "mrr": 0.6597222222222222,
-          "ndcg_at_5": 0.6117299879437573
-        },
-        "after": {
-          "case_count": 12,
-          "miss_count": 3,
-          "hit_at_1": 0.8333333333333334,
-          "recall_at_5": 0.875,
-          "mrr": 0.8958333333333334,
-          "ndcg_at_5": 0.8259457610494652
-        },
-        "delta": {
-          "miss_count": -2,
-          "hit_at_1": 0.25,
-          "recall_at_5": 0.16666666666666663,
-          "mrr": 0.23611111111111116,
-          "ndcg_at_5": 0.21421577310570783
-        }
-      },
-      {
-        "scenario_type": "BANK_ENTERPRISE",
-        "error_type": "AMOUNT_MISMATCH",
-        "before": {
-          "case_count": 12,
-          "miss_count": 6,
-          "hit_at_1": 0.5833333333333334,
-          "recall_at_5": 0.625,
-          "mrr": 0.6527777777777778,
-          "ndcg_at_5": 0.5669111397163823
-        },
-        "after": {
-          "case_count": 12,
-          "miss_count": 3,
-          "hit_at_1": 0.6666666666666666,
-          "recall_at_5": 0.8333333333333334,
-          "mrr": 0.7777777777777777,
-          "ndcg_at_5": 0.7372988872671568
-        },
-        "delta": {
-          "miss_count": -3,
-          "hit_at_1": 0.08333333333333326,
-          "recall_at_5": 0.20833333333333337,
-          "mrr": 0.12499999999999989,
-          "ndcg_at_5": 0.17038774755077446
-        }
-      },
-      {
-        "scenario_type": "BANK_ENTERPRISE",
-        "error_type": "DUPLICATE_BOOKING",
-        "before": {
-          "case_count": 12,
-          "miss_count": 2,
-          "hit_at_1": 0.6666666666666666,
-          "recall_at_5": 0.875,
-          "mrr": 0.7777777777777777,
-          "ndcg_at_5": 0.8077855336347725
-        },
-        "after": {
-          "case_count": 12,
-          "miss_count": 0,
-          "hit_at_1": 0.8333333333333334,
-          "recall_at_5": 1.0,
-          "mrr": 0.8819444444444443,
-          "ndcg_at_5": 0.9043052652136224
-        },
-        "delta": {
-          "miss_count": -2,
-          "hit_at_1": 0.16666666666666674,
-          "recall_at_5": 0.125,
-          "mrr": 0.10416666666666663,
-          "ndcg_at_5": 0.09651973157884997
-        }
-      }
-    ]
+    "largest_regressions": [],
+    "largest_improvements": []
   },
   "success": false,
   "failure_reasons": [
-    "target bucket BANK_CLEARING/SINGLE_SIDE_MISSING did not improve (recall: 0.4 -> 0.35, miss_count: 7 -> 8)"
+    "baseline matrix lacks bucket_metrics for bge_m3/hybrid",
+    "target bucket BANK_CLEARING/SINGLE_SIDE_MISSING did not improve (recall: None -> 0.45, miss_count: None -> 7)"
   ]
 }

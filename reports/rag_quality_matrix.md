@@ -7,7 +7,7 @@
 | Case Count | 120 |
 | Top K | 5 |
 | Real Backend Policy | `auto` |
-| Evaluated At | 2026-07-08T14:47:32.825285Z |
+| Evaluated At | 2026-07-08T16:21:23.821487Z |
 | Best Real Backend | `bge_m3` |
 | Best Real Mode | `dense` |
 
