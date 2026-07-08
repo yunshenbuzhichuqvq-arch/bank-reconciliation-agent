@@ -307,7 +307,9 @@ def evaluate_agent_cases(
         real_provider_call = True
 
     metrics = _compute_metrics(results)
+    coverage = _compute_coverage(cases)
     gates = _compute_gates(metrics)
+    gates["coverage_pass"] = coverage["coverage_pass"]
     return {
         "case_count": len(cases),
         "provider_requested": provider_requested,
@@ -317,6 +319,7 @@ def evaluate_agent_cases(
         "real_provider_call": real_provider_call,
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "metrics": metrics,
+        "coverage": coverage,
         "gates": gates,
         "results": [asdict(result) for result in results],
     }
@@ -385,6 +388,51 @@ def _compute_gates(metrics: dict[str, float]) -> dict[str, bool]:
     }
 
 
+def _compute_coverage(cases: list[AgentEvalCase]) -> dict[str, Any]:
+    count = len(cases)
+    by_error_type: dict[str, int] = {}
+    by_exception_branch: dict[str, int] = {}
+    by_risk_level: dict[str, int] = {}
+    by_evidence_state: dict[str, int] = {}
+    by_coverage_tag: dict[str, int] = {}
+    for case in cases:
+        by_error_type[case.error_type] = by_error_type.get(case.error_type, 0) + 1
+        branch = case.exception_branch or "none"
+        by_exception_branch[branch] = by_exception_branch.get(branch, 0) + 1
+        by_risk_level[case.expected_risk_level] = (
+            by_risk_level.get(case.expected_risk_level, 0) + 1
+        )
+        by_evidence_state[case.evidence_state] = (
+            by_evidence_state.get(case.evidence_state, 0) + 1
+        )
+        for tag in case.coverage_tags:
+            by_coverage_tag[tag] = by_coverage_tag.get(tag, 0) + 1
+
+    missing_tags = sorted(REQUIRED_COVERAGE_TAGS - set(by_coverage_tag))
+    no_evidence_case_present = any(case.evidence_state == "none" for case in cases)
+    unsafe_output_guard_case_present = _has_unsafe_output_guard_case(cases)
+    case_count_in_range = MIN_DEFAULT_CASES <= count <= MAX_DEFAULT_CASES
+    coverage_pass = (
+        case_count_in_range
+        and not missing_tags
+        and no_evidence_case_present
+        and unsafe_output_guard_case_present
+    )
+    return {
+        "case_count": count,
+        "case_count_in_range": case_count_in_range,
+        "by_error_type": by_error_type,
+        "by_exception_branch": by_exception_branch,
+        "by_risk_level": by_risk_level,
+        "by_evidence_state": by_evidence_state,
+        "by_coverage_tag": by_coverage_tag,
+        "missing_required_coverage_tags": missing_tags,
+        "no_evidence_case_present": no_evidence_case_present,
+        "unsafe_output_guard_case_present": unsafe_output_guard_case_present,
+        "coverage_pass": coverage_pass,
+    }
+
+
 def write_markdown_report(report: dict[str, Any], output_path: Path = DEFAULT_REPORT_PATH) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(_format_markdown_report(report), encoding="utf-8")
@@ -424,6 +472,7 @@ def _to_metrics_snapshot(report: dict[str, Any]) -> dict[str, object]:
             "raw_unsafe_auto_fix_rate", 0.0
         ),
         "agent_case_count": metrics.get("case_count", 0),
+        "agent_coverage": report.get("coverage", {}),
         "gates": gates,
         "provider_requested": report.get("provider_requested", "unknown"),
         "provider_effective": report.get("provider_effective", "unknown"),
@@ -432,6 +481,43 @@ def _to_metrics_snapshot(report: dict[str, Any]) -> dict[str, object]:
         "real_provider_call": report.get("real_provider_call", False),
         "evaluated_at": report.get("evaluated_at", ""),
     }
+
+
+def _format_coverage_section(coverage: dict[str, Any]) -> list[str]:
+    missing = coverage.get("missing_required_coverage_tags", [])
+    lines = [
+        "## Coverage Summary",
+        "",
+        "| Key | Value |",
+        "|---|---|",
+        f"| Case Count | {coverage.get('case_count', 0)} |",
+        f"| Case Count In Range | {coverage.get('case_count_in_range', False)} |",
+        f"| Missing Required Coverage Tags | {', '.join(missing) if missing else 'none'} |",
+        f"| No-Evidence Case Present | {coverage.get('no_evidence_case_present', False)} |",
+        (
+            "| Unsafe-Output Guard Case Present | "
+            f"{coverage.get('unsafe_output_guard_case_present', False)} |"
+        ),
+        f"| Coverage Gate | {'PASS' if coverage.get('coverage_pass') else 'FAIL'} |",
+        "",
+    ]
+    lines.extend(_format_count_table("By Risk Level", coverage.get("by_risk_level", {})))
+    lines.extend(_format_count_table("By Evidence State", coverage.get("by_evidence_state", {})))
+    lines.extend(_format_count_table("By Coverage Tag", coverage.get("by_coverage_tag", {})))
+    return lines
+
+
+def _format_count_table(title: str, counts: dict[str, int]) -> list[str]:
+    lines = [
+        f"### {title}",
+        "",
+        "| Bucket | Count |",
+        "|---|---|",
+    ]
+    for key in sorted(counts):
+        lines.append(f"| {key} | {counts[key]} |")
+    lines.append("")
+    return lines
 
 
 def _format_markdown_report(report: dict[str, Any]) -> str:
@@ -473,12 +559,16 @@ def _format_markdown_report(report: dict[str, Any]) -> str:
         "|---|---|",
         f"| Unsafe Auto-Fix = 0 | {'PASS' if gates.get('unsafe_auto_fix_pass') else 'FAIL'} |",
         f"| Hard Constraint Violation = 0 | {'PASS' if gates.get('hard_constraint_violation_pass') else 'FAIL'} |",
+        f"| Coverage Pass | {'PASS' if gates.get('coverage_pass') else 'FAIL'} |",
         "",
+    ]
+    lines.extend(_format_coverage_section(report.get("coverage", {})))
+    lines.extend([
         "## Per-Case Results",
         "",
         "| Case ID | Error Type | Branch | Decision | Risk | Raw Decision | Raw Risk | Policy | Schema | Decision Match | Risk Match | Evidence | Consistent |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-    ]
+    ])
     for result in report["results"]:
         raw_dec = result.get("raw_decision", "") or ""
         raw_risk = result.get("raw_risk_level", "") or ""

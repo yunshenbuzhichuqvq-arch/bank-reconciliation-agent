@@ -1198,3 +1198,117 @@ def test_stub_provider_raw_unsafe_is_gated_in_eval(monkeypatch, tmp_path: Path) 
         assert safe_result["safety_policy_applied"] is False
     finally:
         monkeypatch.setattr(eval_agent, "DeepSeekProvider", original)
+
+
+# ---------------------------------------------------------------------------
+# TASK-20.2: Coverage summary reporting and gates
+# ---------------------------------------------------------------------------
+
+
+def _default_report() -> dict:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    return eval_agent.evaluate_agent_cases(cases, provider="fake")
+
+
+def test_report_dict_includes_coverage_object() -> None:
+    report = _default_report()
+    assert "coverage" in report
+    coverage = report["coverage"]
+    for key in [
+        "case_count",
+        "case_count_in_range",
+        "by_error_type",
+        "by_exception_branch",
+        "by_risk_level",
+        "by_evidence_state",
+        "by_coverage_tag",
+        "missing_required_coverage_tags",
+        "no_evidence_case_present",
+        "unsafe_output_guard_case_present",
+        "coverage_pass",
+    ]:
+        assert key in coverage, f"Missing coverage key: {key}"
+
+
+def test_default_coverage_passes_and_matches_case_count() -> None:
+    report = _default_report()
+    coverage = report["coverage"]
+    assert coverage["case_count"] == report["case_count"]
+    assert coverage["case_count_in_range"] is True
+    assert coverage["missing_required_coverage_tags"] == []
+    assert coverage["no_evidence_case_present"] is True
+    assert coverage["unsafe_output_guard_case_present"] is True
+    assert coverage["coverage_pass"] is True
+
+
+def test_gates_include_coverage_pass_with_safety_gates() -> None:
+    report = _default_report()
+    gates = report["gates"]
+    assert gates["unsafe_auto_fix_pass"] is True
+    assert gates["hard_constraint_violation_pass"] is True
+    assert gates["coverage_pass"] is True
+
+
+def test_coverage_buckets_are_populated() -> None:
+    report = _default_report()
+    coverage = report["coverage"]
+    assert sum(coverage["by_risk_level"].values()) == report["case_count"]
+    assert sum(coverage["by_evidence_state"].values()) == report["case_count"]
+    assert set(coverage["by_coverage_tag"]) >= eval_agent.REQUIRED_COVERAGE_TAGS
+    assert coverage["by_evidence_state"].get("none", 0) >= 1
+
+
+def test_json_snapshot_includes_agent_coverage(tmp_path: Path) -> None:
+    report = _default_report()
+    json_path = tmp_path / "agent_eval_metrics.json"
+    eval_agent.write_json_metrics_snapshot(report, json_path)
+    snapshot = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert "agent_coverage" in snapshot
+    assert snapshot["agent_coverage"]["coverage_pass"] is True
+    assert snapshot["agent_coverage"]["case_count"] == report["case_count"]
+
+
+def test_markdown_includes_coverage_summary(tmp_path: Path) -> None:
+    report = _default_report()
+    md_path = tmp_path / "agent_eval.md"
+    eval_agent.write_markdown_report(report, md_path)
+    content = md_path.read_text(encoding="utf-8")
+
+    assert "Coverage Summary" in content
+    assert "By Risk Level" in content
+    assert "By Evidence State" in content
+    assert "By Coverage Tag" in content
+    assert "Coverage Gate" in content
+    assert "Coverage Pass" in content
+
+
+def test_fake_provider_coverage_markdown_does_not_mention_deepseek(tmp_path: Path) -> None:
+    report = _default_report()
+    md_path = tmp_path / "agent_eval.md"
+    eval_agent.write_markdown_report(report, md_path)
+    content = md_path.read_text(encoding="utf-8")
+
+    assert "Coverage Summary" in content
+    assert "deepseek" not in content.lower()
+
+
+def test_coverage_pass_false_when_tags_missing() -> None:
+    cases = eval_agent.load_agent_eval_cases(PROJECT_ROOT / "data/agent_eval_cases.json")
+    reduced = [c for c in cases if "low_risk_candidate_confirmation" not in c.coverage_tags]
+    coverage = eval_agent._compute_coverage(reduced)
+    assert "low_risk_candidate_confirmation" in coverage["missing_required_coverage_tags"]
+    assert coverage["coverage_pass"] is False
+
+
+def test_eval_harness_agent_layer_remains_compatible() -> None:
+    from scripts import eval_harness
+
+    report = eval_harness.run_harness(normal_rows=10)
+    agent_eval = report["agent_eval"]
+    assert agent_eval["case_count"] is not None
+    assert "metrics" in agent_eval
+    assert "gates" in agent_eval
+    combined_gates = report["gates"]
+    assert all(isinstance(v, bool) for v in combined_gates.values())
+
