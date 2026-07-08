@@ -346,6 +346,8 @@ def evaluate_backend_mode_matrix(
         }
 
     best_real_backend = _find_best_real_backend(rows)
+    best_real_mode = rows[best_real_backend]["selected_mode"] if best_real_backend else None
+    real_backend_requirement = _build_real_backend_requirement(rows)
     miss_buckets = (
         _build_miss_buckets(cases, rows, best_real_backend, top_k, retriever_factory, modes)
         if best_real_backend is not None
@@ -361,6 +363,8 @@ def evaluate_backend_mode_matrix(
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "rows": rows,
         "best_real_backend": best_real_backend,
+        "best_real_mode": best_real_mode,
+        "real_backend_requirement": real_backend_requirement,
         "miss_buckets": miss_buckets,
     }
 
@@ -382,6 +386,48 @@ def _find_best_real_backend(rows: dict[str, dict[str, Any]]) -> str | None:
             best_ndcg = ndcg
             best = backend
     return best
+
+
+def _build_real_backend_requirement(
+    rows: dict[str, dict[str, Any]],
+    *,
+    required_backend: str = "bge_small",
+) -> dict[str, Any]:
+    measured_real = [
+        backend
+        for backend, row in rows.items()
+        if backend != "hash"
+        and row.get("status") == "measured"
+        and row.get("effective_backend") == backend
+    ]
+    unavailable_real = [
+        backend
+        for backend, row in rows.items()
+        if backend != "hash" and row.get("status") == "unavailable"
+    ]
+    not_run_real = [
+        backend
+        for backend, row in rows.items()
+        if backend != "hash" and row.get("status") == "not_run"
+    ]
+    required_row = rows.get(required_backend, {})
+    satisfied = (
+        required_row.get("status") == "measured"
+        and required_row.get("effective_backend") == required_backend
+    )
+    reason = (
+        f"{required_backend} measured with trusted effective backend"
+        if satisfied
+        else f"{required_backend} is not a trusted measured backend"
+    )
+    return {
+        "required_backend": required_backend,
+        "satisfied": satisfied,
+        "measured_real_backends": measured_real,
+        "unavailable_real_backends": unavailable_real,
+        "not_run_real_backends": not_run_real,
+        "reason": reason,
+    }
 
 
 def _build_miss_buckets(
@@ -422,6 +468,18 @@ def _build_miss_buckets(
     for (scenario_type, error_type), group in sorted(groups.items()):
         case_count = len(group)
         miss_count = sum(1 for r in group if r.recall_at_5 < 1.0)
+        miss_case_entries = [
+            {
+                "id": r.id,
+                "query": r.query,
+                "expected_chunk_ids": r.expected_chunk_ids,
+                "retrieved_chunk_ids": r.retrieved_chunk_ids,
+                "hit_at_1": r.hit_at_1,
+                "recall_at_5": r.recall_at_5,
+            }
+            for r in group
+            if r.recall_at_5 < 1.0
+        ]
         buckets.append(
             {
                 "scenario_type": scenario_type,
@@ -432,6 +490,7 @@ def _build_miss_buckets(
                 "recall_at_5": sum(r.recall_at_5 for r in group) / case_count,
                 "mrr": sum(r.reciprocal_rank for r in group) / case_count,
                 "ndcg_at_5": sum(r.ndcg_at_5 for r in group) / case_count,
+                "miss_cases": miss_case_entries[:5],
             }
         )
     return buckets
@@ -469,12 +528,41 @@ def _format_matrix_markdown(report: dict[str, Any]) -> str:
         f"| Real Backend Policy | `{report.get('real_backend_policy', 'skip')}` |",
         f"| Evaluated At | {report.get('evaluated_at', 'N/A')} |",
         f"| Best Real Backend | `{report.get('best_real_backend') or 'N/A'}` |",
+        f"| Best Real Mode | `{report.get('best_real_mode') or 'N/A'}` |",
         "",
+        "## Real Backend Requirement",
+        "",
+    ]
+
+    req = report.get("real_backend_requirement", {})
+    if req:
+        satisfied_label = "Yes" if req.get("satisfied") else "No"
+        measured = ", ".join(f"`{b}`" for b in req.get("measured_real_backends", [])) or "-"
+        unavailable = ", ".join(f"`{b}`" for b in req.get("unavailable_real_backends", [])) or "-"
+        not_run = ", ".join(f"`{b}`" for b in req.get("not_run_real_backends", [])) or "-"
+        lines.extend([
+            "| Key | Value |",
+            "|---|---|",
+            f"| Required Backend | `{req.get('required_backend', 'N/A')}` |",
+            f"| Satisfied | {satisfied_label} |",
+            f"| Measured Real Backends | {measured} |",
+            f"| Unavailable Real Backends | {unavailable} |",
+            f"| Not Run Real Backends | {not_run} |",
+            f"| Reason | {req.get('reason', 'N/A')} |",
+            "",
+        ])
+    else:
+        lines.extend([
+            "No real backend requirement information.",
+            "",
+        ])
+
+    lines.extend([
         "## Row Summary",
         "",
         "| Backend | Eff Backend | Status | Selected Mode | Reason |",
         "| --- | --- | --- | --- | --- |",
-    ]
+    ])
     rows = report.get("rows", {})
     for backend in report.get("requested_backends", rows.keys()):
         row = rows.get(backend, {})
@@ -561,6 +649,34 @@ def _format_matrix_markdown(report: dict[str, Any]) -> str:
                 f"{bucket['mrr']:.4f} | {bucket['ndcg_at_5']:.4f} |"
             )
         lines.append("")
+
+        miss_samples_heading_added = False
+        for bucket in miss:
+            miss_cases = bucket.get("miss_cases", [])
+            if not miss_cases:
+                continue
+            if not miss_samples_heading_added:
+                lines.extend([
+                    "### Miss Samples",
+                    "",
+                ])
+                miss_samples_heading_added = True
+            lines.append(
+                f"#### {bucket['scenario_type']} / {bucket['error_type']}"
+            )
+            lines.append("")
+            lines.append(
+                "| ID | Query | Expected Chunks | Retrieved Chunks | Hit@1 | Recall@5 |\n"
+                "| --- | --- | --- | --- | ---: | ---: |"
+            )
+            for mc in miss_cases:
+                expected = ", ".join(mc["expected_chunk_ids"])
+                retrieved = ", ".join(mc["retrieved_chunk_ids"])
+                lines.append(
+                    f"| {mc['id']} | {mc['query']} | {expected} | {retrieved} | "
+                    f"{mc['hit_at_1']:.4f} | {mc['recall_at_5']:.4f} |"
+                )
+            lines.append("")
 
     return "\n".join(lines)
 
