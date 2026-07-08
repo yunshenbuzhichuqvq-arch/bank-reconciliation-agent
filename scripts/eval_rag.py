@@ -468,6 +468,18 @@ def _build_miss_buckets(
     for (scenario_type, error_type), group in sorted(groups.items()):
         case_count = len(group)
         miss_count = sum(1 for r in group if r.recall_at_5 < 1.0)
+        miss_case_entries = [
+            {
+                "id": r.id,
+                "query": r.query,
+                "expected_chunk_ids": r.expected_chunk_ids,
+                "retrieved_chunk_ids": r.retrieved_chunk_ids,
+                "hit_at_1": r.hit_at_1,
+                "recall_at_5": r.recall_at_5,
+            }
+            for r in group
+            if r.recall_at_5 < 1.0
+        ]
         buckets.append(
             {
                 "scenario_type": scenario_type,
@@ -478,6 +490,7 @@ def _build_miss_buckets(
                 "recall_at_5": sum(r.recall_at_5 for r in group) / case_count,
                 "mrr": sum(r.reciprocal_rank for r in group) / case_count,
                 "ndcg_at_5": sum(r.ndcg_at_5 for r in group) / case_count,
+                "miss_cases": miss_case_entries[:5],
             }
         )
     return buckets
@@ -636,6 +649,34 @@ def _format_matrix_markdown(report: dict[str, Any]) -> str:
                 f"{bucket['mrr']:.4f} | {bucket['ndcg_at_5']:.4f} |"
             )
         lines.append("")
+
+        miss_samples_heading_added = False
+        for bucket in miss:
+            miss_cases = bucket.get("miss_cases", [])
+            if not miss_cases:
+                continue
+            if not miss_samples_heading_added:
+                lines.extend([
+                    "### Miss Samples",
+                    "",
+                ])
+                miss_samples_heading_added = True
+            lines.append(
+                f"#### {bucket['scenario_type']} / {bucket['error_type']}"
+            )
+            lines.append("")
+            lines.append(
+                "| ID | Query | Expected Chunks | Retrieved Chunks | Hit@1 | Recall@5 |\n"
+                "| --- | --- | --- | --- | ---: | ---: |"
+            )
+            for mc in miss_cases:
+                expected = ", ".join(mc["expected_chunk_ids"])
+                retrieved = ", ".join(mc["retrieved_chunk_ids"])
+                lines.append(
+                    f"| {mc['id']} | {mc['query']} | {expected} | {retrieved} | "
+                    f"{mc['hit_at_1']:.4f} | {mc['recall_at_5']:.4f} |"
+                )
+            lines.append("")
 
     return "\n".join(lines)
 
