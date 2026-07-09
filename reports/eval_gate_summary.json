@@ -1,0 +1,208 @@
+{
+  "evaluated_at": "2026-07-09T12:24:16.934053Z",
+  "stage": "stage-24-eval-gate-layering",
+  "overall_status": "pass",
+  "source_reports": {
+    "harness_comparison": "/Users/hunengtao/Projects/AI_agent/bank-reconciliation-agent/reports/eval_harness/comparison.json",
+    "schema_conformance": "/Users/hunengtao/Projects/AI_agent/bank-reconciliation-agent/reports/agent_schema_conformance.json",
+    "agent_real_json": "/Users/hunengtao/Projects/AI_agent/bank-reconciliation-agent/reports/agent_eval_deepseek_flash_metrics.json",
+    "rag_matrix": "/Users/hunengtao/Projects/AI_agent/bank-reconciliation-agent/reports/rag_quality_matrix.json",
+    "performance_cost_json": "/Users/hunengtao/Projects/AI_agent/bank-reconciliation-agent/reports/performance_cost_benchmark.json",
+    "triage_json": "/Users/hunengtao/Projects/AI_agent/bank-reconciliation-agent/reports/real_quality_triage.json"
+  },
+  "layers": {
+    "ci": {
+      "name": "ci",
+      "status": "pass",
+      "blocks_ci": false,
+      "blocks_release": false,
+      "required_for_default_ci": true,
+      "checks": [
+        {
+          "id": "ci_default_fake_hash_harness_gates",
+          "layer": "ci",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Deterministic fake/hash harness after-gates all pass.",
+          "evidence": {
+            "after_gates": {
+              "system_unsafe_auto_fix_pass": true,
+              "system_hard_constraint_violation_pass": true,
+              "agent_unsafe_auto_fix_pass": true,
+              "agent_hard_constraint_violation_pass": true
+            }
+          }
+        },
+        {
+          "id": "ci_agent_schema_conformance",
+          "layer": "ci",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Agent schema conformance rate is 1.0.",
+          "evidence": {
+            "schema_conformance_rate": 1.0
+          }
+        }
+      ]
+    },
+    "manual_diagnostic": {
+      "name": "manual_diagnostic",
+      "status": "pass",
+      "blocks_ci": false,
+      "blocks_release": false,
+      "required_for_default_ci": false,
+      "checks": [
+        {
+          "id": "manual_deepseek_agent_eval",
+          "layer": "manual_diagnostic",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "DeepSeek Agent Eval evidence is trusted (real provider call).",
+          "evidence": {
+            "report_present": true,
+            "provider_effective": "deepseek",
+            "real_provider_call": true
+          }
+        },
+        {
+          "id": "manual_real_embedding_rag_matrix",
+          "layer": "manual_diagnostic",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Real embedding RAG matrix has a trusted measured non-hash backend.",
+          "evidence": {
+            "report_present": true,
+            "real_backend_requirement": {
+              "required_backend": "bge_small",
+              "satisfied": true,
+              "measured_real_backends": [
+                "bge_small",
+                "bge_m3"
+              ],
+              "unavailable_real_backends": [],
+              "not_run_real_backends": [],
+              "reason": "bge_small measured with trusted effective backend"
+            }
+          }
+        },
+        {
+          "id": "manual_real_provider_performance_cost",
+          "layer": "manual_diagnostic",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Real provider performance/cost evidence is trusted.",
+          "evidence": {
+            "report_present": true,
+            "provider_effective": "deepseek",
+            "status": "measured",
+            "trust": {
+              "trusted": true,
+              "real_provider_evidence": true,
+              "cost_evidence_available": true,
+              "reasons": []
+            }
+          }
+        }
+      ]
+    },
+    "release": {
+      "name": "release",
+      "status": "pass",
+      "blocks_ci": false,
+      "blocks_release": false,
+      "required_for_default_ci": false,
+      "checks": [
+        {
+          "id": "release_effective_unsafe_auto_fix_zero",
+          "layer": "release",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Trusted DeepSeek effective unsafe auto-fix rate is 0.",
+          "evidence": {
+            "agent_unsafe_auto_fix_rate": 0.0,
+            "trusted": true
+          }
+        },
+        {
+          "id": "release_effective_hard_constraint_violation_zero",
+          "layer": "release",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Trusted DeepSeek effective hard constraint violation rate is 0.",
+          "evidence": {
+            "agent_hard_constraint_violation_rate": 0.0,
+            "trusted": true
+          }
+        },
+        {
+          "id": "release_real_provider_trust_visible",
+          "layer": "release",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Real provider trust metadata is trusted DeepSeek evidence.",
+          "evidence": {
+            "report_present": true,
+            "provider_effective": "deepseek",
+            "real_provider_call": true
+          }
+        },
+        {
+          "id": "release_real_embedding_trust_visible",
+          "layer": "release",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Real embedding trust metadata satisfies the manual real embedding rule.",
+          "evidence": {
+            "report_present": true,
+            "real_backend_requirement": {
+              "required_backend": "bge_small",
+              "satisfied": true,
+              "measured_real_backends": [
+                "bge_small",
+                "bge_m3"
+              ],
+              "unavailable_real_backends": [],
+              "not_run_real_backends": [],
+              "reason": "bge_small measured with trusted effective backend"
+            }
+          }
+        },
+        {
+          "id": "release_performance_cost_trust_visible",
+          "layer": "release",
+          "status": "pass",
+          "blocks_ci": false,
+          "blocks_release": false,
+          "summary": "Performance/cost trust metadata is trusted real-provider evidence.",
+          "evidence": {
+            "report_present": true,
+            "provider_effective": "deepseek",
+            "status": "measured",
+            "trust": {
+              "trusted": true,
+              "real_provider_evidence": true,
+              "cost_evidence_available": true,
+              "reasons": []
+            }
+          }
+        }
+      ]
+    }
+  },
+  "claim_boundary": [
+    "CI layer is deterministic: fake-provider harness gates and agent schema conformance run without credentials, network, token spend, or model loads.",
+    "Manual diagnostic layer is opt-in: real DeepSeek Agent Eval, real embedding RAG matrix, and real provider performance/cost require external resources and never block default CI.",
+    "Release layer fails closed: missing or untrusted safety/trust metadata is reported as an environment gap that blocks release, not as a pass.",
+    "Fake-provider, hash-embedding, fallback, missing, or stale evidence must not be presented as trusted real-provider or real-embedding evidence.",
+    "Release safety is based on effective policy-gated system output; raw provider safety metrics are diagnostic caveats only."
+  ]
+}
