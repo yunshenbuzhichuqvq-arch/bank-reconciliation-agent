@@ -1,48 +1,60 @@
 {
-  "evaluated_at": "2026-07-07T10:10:07.347082Z",
+  "evaluated_at": "2026-07-09T07:45:52.133525Z",
+  "stage": "stage-23-real-provider-cost-benchmark",
+  "status": "measured",
   "run_count": 5,
-  "provider_requested": "fake",
-  "provider_effective": "fake",
+  "provider_requested": "deepseek",
+  "provider_effective": "deepseek",
   "model_requested": "deepseek-v4-flash",
-  "model_effective": "fake-llm",
+  "model_effective": "deepseek-v4-flash",
   "boundary": "offline benchmark; not production SLA",
   "latency": {
     "extraction_agent": {
-      "avg_latency_ms": 0.062,
-      "p95_latency_ms": 0.108,
-      "min_latency_ms": 0.04,
-      "max_latency_ms": 0.108,
+      "avg_latency_ms": 3312.742,
+      "p95_latency_ms": 4661.419,
+      "min_latency_ms": 1493.089,
+      "max_latency_ms": 4661.419,
       "samples_ms": [
-        0.066,
-        0.108,
-        0.057,
-        0.04,
-        0.04
+        3240.832,
+        4495.113,
+        2673.257,
+        4661.419,
+        1493.089
       ]
     },
     "rag_search": {
-      "avg_latency_ms": 49.342,
-      "p95_latency_ms": 243.564,
-      "min_latency_ms": 0.707,
-      "max_latency_ms": 243.564,
+      "avg_latency_ms": 1308.533,
+      "p95_latency_ms": 6278.735,
+      "min_latency_ms": 59.224,
+      "max_latency_ms": 6278.735,
       "samples_ms": [
-        243.564,
-        0.88,
-        0.782,
-        0.779,
-        0.707
+        6278.735,
+        59.224,
+        68.768,
+        67.165,
+        68.774
       ]
     }
   },
   "tokens": {
-    "token_usage_available": false,
-    "input_tokens": null,
-    "output_tokens": null,
-    "total_tokens": null
+    "token_usage_available": true,
+    "input_tokens": 1115,
+    "output_tokens": 1105,
+    "total_tokens": 2220,
+    "unavailable_reason": null
   },
   "cost": {
-    "cost_available": false,
-    "estimated_cost_usd": null,
-    "assumptions": "fake provider; no real LLM cost"
-  }
+    "cost_available": true,
+    "estimated_cost_usd": "0.001446375",
+    "per_case_estimated_cost_usd": "0.000289275",
+    "assumptions": "DeepSeek v4 Pro pricing: input $0.435/1M, output $0.87/1M",
+    "unavailable_reason": null
+  },
+  "trust": {
+    "trusted": true,
+    "real_provider_evidence": true,
+    "cost_evidence_available": true,
+    "reasons": []
+  },
+  "environment_gap": null
 }
