@@ -795,13 +795,29 @@ def _global_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) ->
     return row.get("modes", {}).get(mode, {}).get("global_metrics", {})
 
 
-def _bucket_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) -> list[dict[str, Any]]:
+def _bucket_metrics_for_mode(
+    matrix: dict[str, Any],
+    backend: str,
+    mode: str,
+    *,
+    source_label: str = "",
+) -> tuple[list[dict[str, Any]], str | None, str | None]:
     row = _matrix_row_for_backend(matrix, backend)
-    return row.get("modes", {}).get(mode, {}).get("bucket_metrics", [])
+    mode_entry = row.get("modes", {}).get(mode, {})
+    bucket_metrics = mode_entry.get("bucket_metrics")
+    if bucket_metrics:
+        return list(bucket_metrics), "mode_bucket_metrics", None
+
+    if matrix.get("best_real_backend") == backend and matrix.get("best_real_mode") == mode:
+        legacy_buckets = matrix.get("miss_buckets", [])
+        if legacy_buckets:
+            return list(legacy_buckets), "legacy_top_level_miss_buckets", None
+
+    return [], None, f"{source_label} matrix lacks bucket_metrics for {backend}/{mode}"
 
 
 def _bucket_by_key(matrix: dict[str, Any], backend: str, mode: str, scenario_type: str, error_type: str) -> dict[str, Any]:
-    for bucket in _bucket_metrics_for_mode(matrix, backend, mode):
+    for bucket in _bucket_metrics_for_mode(matrix, backend, mode)[0]:
         if bucket.get("scenario_type") == scenario_type and bucket.get("error_type") == error_type:
             return bucket
     return {}
@@ -816,8 +832,8 @@ def _metric_delta(after: dict[str, Any], before: dict[str, Any]) -> dict[str, An
 
 
 def _bucket_deltas(baseline_matrix: dict[str, Any], after_matrix: dict[str, Any], backend: str, mode: str) -> list[dict[str, Any]]:
-    baseline_buckets = _bucket_metrics_for_mode(baseline_matrix, backend, mode)
-    after_buckets = _bucket_metrics_for_mode(after_matrix, backend, mode)
+    baseline_buckets = _bucket_metrics_for_mode(baseline_matrix, backend, mode)[0]
+    after_buckets = _bucket_metrics_for_mode(after_matrix, backend, mode)[0]
     after_by_key: dict[tuple[str, str], dict[str, Any]] = {
         (b["scenario_type"], b["error_type"]): b for b in after_buckets
     }
@@ -902,13 +918,17 @@ def build_optimization_comparison_report(
         trust_reasons.append(f"top_k mismatch: baseline={baseline_source['top_k']}, after={after_source['top_k']}")
         trusted = False
 
-    baseline_buckets = _bucket_metrics_for_mode(baseline_matrix, backend, mode)
-    after_buckets = _bucket_metrics_for_mode(after_matrix, backend, mode)
-    if not baseline_buckets:
-        trust_reasons.append(f"baseline matrix lacks bucket_metrics for {backend}/{mode}")
+    baseline_buckets, baseline_bucket_source, baseline_bucket_err = _bucket_metrics_for_mode(
+        baseline_matrix, backend, mode, source_label="baseline"
+    )
+    after_buckets, after_bucket_source, after_bucket_err = _bucket_metrics_for_mode(
+        after_matrix, backend, mode, source_label="after"
+    )
+    if baseline_bucket_err:
+        trust_reasons.append(baseline_bucket_err)
         trusted = False
-    if not after_buckets:
-        trust_reasons.append(f"after matrix lacks bucket_metrics for {backend}/{mode}")
+    if after_bucket_err:
+        trust_reasons.append(after_bucket_err)
         trusted = False
 
     baseline_global = _global_metrics_for_mode(baseline_matrix, backend, mode)
@@ -920,7 +940,14 @@ def build_optimization_comparison_report(
         trust_reasons.append(f"after matrix lacks global_metrics for {backend}/{mode}")
         trusted = False
 
-    trust = {"trusted": trusted, "reasons": trust_reasons}
+    trust = {
+        "trusted": trusted,
+        "reasons": trust_reasons,
+        "bucket_metric_sources": {
+            "baseline": baseline_bucket_source or "missing",
+            "after": after_bucket_source or "missing",
+        },
+    }
 
     target_before = _bucket_by_key(baseline_matrix, backend, mode, target_scenario_type, target_error_type)
     target_after = _bucket_by_key(after_matrix, backend, mode, target_scenario_type, target_error_type)

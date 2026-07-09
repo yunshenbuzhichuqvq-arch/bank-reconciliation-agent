@@ -980,8 +980,17 @@ def test_build_optimization_comparison_uses_requested_mode_not_selected_mode() -
 
 
 def test_build_optimization_comparison_trust_fails_when_bucket_metrics_missing() -> None:
-    baseline = _make_matrix()
-    del baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+    baseline = _make_matrix(
+        selected_mode="dense",
+        best_real_mode="dense",
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
+    )
+    del baseline["rows"]["bge_m3"]["modes"]["hybrid"]
+    baseline["rows"]["bge_m3"]["modes"]["dense"] = {
+        "global_metrics": {"hit_at_1": 0.50, "recall_at_5": 0.70, "mrr": 0.60, "ndcg_at_5": 0.55},
+        "bucket_metrics": [],
+    }
 
     after = _make_matrix()
 
@@ -990,6 +999,8 @@ def test_build_optimization_comparison_trust_fails_when_bucket_metrics_missing()
         after,
         target_scenario_type="BANK_CLEARING",
         target_error_type="SINGLE_SIDE_MISSING",
+        backend="bge_m3",
+        mode="hybrid",
     )
 
     assert report["trust"]["trusted"] is False
@@ -1010,3 +1021,81 @@ def test_optimization_cli_rejects_missing_args() -> None:
     )
     assert result.returncode != 0
     assert "both be provided" in result.stderr
+
+
+def test_build_optimization_comparison_trusted_legacy_baseline() -> None:
+    baseline = _make_matrix(
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
+    )
+    del baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+
+    after = _make_matrix(
+        clearing_single_side_recall=0.35,
+        clearing_single_side_miss_count=8,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+        backend="bge_m3",
+        mode="hybrid",
+    )
+
+    assert report["trust"]["trusted"] is True
+    assert "bucket_metric_sources" in report["trust"]
+    assert report["target_bucket"]["before"]["recall_at_5"] == 0.40
+    assert report["target_bucket"]["before"]["miss_count"] == 7
+    assert report["target_bucket"]["after"]["recall_at_5"] == 0.35
+
+
+def test_build_optimization_comparison_rejects_legacy_mode_mismatch() -> None:
+    baseline = {
+        "case_count": 120,
+        "top_k": 5,
+        "real_backend_policy": "auto",
+        "requested_backends": ["hash", "bge_m3"],
+        "best_real_backend": "bge_m3",
+        "best_real_mode": "dense",
+        "rows": {
+            "bge_m3": {
+                "requested_backend": "bge_m3",
+                "effective_backend": "bge_m3",
+                "status": "measured",
+                "selected_mode": "dense",
+                "selection_reason": "test",
+                "modes": {},
+                "deltas_vs_dense": {},
+            }
+        },
+        "real_backend_requirement": {"satisfied": True},
+        "miss_buckets": [
+            {
+                "scenario_type": "BANK_CLEARING",
+                "error_type": "SINGLE_SIDE_MISSING",
+                "case_count": 10,
+                "miss_count": 7,
+                "hit_at_1": 0.20,
+                "recall_at_5": 0.40,
+                "mrr": 0.30,
+                "ndcg_at_5": 0.30,
+            }
+        ],
+    }
+
+    after = _make_matrix(clearing_single_side_recall=0.35, clearing_single_side_miss_count=8)
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+        backend="bge_m3",
+        mode="hybrid",
+    )
+
+    assert report["trust"]["trusted"] is False
+    reasons_text = " ".join(report["trust"]["reasons"])
+    assert "lacks" in reasons_text.lower() or "missing" in reasons_text.lower()
