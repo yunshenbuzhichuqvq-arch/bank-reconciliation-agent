@@ -9,8 +9,7 @@
 
 ## Trust
 
-- **Trusted**: No
-  - baseline matrix lacks bucket_metrics for bge_m3/hybrid
+- **Trusted**: Yes
 
 ## Baseline Source
 
@@ -32,11 +31,11 @@
 
 | Metric | Before | After | Delta |
 | --- | ---: | ---: | ---: |
-| miss_count | - | 7 | - |
-| hit_at_1 | - | 0.3 | - |
-| recall_at_5 | - | 0.45 | - |
-| mrr | - | 0.395 | - |
-| ndcg_at_5 | - | 0.3528136245145182 | - |
+| miss_count | 7 | 7 | 0 |
+| hit_at_1 | 0.1000 | 0.3000 | 0.2000 |
+| recall_at_5 | 0.4000 | 0.4500 | 0.0500 |
+| mrr | 0.2833 | 0.3950 | 0.1117 |
+| ndcg_at_5 | 0.2938 | 0.3528 | 0.0591 |
 
 - **Improved**: No
 
@@ -52,9 +51,22 @@
 - **Within Regression Limit**: Yes
 - **Max Allowed Regression**: 0.02
 
+## Largest Regressions (up to 3)
+
+| Scenario | Error Type | Δ NDCG@5 | Δ MRR | Δ Recall@5 |
+| --- | --- | ---: | ---: | ---: |
+| BANK_CLEARING | AMOUNT_MISMATCH | -0.0361 | 0.0133 | -0.1000 |
+
+## Largest Improvements (up to 3)
+
+| Scenario | Error Type | Δ NDCG@5 | Δ MRR | Δ Recall@5 |
+| --- | --- | ---: | ---: | ---: |
+| BANK_CLEARING | CLEARING_FILE_EXCEPTION | 0.1160 | 0.0833 | 0.1500 |
+| BANK_ENTERPRISE | AMOUNT_MISMATCH | 0.1000 | 0.0833 | 0.0833 |
+| BANK_ENTERPRISE | BANK_UNARRIVED | 0.0734 | 0.0486 | 0.0417 |
+
 ## Verdict
 
 - **Success**: No
 - **Failure Reasons**:
-  - baseline matrix lacks bucket_metrics for bge_m3/hybrid
-  - target bucket BANK_CLEARING/SINGLE_SIDE_MISSING did not improve (recall: None -> 0.45, miss_count: None -> 7)
+  - target bucket BANK_CLEARING/SINGLE_SIDE_MISSING did not improve (recall: 0.4 -> 0.45, miss_count: 7 -> 7)
