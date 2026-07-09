@@ -12,7 +12,7 @@
     "hybrid_rerank"
   ],
   "real_backend_policy": "auto",
-  "evaluated_at": "2026-07-08T09:44:49.643516Z",
+  "evaluated_at": "2026-07-08T16:21:23.821487Z",
   "rows": {
     "hash": {
       "requested_backend": "hash",
@@ -23,39 +23,375 @@
       "modes": {
         "dense": {
           "global_metrics": {
-            "hit_at_1": 0.16666666666666666,
-            "recall_at_5": 0.3875,
-            "mrr": 0.275,
-            "ndcg_at_5": 0.28242136175356597
-          }
+            "hit_at_1": 0.175,
+            "recall_at_5": 0.37916666666666665,
+            "mrr": 0.2808333333333333,
+            "ndcg_at_5": 0.2826732892557119
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.35,
+              "mrr": 0.30333333333333334,
+              "ndcg_at_5": 0.2737197712769296
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.6,
+              "mrr": 0.39166666666666666,
+              "ndcg_at_5": 0.43078918734114424
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.5,
+              "mrr": 0.395,
+              "ndcg_at_5": 0.4132195588913345
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.1,
+              "recall_at_5": 0.45,
+              "mrr": 0.26,
+              "ndcg_at_5": 0.2879030793579133
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 5,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.65,
+              "mrr": 0.4083333333333333,
+              "ndcg_at_5": 0.43991268531884603
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.1,
+              "recall_at_5": 0.35,
+              "mrr": 0.2333333333333333,
+              "ndcg_at_5": 0.25884242797613194
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 11,
+              "hit_at_1": 0.0,
+              "recall_at_5": 0.16666666666666666,
+              "mrr": 0.10416666666666667,
+              "ndcg_at_5": 0.1084868216345221
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.375,
+              "mrr": 0.32916666666666666,
+              "ndcg_at_5": 0.2923454224091256
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.2916666666666667,
+              "mrr": 0.2777777777777778,
+              "ndcg_at_5": 0.25942893273045486
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 8,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.4166666666666667,
+              "mrr": 0.375,
+              "ndcg_at_5": 0.3382329676357627
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 11,
+              "hit_at_1": 0.0,
+              "recall_at_5": 0.125,
+              "mrr": 0.0625,
+              "ndcg_at_5": 0.07458315634533737
+            }
+          ]
         },
         "hybrid": {
           "global_metrics": {
-            "hit_at_1": 0.30833333333333335,
-            "recall_at_5": 0.5625,
-            "mrr": 0.45152777777777775,
-            "ndcg_at_5": 0.4447569570496155
-          }
+            "hit_at_1": 0.3333333333333333,
+            "recall_at_5": 0.5666666666666667,
+            "mrr": 0.46777777777777774,
+            "ndcg_at_5": 0.45899185783572205
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.55,
+              "mrr": 0.5,
+              "ndcg_at_5": 0.4668703490613132
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.4,
+              "recall_at_5": 0.7,
+              "mrr": 0.5583333333333333,
+              "ndcg_at_5": 0.5814718665292237
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 5,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.6,
+              "mrr": 0.4666666666666666,
+              "ndcg_at_5": 0.48243561571887283
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.55,
+              "mrr": 0.4083333333333334,
+              "ndcg_at_5": 0.41418855224966633
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.8,
+              "mrr": 0.77,
+              "ndcg_at_5": 0.7163797735485103
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 6,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.5,
+              "mrr": 0.3733333333333334,
+              "ndcg_at_5": 0.37444611202215344
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.16666666666666666,
+              "recall_at_5": 0.375,
+              "mrr": 0.27361111111111114,
+              "ndcg_at_5": 0.260341913474222
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 7,
+              "hit_at_1": 0.25,
+              "recall_at_5": 0.5416666666666666,
+              "mrr": 0.4236111111111111,
+              "ndcg_at_5": 0.43494616944439807
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5347222222222222,
+              "ndcg_at_5": 0.5239917247646473
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.6527777777777778,
+              "ndcg_at_5": 0.6060177659568414
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 9,
+              "hit_at_1": 0.16666666666666666,
+              "recall_at_5": 0.2916666666666667,
+              "mrr": 0.22916666666666666,
+              "ndcg_at_5": 0.2347941137756612
+            }
+          ]
         },
         "hybrid_rerank": {
           "global_metrics": {
-            "hit_at_1": 0.43333333333333335,
-            "recall_at_5": 0.6583333333333333,
-            "mrr": 0.5681944444444444,
-            "ndcg_at_5": 0.5528158133454631
-          }
+            "hit_at_1": 0.5333333333333333,
+            "recall_at_5": 0.7,
+            "mrr": 0.6443055555555556,
+            "ndcg_at_5": 0.6168479692395881
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.8,
+              "mrr": 0.7833333333333333,
+              "ndcg_at_5": 0.7270065694682942
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.75,
+              "mrr": 0.675,
+              "ndcg_at_5": 0.6569149295968335
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.4,
+              "recall_at_5": 0.75,
+              "mrr": 0.625,
+              "ndcg_at_5": 0.6027193465057393
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.65,
+              "mrr": 0.55,
+              "ndcg_at_5": 0.5545089586180738
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.95,
+              "mrr": 0.8333333333333333,
+              "ndcg_at_5": 0.8561553869958025
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.4,
+              "mrr": 0.3416666666666667,
+              "ndcg_at_5": 0.3043823750838851
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 7,
+              "hit_at_1": 0.3333333333333333,
+              "recall_at_5": 0.5833333333333334,
+              "mrr": 0.46388888888888896,
+              "ndcg_at_5": 0.45961737303014544
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.711072331826137
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.736111111111111,
+              "ndcg_at_5": 0.7098152134004999
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.6666666666666666
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5277777777777778,
+              "ndcg_at_5": 0.5365684689152417
+            }
+          ]
         }
       },
       "deltas_vs_dense": {
         "hybrid": {
-          "hit_at_1": 0.1416666666666667,
-          "mrr": 0.17652777777777773,
-          "ndcg_at_5": 0.16233559529604952
+          "hit_at_1": 0.15833333333333333,
+          "mrr": 0.1869444444444444,
+          "ndcg_at_5": 0.17631856858001016
         },
         "hybrid_rerank": {
-          "hit_at_1": 0.2666666666666667,
-          "mrr": 0.2931944444444444,
-          "ndcg_at_5": 0.2703944515918972
+          "hit_at_1": 0.35833333333333334,
+          "mrr": 0.36347222222222225,
+          "ndcg_at_5": 0.3341746799838762
         }
       }
     },
@@ -68,39 +404,375 @@
       "modes": {
         "dense": {
           "global_metrics": {
-            "hit_at_1": 0.5416666666666666,
-            "recall_at_5": 0.6666666666666666,
-            "mrr": 0.6388888888888891,
-            "ndcg_at_5": 0.6044553438198553
-          }
+            "hit_at_1": 0.5916666666666667,
+            "recall_at_5": 0.7875,
+            "mrr": 0.712638888888889,
+            "ndcg_at_5": 0.6947968918851234
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.8,
+              "mrr": 0.6833333333333333,
+              "ndcg_at_5": 0.6674701062723483
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.8,
+              "mrr": 0.6583333333333333,
+              "ndcg_at_5": 0.6755032715262121
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.2,
+              "recall_at_5": 0.85,
+              "mrr": 0.4916666666666666,
+              "ndcg_at_5": 0.584345699502344
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.9,
+              "mrr": 0.77,
+              "ndcg_at_5": 0.7787848255488942
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.9,
+              "recall_at_5": 0.95,
+              "mrr": 0.95,
+              "ndcg_at_5": 0.9237197712769296
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.7,
+              "mrr": 0.495,
+              "ndcg_at_5": 0.5019100837834712
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.875,
+              "mrr": 0.7569444444444445,
+              "ndcg_at_5": 0.7374545472611495
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.8125,
+              "ndcg_at_5": 0.7075302090086256
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.8333333333333334,
+              "mrr": 0.85,
+              "ndcg_at_5": 0.7901062215921844
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.769766476064108
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 7,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.5,
+              "mrr": 0.5416666666666666,
+              "ndcg_at_5": 0.5
+            }
+          ]
         },
         "hybrid": {
           "global_metrics": {
-            "hit_at_1": 0.5333333333333333,
-            "recall_at_5": 0.7541666666666667,
-            "mrr": 0.6602777777777776,
-            "ndcg_at_5": 0.6528115145380317
-          }
+            "hit_at_1": 0.55,
+            "recall_at_5": 0.7875,
+            "mrr": 0.6869444444444445,
+            "ndcg_at_5": 0.6849834198341831
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.75,
+              "mrr": 0.7,
+              "ndcg_at_5": 0.6568433103525645
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.75,
+              "mrr": 0.675,
+              "ndcg_at_5": 0.6914989052379724
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.85,
+              "mrr": 0.5866666666666667,
+              "ndcg_at_5": 0.6162854955397314
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.9,
+              "mrr": 0.72,
+              "ndcg_at_5": 0.7550650542719646
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 0,
+              "hit_at_1": 0.7,
+              "recall_at_5": 1.0,
+              "mrr": 0.8333333333333333,
+              "ndcg_at_5": 0.8718472371875509
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.4,
+              "mrr": 0.4,
+              "ndcg_at_5": 0.36131471927654585
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.6700844209019294
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 2,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.875,
+              "mrr": 0.6805555555555555,
+              "ndcg_at_5": 0.7187763629454772
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.875,
+              "mrr": 0.875,
+              "ndcg_at_5": 0.8342419439365316
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 2,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.875,
+              "mrr": 0.7777777777777777,
+              "ndcg_at_5": 0.8020042100003199
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5236111111111111,
+              "ndcg_at_5": 0.5306816590022984
+            }
+          ]
         },
         "hybrid_rerank": {
           "global_metrics": {
-            "hit_at_1": 0.45,
-            "recall_at_5": 0.6708333333333333,
-            "mrr": 0.5852777777777779,
-            "ndcg_at_5": 0.5702960952873805
-          }
+            "hit_at_1": 0.55,
+            "recall_at_5": 0.7166666666666667,
+            "mrr": 0.6605555555555557,
+            "ndcg_at_5": 0.633644491092255
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.7833333333333333,
+              "ndcg_at_5": 0.7032867981913646
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.725,
+              "ndcg_at_5": 0.6980725016207016
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.75,
+              "mrr": 0.575,
+              "ndcg_at_5": 0.5658123218628851
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 5,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.65,
+              "mrr": 0.6583333333333333,
+              "ndcg_at_5": 0.5963544539987039
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.95,
+              "mrr": 0.8166666666666667,
+              "ndcg_at_5": 0.8481274659106213
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.45,
+              "mrr": 0.4033333333333333,
+              "ndcg_at_5": 0.3543771309152025
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.3333333333333333,
+              "recall_at_5": 0.625,
+              "mrr": 0.4777777777777778,
+              "ndcg_at_5": 0.4860737833319045
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.75,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.7330780087071863
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.6944444444444443,
+              "ndcg_at_5": 0.6909573479395902
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.75,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.7061996187948827
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5902777777777778,
+              "ndcg_at_5": 0.5817772583994198
+            }
+          ]
         }
       },
       "deltas_vs_dense": {
         "hybrid": {
-          "hit_at_1": -0.008333333333333304,
-          "mrr": 0.02138888888888857,
-          "ndcg_at_5": 0.04835617071817633
+          "hit_at_1": -0.04166666666666663,
+          "mrr": -0.025694444444444575,
+          "ndcg_at_5": -0.009813472050940297
         },
         "hybrid_rerank": {
-          "hit_at_1": -0.09166666666666662,
-          "mrr": -0.053611111111111165,
-          "ndcg_at_5": -0.03415924853247487
+          "hit_at_1": -0.04166666666666663,
+          "mrr": -0.05208333333333337,
+          "ndcg_at_5": -0.06115240079286843
         }
       }
     },
@@ -108,50 +780,386 @@
       "requested_backend": "bge_m3",
       "effective_backend": "bge_m3",
       "status": "measured",
-      "selected_mode": "hybrid",
-      "selection_reason": "Highest NDCG@5 among eligible modes with no negative ranking deltas",
+      "selected_mode": "dense",
+      "selection_reason": "No mode improved ranking metrics over dense baseline; RAG has no proven improvement",
       "modes": {
         "dense": {
           "global_metrics": {
-            "hit_at_1": 0.5083333333333333,
-            "recall_at_5": 0.7333333333333333,
-            "mrr": 0.6348611111111111,
-            "ndcg_at_5": 0.6270661427830345
-          }
+            "hit_at_1": 0.6333333333333333,
+            "recall_at_5": 0.825,
+            "mrr": 0.7352777777777778,
+            "ndcg_at_5": 0.7209402917441399
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.9,
+              "mrr": 0.6733333333333335,
+              "ndcg_at_5": 0.7019048396147887
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.8,
+              "mrr": 0.7083333333333333,
+              "ndcg_at_5": 0.7070641718955321
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.9,
+              "mrr": 0.7166666666666666,
+              "ndcg_at_5": 0.7384531164477114
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 0,
+              "hit_at_1": 0.5,
+              "recall_at_5": 1.0,
+              "mrr": 0.6833333333333333,
+              "ndcg_at_5": 0.759100839213192
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.95,
+              "mrr": 0.7583333333333333,
+              "ndcg_at_5": 0.8019048396147888
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.35,
+              "mrr": 0.38333333333333336,
+              "ndcg_at_5": 0.31131471927654586
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.8333333333333334,
+              "mrr": 0.7777777777777777,
+              "ndcg_at_5": 0.7372988872671568
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 0.8333333333333334,
+              "recall_at_5": 0.875,
+              "mrr": 0.8958333333333334,
+              "ndcg_at_5": 0.8259457610494652
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 1.0,
+              "recall_at_5": 0.875,
+              "mrr": 1.0,
+              "ndcg_at_5": 0.893054741136202
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 0,
+              "hit_at_1": 0.8333333333333334,
+              "recall_at_5": 1.0,
+              "mrr": 0.8819444444444443,
+              "ndcg_at_5": 0.9043052652136224
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.5833333333333334,
+              "mrr": 0.5277777777777778,
+              "ndcg_at_5": 0.499012824389486
+            }
+          ]
         },
         "hybrid": {
           "global_metrics": {
-            "hit_at_1": 0.5583333333333333,
-            "recall_at_5": 0.7541666666666667,
-            "mrr": 0.6675,
-            "ndcg_at_5": 0.6551831198479162
-          }
+            "hit_at_1": 0.6166666666666667,
+            "recall_at_5": 0.7875,
+            "mrr": 0.7220833333333334,
+            "ndcg_at_5": 0.7007177543097192
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.75,
+              "mrr": 0.6666666666666667,
+              "ndcg_at_5": 0.6357224139102374
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 2,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.85,
+              "mrr": 0.6916666666666667,
+              "ndcg_at_5": 0.7281021463608147
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.85,
+              "mrr": 0.7366666666666666,
+              "ndcg_at_5": 0.7227560220872804
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.95,
+              "mrr": 0.7,
+              "ndcg_at_5": 0.7414989052379723
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.8,
+              "recall_at_5": 0.95,
+              "mrr": 0.8833333333333332,
+              "ndcg_at_5": 0.8734439454440424
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 7,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.45,
+              "mrr": 0.395,
+              "ndcg_at_5": 0.3528136245145182
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.7083333333333334,
+              "mrr": 0.7361111111111112,
+              "ndcg_at_5": 0.6669366094817898
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.75,
+              "mrr": 0.7083333333333334,
+              "ndcg_at_5": 0.6851302207302044
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 3,
+              "hit_at_1": 1.0,
+              "recall_at_5": 0.875,
+              "mrr": 1.0,
+              "ndcg_at_5": 0.8965968639537136
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 2,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.875,
+              "mrr": 0.8333333333333334,
+              "ndcg_at_5": 0.8266433990956822
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.4166666666666667,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5486111111111112,
+              "ndcg_at_5": 0.553256235206747
+            }
+          ]
         },
         "hybrid_rerank": {
           "global_metrics": {
-            "hit_at_1": 0.44166666666666665,
-            "recall_at_5": 0.675,
-            "mrr": 0.5845833333333333,
-            "ndcg_at_5": 0.568861278045852
-          }
+            "hit_at_1": 0.5666666666666667,
+            "recall_at_5": 0.7208333333333333,
+            "mrr": 0.6730555555555555,
+            "ndcg_at_5": 0.6411735168673882
+          },
+          "bucket_metrics": [
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.7833333333333333,
+              "ndcg_at_5": 0.7032867981913646
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CLEARING_FILE_EXCEPTION",
+              "case_count": 10,
+              "miss_count": 3,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.75,
+              "mrr": 0.7333333333333333,
+              "ndcg_at_5": 0.7023230490017154
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "CUTOFF_T1",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.4,
+              "recall_at_5": 0.75,
+              "mrr": 0.625,
+              "ndcg_at_5": 0.6027193465057393
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "QUERY_REPLY",
+              "case_count": 10,
+              "miss_count": 4,
+              "hit_at_1": 0.6,
+              "recall_at_5": 0.75,
+              "mrr": 0.6833333333333333,
+              "ndcg_at_5": 0.6394221098060432
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "REFERENCE_MATCH",
+              "case_count": 10,
+              "miss_count": 1,
+              "hit_at_1": 0.7,
+              "recall_at_5": 0.95,
+              "mrr": 0.8166666666666667,
+              "ndcg_at_5": 0.8481274659106213
+            },
+            {
+              "scenario_type": "BANK_CLEARING",
+              "error_type": "SINGLE_SIDE_MISSING",
+              "case_count": 10,
+              "miss_count": 8,
+              "hit_at_1": 0.3,
+              "recall_at_5": 0.4,
+              "mrr": 0.42000000000000004,
+              "ndcg_at_5": 0.33868528072345416
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "AMOUNT_MISMATCH",
+              "case_count": 12,
+              "miss_count": 6,
+              "hit_at_1": 0.3333333333333333,
+              "recall_at_5": 0.625,
+              "mrr": 0.4777777777777778,
+              "ndcg_at_5": 0.48383458251496325
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BANK_UNARRIVED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.75,
+              "recall_at_5": 0.75,
+              "mrr": 0.7916666666666666,
+              "ndcg_at_5": 0.7366201315246977
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "BOOK_UNRECORDED",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.5833333333333334,
+              "recall_at_5": 0.7916666666666666,
+              "mrr": 0.736111111111111,
+              "ndcg_at_5": 0.7098152134004999
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "DUPLICATE_BOOKING",
+              "case_count": 12,
+              "miss_count": 4,
+              "hit_at_1": 0.6666666666666666,
+              "recall_at_5": 0.75,
+              "mrr": 0.75,
+              "ndcg_at_5": 0.708438819611824
+            },
+            {
+              "scenario_type": "BANK_ENTERPRISE",
+              "error_type": "NARRATIVE_NAME_MISMATCH",
+              "case_count": 12,
+              "miss_count": 5,
+              "hit_at_1": 0.5,
+              "recall_at_5": 0.6666666666666666,
+              "mrr": 0.5902777777777778,
+              "ndcg_at_5": 0.5775563798394494
+            }
+          ]
         }
       },
       "deltas_vs_dense": {
         "hybrid": {
-          "hit_at_1": 0.050000000000000044,
-          "mrr": 0.032638888888888884,
-          "ndcg_at_5": 0.0281169770648817
+          "hit_at_1": -0.016666666666666607,
+          "mrr": -0.013194444444444398,
+          "ndcg_at_5": -0.020222537434420707
         },
         "hybrid_rerank": {
           "hit_at_1": -0.06666666666666665,
-          "mrr": -0.050277777777777755,
-          "ndcg_at_5": -0.05820486473718256
+          "mrr": -0.06222222222222229,
+          "ndcg_at_5": -0.07976677487675166
         }
       }
     }
   },
   "best_real_backend": "bge_m3",
-  "best_real_mode": "hybrid",
+  "best_real_mode": "dense",
   "real_backend_requirement": {
     "required_backend": "bge_small",
     "satisfied": true,
@@ -170,42 +1178,43 @@
       "case_count": 10,
       "miss_count": 2,
       "hit_at_1": 0.5,
-      "recall_at_5": 0.85,
-      "mrr": 0.6533333333333333,
-      "ndcg_at_5": 0.6718472371875508,
+      "recall_at_5": 0.9,
+      "mrr": 0.6733333333333335,
+      "ndcg_at_5": 0.7019048396147887,
       "miss_cases": [
         {
-          "id": "bc-r002-01",
-          "query": "清算文件金额和核心系统入账金额不一致，运营人员应该先核对哪些字段",
+          "id": "bc-r002-06",
+          "query": "清算对账时发现渠道金额比核心入账少，是否可以直接改核心账",
           "expected_chunk_ids": [
-            "clearing_amount_mismatch_playbook_001",
-            "clearing_amount_mismatch_playbook_002"
+            "clearing_reference_match_playbook_001",
+            "clearing_amount_mismatch_playbook_001"
           ],
           "retrieved_chunk_ids": [
             "clearing_amount_mismatch_playbook_001",
-            "clearing_file_exception_playbook_004",
-            "clearing_reference_match_playbook_001",
-            "clearing_reconciliation_scope_001",
-            "clearing_single_side_playbook_001"
+            "clearing_amount_mismatch_playbook_002",
+            "clearing_amount_mismatch_playbook_003",
+            "clearing_single_side_playbook_001",
+            "clearing_reconciliation_scope_001"
           ],
           "hit_at_1": 1.0,
           "recall_at_5": 0.5
         },
         {
-          "id": "bc-r002-07",
-          "query": "文件字段口径不同导致金额不一致，应参考清算对账字段还是自动结论边界",
+          "id": "bc-r002-09",
+          "query": "清算金额不平同时存在文件异常迹象，应该先定位金额规则还是文件完整性",
           "expected_chunk_ids": [
-            "clearing_amount_mismatch_playbook_003"
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_file_exception_playbook_001"
           ],
           "retrieved_chunk_ids": [
-            "clearing_file_exception_playbook_004",
             "clearing_amount_mismatch_playbook_001",
             "clearing_reconciliation_scope_001",
-            "clearing_amount_mismatch_playbook_004",
-            "clearing_file_exception_playbook_003"
+            "clearing_amount_mismatch_playbook_002",
+            "clearing_file_exception_playbook_004",
+            "clearing_amount_mismatch_playbook_004"
           ],
           "hit_at_1": 0.0,
-          "recall_at_5": 0.0
+          "recall_at_5": 0.5
         }
       ]
     },
@@ -213,28 +1222,12 @@
       "scenario_type": "BANK_CLEARING",
       "error_type": "CLEARING_FILE_EXCEPTION",
       "case_count": 10,
-      "miss_count": 4,
-      "hit_at_1": 0.5,
-      "recall_at_5": 0.7,
-      "mrr": 0.6083333333333334,
-      "ndcg_at_5": 0.6121292261674965,
+      "miss_count": 3,
+      "hit_at_1": 0.6,
+      "recall_at_5": 0.8,
+      "mrr": 0.7083333333333333,
+      "ndcg_at_5": 0.7070641718955321,
       "miss_cases": [
-        {
-          "id": "bc-r004-05",
-          "query": "清算文件校验失败后，报告需要说明是文件问题还是交易问题",
-          "expected_chunk_ids": [
-            "clearing_file_exception_playbook_003"
-          ],
-          "retrieved_chunk_ids": [
-            "clearing_amount_mismatch_playbook_004",
-            "clearing_file_exception_playbook_001",
-            "clearing_amount_mismatch_playbook_001",
-            "clearing_reconciliation_scope_001",
-            "clearing_file_exception_playbook_004"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
-        },
         {
           "id": "bc-r004-06",
           "query": "渠道上传的文件少了明细行，和单边缺失的边界怎么区分",
@@ -244,10 +1237,10 @@
           ],
           "retrieved_chunk_ids": [
             "clearing_amount_mismatch_playbook_004",
-            "clearing_single_side_playbook_001",
             "clearing_file_exception_playbook_001",
-            "clearing_query_reply_playbook_001",
-            "clearing_reconciliation_scope_001"
+            "clearing_single_side_playbook_001",
+            "clearing_file_exception_playbook_003",
+            "clearing_single_side_playbook_002"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.5
@@ -259,11 +1252,11 @@
             "clearing_file_exception_playbook_002"
           ],
           "retrieved_chunk_ids": [
-            "clearing_query_reply_playbook_002",
             "clearing_reference_match_playbook_002",
             "clearing_file_exception_playbook_003",
-            "clearing_query_reply_playbook_001",
-            "clearing_reference_match_playbook_004"
+            "clearing_t1_supplement_playbook_002",
+            "clearing_reference_match_playbook_004",
+            "clearing_file_exception_playbook_001"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.0
@@ -276,11 +1269,11 @@
             "clearing_query_reply_playbook_003"
           ],
           "retrieved_chunk_ids": [
-            "clearing_query_reply_playbook_004",
-            "clearing_amount_mismatch_playbook_004",
             "clearing_file_exception_playbook_001",
+            "clearing_single_side_playbook_002",
+            "clearing_query_reply_playbook_004",
             "clearing_query_reply_playbook_003",
-            "clearing_file_exception_playbook_002"
+            "clearing_file_exception_playbook_003"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.5
@@ -291,29 +1284,12 @@
       "scenario_type": "BANK_CLEARING",
       "error_type": "CUTOFF_T1",
       "case_count": 10,
-      "miss_count": 3,
+      "miss_count": 2,
       "hit_at_1": 0.6,
-      "recall_at_5": 0.8,
+      "recall_at_5": 0.9,
       "mrr": 0.7166666666666666,
-      "ndcg_at_5": 0.689411621468678,
+      "ndcg_at_5": 0.7384531164477114,
       "miss_cases": [
-        {
-          "id": "bc-r003-07",
-          "query": "清算日期和核心入账日期跨了一天，如何区分正常 T+1 和异常缺失",
-          "expected_chunk_ids": [
-            "clearing_t1_supplement_playbook_001",
-            "clearing_cutoff_t1_guideline_001"
-          ],
-          "retrieved_chunk_ids": [
-            "clearing_cutoff_t1_guideline_001",
-            "clearing_t1_supplement_playbook_002",
-            "clearing_reconciliation_scope_001",
-            "clearing_file_exception_playbook_004",
-            "clearing_amount_mismatch_playbook_001"
-          ],
-          "hit_at_1": 1.0,
-          "recall_at_5": 0.5
-        },
         {
           "id": "bc-r003-08",
           "query": "日切窗口内金额一致但日期不同，自动审核能否直接判定通过",
@@ -322,14 +1298,14 @@
             "clearing_reconciliation_scope_002"
           ],
           "retrieved_chunk_ids": [
-            "clearing_file_exception_playbook_004",
             "clearing_cutoff_t1_guideline_001",
             "clearing_t1_supplement_playbook_001",
-            "clearing_single_side_playbook_001",
+            "clearing_cutoff_t1_guideline_002",
+            "clearing_file_exception_playbook_004",
             "clearing_t1_supplement_playbook_003"
           ],
           "hit_at_1": 0.0,
-          "recall_at_5": 0.0
+          "recall_at_5": 0.5
         },
         {
           "id": "bc-r003-10",
@@ -339,11 +1315,11 @@
             "clearing_t1_supplement_playbook_001"
           ],
           "retrieved_chunk_ids": [
-            "clearing_single_side_playbook_001",
             "clearing_single_side_playbook_002",
+            "clearing_single_side_playbook_001",
             "clearing_cutoff_t1_guideline_001",
-            "clearing_cutoff_t1_guideline_002",
-            "clearing_query_reply_playbook_001"
+            "clearing_t1_supplement_playbook_003",
+            "clearing_t1_supplement_playbook_004"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.5
@@ -354,29 +1330,12 @@
       "scenario_type": "BANK_CLEARING",
       "error_type": "QUERY_REPLY",
       "case_count": 10,
-      "miss_count": 1,
-      "hit_at_1": 0.6,
-      "recall_at_5": 0.9,
-      "mrr": 0.7033333333333334,
-      "ndcg_at_5": 0.7238463548111184,
-      "miss_cases": [
-        {
-          "id": "bc-r005-05",
-          "query": "发起清算查询时，必须带上哪些交易要素",
-          "expected_chunk_ids": [
-            "clearing_query_reply_playbook_002"
-          ],
-          "retrieved_chunk_ids": [
-            "clearing_query_reply_playbook_001",
-            "clearing_reconciliation_scope_001",
-            "clearing_cutoff_t1_guideline_002",
-            "clearing_reference_match_playbook_001",
-            "clearing_single_side_playbook_001"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
-        }
-      ]
+      "miss_count": 0,
+      "hit_at_1": 0.5,
+      "recall_at_5": 1.0,
+      "mrr": 0.6833333333333333,
+      "ndcg_at_5": 0.759100839213192,
+      "miss_cases": []
     },
     {
       "scenario_type": "BANK_CLEARING",
@@ -385,22 +1344,22 @@
       "miss_count": 1,
       "hit_at_1": 0.6,
       "recall_at_5": 0.95,
-      "mrr": 0.7833333333333333,
-      "ndcg_at_5": 0.8130929753571458,
+      "mrr": 0.7583333333333333,
+      "ndcg_at_5": 0.8019048396147888,
       "miss_cases": [
         {
-          "id": "bc-r006-08",
-          "query": "参考号一致而日期跨日，是否需要结合 T+1 规则判断",
+          "id": "bc-r006-09",
+          "query": "一对多匹配后仍有尾差，应该转金额差异还是保留参考号匹配结论",
           "expected_chunk_ids": [
-            "clearing_reference_match_playbook_001",
-            "clearing_cutoff_t1_guideline_001"
+            "clearing_reference_match_playbook_003",
+            "clearing_amount_mismatch_playbook_001"
           ],
           "retrieved_chunk_ids": [
-            "clearing_t1_supplement_playbook_002",
-            "clearing_cutoff_t1_guideline_001",
-            "clearing_file_exception_playbook_004",
-            "clearing_t1_supplement_playbook_001",
-            "clearing_cutoff_t1_guideline_002"
+            "clearing_reference_match_playbook_001",
+            "clearing_reference_match_playbook_003",
+            "clearing_reference_match_playbook_004",
+            "clearing_reference_match_playbook_002",
+            "clearing_amount_mismatch_playbook_003"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.5
@@ -411,11 +1370,11 @@
       "scenario_type": "BANK_CLEARING",
       "error_type": "SINGLE_SIDE_MISSING",
       "case_count": 10,
-      "miss_count": 7,
-      "hit_at_1": 0.1,
-      "recall_at_5": 0.4,
-      "mrr": 0.2833333333333333,
-      "ndcg_at_5": 0.2937503349954187,
+      "miss_count": 8,
+      "hit_at_1": 0.3,
+      "recall_at_5": 0.35,
+      "mrr": 0.38333333333333336,
+      "ndcg_at_5": 0.31131471927654586,
       "miss_cases": [
         {
           "id": "bc-r001-02",
@@ -425,13 +1384,30 @@
             "clearing_query_reply_playbook_001"
           ],
           "retrieved_chunk_ids": [
+            "clearing_single_side_playbook_002",
+            "clearing_file_exception_playbook_001",
             "clearing_amount_mismatch_playbook_004",
-            "clearing_file_exception_playbook_002",
-            "clearing_single_side_playbook_001",
-            "clearing_cutoff_t1_guideline_001",
-            "clearing_file_exception_playbook_001"
+            "clearing_t1_supplement_playbook_002",
+            "clearing_file_exception_playbook_002"
           ],
           "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
+        {
+          "id": "bc-r001-03",
+          "query": "渠道侧返回成功但清算批次里没有这笔记录，是否需要发起查询",
+          "expected_chunk_ids": [
+            "clearing_single_side_playbook_001",
+            "clearing_query_reply_playbook_001"
+          ],
+          "retrieved_chunk_ids": [
+            "clearing_query_reply_playbook_001",
+            "clearing_query_reply_playbook_003",
+            "clearing_query_reply_playbook_002",
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_file_exception_playbook_001"
+          ],
+          "hit_at_1": 1.0,
           "recall_at_5": 0.5
         },
         {
@@ -444,28 +1420,29 @@
           "retrieved_chunk_ids": [
             "clearing_cutoff_t1_guideline_001",
             "clearing_single_side_playbook_001",
-            "clearing_reconciliation_scope_001",
             "clearing_t1_supplement_playbook_001",
-            "clearing_reconciliation_scope_002"
+            "clearing_cutoff_t1_guideline_002",
+            "clearing_file_exception_playbook_004"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.5
         },
         {
-          "id": "bc-r001-05",
-          "query": "只有一侧有参考号，另一侧查不到记录，人工复核前要收集什么材料",
+          "id": "bc-r001-06",
+          "query": "清算单边和文件缺失都可能导致少一笔，怎样区分交易缺失和文件异常",
           "expected_chunk_ids": [
-            "clearing_query_reply_playbook_002"
+            "clearing_single_side_playbook_001",
+            "clearing_file_exception_playbook_001"
           ],
           "retrieved_chunk_ids": [
-            "clearing_single_side_playbook_001",
-            "clearing_reference_match_playbook_002",
-            "clearing_query_reply_playbook_001",
-            "clearing_reference_match_playbook_004",
-            "clearing_single_side_playbook_002"
+            "clearing_file_exception_playbook_001",
+            "clearing_file_exception_playbook_003",
+            "clearing_file_exception_playbook_004",
+            "clearing_amount_mismatch_playbook_004",
+            "clearing_amount_mismatch_playbook_001"
           ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
         },
         {
           "id": "bc-r001-07",
@@ -474,27 +1451,11 @@
             "clearing_single_side_playbook_001"
           ],
           "retrieved_chunk_ids": [
-            "clearing_t1_supplement_playbook_003",
-            "clearing_query_reply_playbook_003",
-            "clearing_cutoff_t1_guideline_001",
+            "clearing_amount_mismatch_playbook_001",
             "clearing_file_exception_playbook_001",
-            "clearing_reconciliation_scope_002"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
-        },
-        {
-          "id": "bc-r001-08",
-          "query": "非日切窗口内出现单边交易，系统结论应避免自动平账还是直接挂起",
-          "expected_chunk_ids": [
-            "clearing_single_side_playbook_002"
-          ],
-          "retrieved_chunk_ids": [
-            "clearing_single_side_playbook_001",
-            "clearing_cutoff_t1_guideline_001",
             "clearing_t1_supplement_playbook_003",
-            "clearing_reconciliation_scope_001",
-            "clearing_reconciliation_scope_002"
+            "clearing_query_reply_playbook_004",
+            "clearing_amount_mismatch_playbook_002"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.0
@@ -505,29 +1466,12 @@
       "scenario_type": "BANK_ENTERPRISE",
       "error_type": "AMOUNT_MISMATCH",
       "case_count": 12,
-      "miss_count": 6,
-      "hit_at_1": 0.5833333333333334,
-      "recall_at_5": 0.625,
-      "mrr": 0.6527777777777778,
-      "ndcg_at_5": 0.5669111397163823,
+      "miss_count": 3,
+      "hit_at_1": 0.6666666666666666,
+      "recall_at_5": 0.8333333333333334,
+      "mrr": 0.7777777777777777,
+      "ndcg_at_5": 0.7372988872671568,
       "miss_cases": [
-        {
-          "id": "be-r002-02",
-          "query": "客户付款在两边都有记录，只是银行入账金额比企业登记金额少了一部分，这类差额怎么判断",
-          "expected_chunk_ids": [
-            "bank_enterprise_amount_mismatch_playbook_001",
-            "bank_enterprise_amount_mismatch_playbook_004"
-          ],
-          "retrieved_chunk_ids": [
-            "bank_enterprise_amount_mismatch_playbook_004",
-            "bank_enterprise_cross_period_playbook_003",
-            "bank_enterprise_fee_tax_diff_playbook_001",
-            "bank_enterprise_amount_mismatch_playbook_003",
-            "bank_enterprise_amount_mismatch_playbook_002"
-          ],
-          "hit_at_1": 1.0,
-          "recall_at_5": 0.5
-        },
         {
           "id": "be-r002-06",
           "query": "银行扣了手续费后到账净额小于企业应收金额，怎么区分普通金额差异和手续费差异",
@@ -537,29 +1481,13 @@
           ],
           "retrieved_chunk_ids": [
             "bank_enterprise_amount_mismatch_playbook_002",
-            "bank_enterprise_fee_tax_diff_playbook_005",
             "bank_enterprise_fee_tax_diff_playbook_001",
+            "bank_enterprise_fee_tax_diff_playbook_005",
             "bank_enterprise_fee_tax_diff_playbook_002",
-            "bank_enterprise_fee_tax_diff_playbook_003"
+            "bank_enterprise_fee_tax_diff_playbook_006"
           ],
           "hit_at_1": 1.0,
           "recall_at_5": 0.5
-        },
-        {
-          "id": "be-r002-07",
-          "query": "同一笔资金两边日期和对手方一致但金额不相等，系统应给出什么处理路径",
-          "expected_chunk_ids": [
-            "bank_enterprise_amount_mismatch_playbook_001"
-          ],
-          "retrieved_chunk_ids": [
-            "bank_enterprise_cross_period_playbook_001",
-            "unionpay_reconciliation_faq_001",
-            "bank_enterprise_duplicate_booking_advanced_002",
-            "bank_enterprise_fuzzy_match_playbook_003",
-            "bank_enterprise_exact_match_playbook_007"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
         },
         {
           "id": "be-r002-09",
@@ -568,30 +1496,31 @@
             "bank_enterprise_amount_mismatch_playbook_005"
           ],
           "retrieved_chunk_ids": [
-            "bank_enterprise_amount_mismatch_playbook_003",
             "bank_enterprise_amount_mismatch_playbook_001",
-            "bank_enterprise_cross_period_playbook_001",
-            "bank_enterprise_fee_tax_diff_playbook_001",
-            "bank_enterprise_amount_mismatch_advanced_003"
+            "bank_enterprise_amount_mismatch_playbook_003",
+            "bank_enterprise_amount_mismatch_playbook_002",
+            "bank_enterprise_amount_mismatch_playbook_004",
+            "bank_enterprise_fee_tax_diff_playbook_001"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.0
         },
         {
-          "id": "be-r002-11",
-          "query": "收款金额方向记反后看起来差额很大，应该按金额不平还是重复记账处理",
+          "id": "be-r002-12",
+          "query": "双方都有流水但差额原因暂时说不清，审计结论需要包含哪些字段",
           "expected_chunk_ids": [
-            "bank_enterprise_amount_mismatch_playbook_003"
+            "bank_enterprise_amount_mismatch_advanced_006",
+            "bank_enterprise_amount_mismatch_playbook_001"
           ],
           "retrieved_chunk_ids": [
-            "bank_enterprise_fee_tax_diff_playbook_009",
-            "bank_enterprise_narrative_mismatch_advanced_004",
-            "bank_enterprise_amount_mismatch_advanced_003",
-            "bank_enterprise_amount_mismatch_advanced_002",
-            "bank_enterprise_duplicate_booking_playbook_004"
+            "unionpay_reconciliation_faq_001",
+            "bank_enterprise_amount_mismatch_playbook_001",
+            "unionpay_reconciliation_faq_002",
+            "bank_enterprise_narrative_mismatch_playbook_004",
+            "bank_enterprise_bank_unarrived_playbook_005"
           ],
           "hit_at_1": 0.0,
-          "recall_at_5": 0.0
+          "recall_at_5": 0.5
         }
       ]
     },
@@ -599,29 +1528,12 @@
       "scenario_type": "BANK_ENTERPRISE",
       "error_type": "BANK_UNARRIVED",
       "case_count": 12,
-      "miss_count": 5,
-      "hit_at_1": 0.5833333333333334,
-      "recall_at_5": 0.7083333333333334,
-      "mrr": 0.6597222222222222,
-      "ndcg_at_5": 0.6117299879437573,
+      "miss_count": 3,
+      "hit_at_1": 0.8333333333333334,
+      "recall_at_5": 0.875,
+      "mrr": 0.8958333333333334,
+      "ndcg_at_5": 0.8259457610494652,
       "miss_cases": [
-        {
-          "id": "be-r005-02",
-          "query": "客户说款项已经汇出，企业账上也登记了，银行侧未达时能不能先自动平账",
-          "expected_chunk_ids": [
-            "bank_enterprise_bank_unarrived_playbook_001",
-            "bank_enterprise_bank_unarrived_playbook_003"
-          ],
-          "retrieved_chunk_ids": [
-            "bank_enterprise_bank_unarrived_playbook_001",
-            "bank_enterprise_exact_match_playbook_001",
-            "pbc_small_payment_query_reply_001",
-            "bank_enterprise_exact_match_playbook_006",
-            "bank_enterprise_amount_mismatch_playbook_004"
-          ],
-          "hit_at_1": 1.0,
-          "recall_at_5": 0.5
-        },
         {
           "id": "be-r005-03",
           "query": "跨行转账在途导致银行未到账，规则要求保留哪些查询查复材料",
@@ -631,10 +1543,10 @@
           ],
           "retrieved_chunk_ids": [
             "bank_enterprise_bank_unarrived_playbook_002",
-            "bank_enterprise_bank_unarrived_advanced_003",
             "bank_enterprise_bank_unarrived_advanced_002",
-            "bank_enterprise_cross_period_playbook_002",
-            "pbc_small_payment_query_reply_001"
+            "bank_enterprise_bank_unarrived_advanced_003",
+            "bank_enterprise_bank_unarrived_playbook_005",
+            "bank_enterprise_bank_unarrived_playbook_003"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.5
@@ -647,14 +1559,14 @@
             "bank_enterprise_bank_unarrived_playbook_005"
           ],
           "retrieved_chunk_ids": [
-            "bank_enterprise_book_unrecorded_playbook_001",
-            "bank_enterprise_book_unrecorded_playbook_005",
             "bank_enterprise_book_unrecorded_playbook_002",
-            "bank_enterprise_narrative_mismatch_playbook_004",
-            "bank_enterprise_bank_unarrived_playbook_001"
+            "bank_enterprise_book_unrecorded_playbook_005",
+            "bank_enterprise_book_unrecorded_playbook_001",
+            "bank_enterprise_bank_unarrived_playbook_005",
+            "bank_enterprise_book_unrecorded_advanced_001"
           ],
           "hit_at_1": 0.0,
-          "recall_at_5": 0.0
+          "recall_at_5": 0.5
         },
         {
           "id": "be-r005-11",
@@ -666,29 +1578,12 @@
           "retrieved_chunk_ids": [
             "bank_enterprise_bank_unarrived_playbook_002",
             "bank_enterprise_cross_period_playbook_004",
-            "bank_enterprise_bank_unarrived_playbook_001",
             "bank_enterprise_bank_unarrived_advanced_002",
-            "bank_enterprise_bank_unarrived_advanced_001"
+            "bank_enterprise_bank_unarrived_playbook_001",
+            "bank_enterprise_bank_unarrived_playbook_003"
           ],
           "hit_at_1": 1.0,
           "recall_at_5": 0.5
-        },
-        {
-          "id": "be-r005-12",
-          "query": "银行端缺失的流水如果无法查复，最终应转入哪类人工处理",
-          "expected_chunk_ids": [
-            "bank_enterprise_bank_unarrived_advanced_005",
-            "bank_enterprise_bank_unarrived_playbook_004"
-          ],
-          "retrieved_chunk_ids": [
-            "pbc_small_payment_query_reply_001",
-            "unionpay_reconciliation_faq_002",
-            "unionpay_reconciliation_faq_001",
-            "bank_enterprise_book_unrecorded_playbook_001",
-            "bank_enterprise_amount_mismatch_playbook_001"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
         }
       ]
     },
@@ -697,11 +1592,28 @@
       "error_type": "BOOK_UNRECORDED",
       "case_count": 12,
       "miss_count": 3,
-      "hit_at_1": 0.9166666666666666,
+      "hit_at_1": 1.0,
       "recall_at_5": 0.875,
-      "mrr": 0.9583333333333334,
-      "ndcg_at_5": 0.8844289327304549,
+      "mrr": 1.0,
+      "ndcg_at_5": 0.893054741136202,
       "miss_cases": [
+        {
+          "id": "be-r006-08",
+          "query": "银行端出现一笔收入，企业凭证还没生成，应该要求业务部门补什么材料",
+          "expected_chunk_ids": [
+            "bank_enterprise_book_unrecorded_advanced_003",
+            "bank_enterprise_book_unrecorded_playbook_001"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_book_unrecorded_advanced_003",
+            "bank_enterprise_bank_unarrived_playbook_003",
+            "bank_enterprise_bank_unarrived_playbook_005",
+            "bank_enterprise_bank_unarrived_playbook_001",
+            "bank_enterprise_book_unrecorded_advanced_002"
+          ],
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
+        },
         {
           "id": "be-r006-09",
           "query": "月末银行已入账但企业下月才记账，应按企业未入账还是跨期处理",
@@ -712,28 +1624,11 @@
           "retrieved_chunk_ids": [
             "bank_enterprise_cross_period_playbook_003",
             "bank_enterprise_bank_unarrived_advanced_003",
-            "bank_enterprise_bank_unarrived_playbook_002",
-            "bank_enterprise_cross_period_playbook_004",
-            "bank_enterprise_cross_period_playbook_001"
+            "bank_enterprise_cross_period_playbook_002",
+            "bank_enterprise_cross_period_playbook_001",
+            "bank_enterprise_bank_unarrived_playbook_002"
           ],
           "hit_at_1": 1.0,
-          "recall_at_5": 0.5
-        },
-        {
-          "id": "be-r006-11",
-          "query": "银行流水存在但企业系统漏导入批次文件，怎样避免误判为清算文件异常",
-          "expected_chunk_ids": [
-            "bank_enterprise_book_unrecorded_playbook_001",
-            "bank_enterprise_book_unrecorded_playbook_004"
-          ],
-          "retrieved_chunk_ids": [
-            "unionpay_reconciliation_faq_001",
-            "bank_enterprise_book_unrecorded_playbook_004",
-            "bank_enterprise_duplicate_booking_playbook_003",
-            "bank_enterprise_book_unrecorded_playbook_002",
-            "bank_enterprise_narrative_mismatch_playbook_005"
-          ],
-          "hit_at_1": 0.0,
           "recall_at_5": 0.5
         },
         {
@@ -747,7 +1642,7 @@
             "bank_enterprise_book_unrecorded_advanced_005",
             "bank_enterprise_bank_unarrived_advanced_004",
             "bank_enterprise_amount_mismatch_advanced_006",
-            "bank_enterprise_book_unrecorded_playbook_002",
+            "bank_enterprise_bank_unarrived_advanced_005",
             "bank_enterprise_book_unrecorded_advanced_001"
           ],
           "hit_at_1": 1.0,
@@ -759,57 +1654,39 @@
       "scenario_type": "BANK_ENTERPRISE",
       "error_type": "DUPLICATE_BOOKING",
       "case_count": 12,
-      "miss_count": 2,
-      "hit_at_1": 0.6666666666666666,
-      "recall_at_5": 0.875,
-      "mrr": 0.7777777777777777,
-      "ndcg_at_5": 0.8077855336347725,
-      "miss_cases": [
-        {
-          "id": "be-r008-05",
-          "query": "同日同额同对手的两条企业记录都没有独立银行流水，应按什么规则处理",
-          "expected_chunk_ids": [
-            "bank_enterprise_duplicate_booking_advanced_001",
-            "bank_enterprise_duplicate_booking_playbook_002"
-          ],
-          "retrieved_chunk_ids": [
-            "bank_enterprise_book_unrecorded_playbook_001",
-            "bank_enterprise_exact_match_playbook_005",
-            "bank_enterprise_duplicate_booking_advanced_001",
-            "bank_enterprise_book_unrecorded_advanced_001",
-            "bank_enterprise_cross_period_playbook_001"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.5
-        },
-        {
-          "id": "be-r008-12",
-          "query": "银行只有一笔资金，企业有两笔同额应收确认，系统要怎么给出解释",
-          "expected_chunk_ids": [
-            "bank_enterprise_duplicate_booking_advanced_004"
-          ],
-          "retrieved_chunk_ids": [
-            "bank_enterprise_amount_mismatch_advanced_003",
-            "bank_enterprise_duplicate_booking_advanced_001",
-            "pbc_small_payment_query_reply_001",
-            "bank_enterprise_amount_mismatch_playbook_003",
-            "bank_enterprise_fuzzy_match_playbook_004"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
-        }
-      ]
+      "miss_count": 0,
+      "hit_at_1": 0.8333333333333334,
+      "recall_at_5": 1.0,
+      "mrr": 0.8819444444444443,
+      "ndcg_at_5": 0.9043052652136224,
+      "miss_cases": []
     },
     {
       "scenario_type": "BANK_ENTERPRISE",
       "error_type": "NARRATIVE_NAME_MISMATCH",
       "case_count": 12,
-      "miss_count": 5,
+      "miss_count": 6,
       "hit_at_1": 0.4166666666666667,
-      "recall_at_5": 0.625,
-      "mrr": 0.5027777777777778,
-      "ndcg_at_5": 0.5109108127976215,
+      "recall_at_5": 0.5833333333333334,
+      "mrr": 0.5277777777777778,
+      "ndcg_at_5": 0.499012824389486,
       "miss_cases": [
+        {
+          "id": "be-r004-05",
+          "query": "付款用途字段和合同编号对不上，但金额相同，是否可以直接平账",
+          "expected_chunk_ids": [
+            "bank_enterprise_narrative_mismatch_playbook_004"
+          ],
+          "retrieved_chunk_ids": [
+            "bank_enterprise_exact_match_playbook_003",
+            "bank_enterprise_amount_mismatch_playbook_004",
+            "bank_enterprise_exact_match_playbook_006",
+            "bank_enterprise_exact_match_playbook_002",
+            "bank_enterprise_exact_match_playbook_005"
+          ],
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0
+        },
         {
           "id": "be-r004-06",
           "query": "银行摘要包含特殊字符和英文缩写，企业名称是中文全称，规范化后还要保留什么证据",
@@ -821,8 +1698,8 @@
             "bank_enterprise_narrative_mismatch_advanced_002",
             "bank_enterprise_narrative_mismatch_advanced_005",
             "bank_enterprise_narrative_mismatch_playbook_002",
-            "bank_enterprise_exact_match_playbook_003",
-            "bank_enterprise_narrative_mismatch_playbook_001"
+            "bank_enterprise_narrative_mismatch_playbook_001",
+            "bank_enterprise_narrative_mismatch_playbook_004"
           ],
           "hit_at_1": 1.0,
           "recall_at_5": 0.5
@@ -835,11 +1712,11 @@
             "pbc_small_payment_query_reply_002"
           ],
           "retrieved_chunk_ids": [
-            "bank_enterprise_narrative_mismatch_playbook_005",
             "bank_enterprise_narrative_mismatch_playbook_001",
-            "bank_enterprise_exact_match_playbook_005",
-            "bank_enterprise_duplicate_booking_playbook_004",
-            "bank_enterprise_fuzzy_match_playbook_002"
+            "bank_enterprise_narrative_mismatch_advanced_004",
+            "bank_enterprise_exact_match_playbook_003",
+            "bank_enterprise_fuzzy_match_playbook_002",
+            "bank_enterprise_exact_match_playbook_001"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.0
@@ -852,14 +1729,14 @@
             "pbc_epayment_guideline_002"
           ],
           "retrieved_chunk_ids": [
-            "bank_enterprise_book_unrecorded_playbook_005",
+            "bank_enterprise_narrative_mismatch_advanced_005",
             "bank_enterprise_duplicate_booking_playbook_002",
-            "bank_enterprise_narrative_mismatch_playbook_001",
-            "bank_enterprise_exact_match_playbook_003",
-            "unionpay_reconciliation_faq_002"
+            "bank_enterprise_duplicate_booking_playbook_005",
+            "bank_enterprise_book_unrecorded_playbook_005",
+            "bank_enterprise_book_unrecorded_playbook_002"
           ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.5
         },
         {
           "id": "be-r004-11",
@@ -870,26 +1747,10 @@
           ],
           "retrieved_chunk_ids": [
             "bank_enterprise_narrative_mismatch_playbook_004",
-            "bank_enterprise_amount_mismatch_playbook_001",
-            "bank_enterprise_bank_unarrived_playbook_005",
-            "bank_enterprise_amount_mismatch_playbook_003",
-            "bank_enterprise_bank_unarrived_playbook_001"
-          ],
-          "hit_at_1": 0.0,
-          "recall_at_5": 0.0
-        },
-        {
-          "id": "be-r004-12",
-          "query": "代付代收场景下实际付款人和账面客户不同，是否需要转人工确认",
-          "expected_chunk_ids": [
-            "bank_enterprise_narrative_mismatch_playbook_003"
-          ],
-          "retrieved_chunk_ids": [
-            "bank_enterprise_narrative_mismatch_advanced_003",
-            "bank_enterprise_book_unrecorded_advanced_003",
-            "bank_enterprise_book_unrecorded_advanced_005",
-            "bank_enterprise_amount_mismatch_playbook_004",
-            "bank_enterprise_bank_unarrived_playbook_003"
+            "bank_enterprise_book_unrecorded_playbook_002",
+            "pbc_small_payment_query_reply_002",
+            "bank_enterprise_book_unrecorded_playbook_001",
+            "bank_enterprise_book_unrecorded_playbook_005"
           ],
           "hit_at_1": 0.0,
           "recall_at_5": 0.0

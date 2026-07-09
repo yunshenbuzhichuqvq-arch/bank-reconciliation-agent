@@ -298,7 +298,8 @@ def test_upload_reconciliation_files_returns_excel_row_counts(tmp_path: Path) ->
     assert rag_log_f2003["top_k"] == settings.rag_rerank_top_k
     assert "金额不一致 对账差异 处理规则" in rag_log_f2003["query_text"]
     assert "bank_amount=300.00" in rag_log_f2003["query_text"]
-    assert "unionpay_reconciliation_faq_001" in rag_log_f2003["sources"]
+    assert any("amount_mismatch" in source for source in rag_log_f2003["sources"])
+    assert all(source for source in rag_log_f2003["sources"])
 
 
 def test_upload_reconciliation_files_rejects_missing_required_bank_columns(
