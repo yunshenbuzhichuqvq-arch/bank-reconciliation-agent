@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from typing import Any
 
 from scripts import eval_gates
@@ -403,3 +405,122 @@ def test_fake_performance_cost_is_visible_diagnostic_gap() -> None:
     release = checks["release_performance_cost_trust_visible"]
     assert release["status"] != "pass"
     assert release["evidence"].get("provider_effective") == "fake"
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+REQUIRED_MARKDOWN_HEADINGS = [
+    "# Evaluation Gate Summary",
+    "## Source Reports",
+    "## CI Layer",
+    "## Manual Diagnostic Layer",
+    "## Release Layer",
+    "## Claim Boundary",
+    "## Exit Semantics",
+]
+
+
+def test_cli_writes_json_and_markdown(tmp_path: Path) -> None:
+    harness = tmp_path / "comparison.json"
+    schema = tmp_path / "schema.json"
+    agent = tmp_path / "agent.json"
+    rag = tmp_path / "rag.json"
+    perf = tmp_path / "perf.json"
+    _write_json(harness, _passing_harness_comparison())
+    _write_json(schema, _schema_conformance_pass())
+    _write_json(agent, _trusted_deepseek_agent_report())
+    _write_json(rag, _trusted_real_rag_matrix())
+    _write_json(perf, _trusted_performance_cost_report())
+
+    md_output = tmp_path / "eval_gate_summary.md"
+    json_output = tmp_path / "eval_gate_summary.json"
+
+    exit_code = eval_gates.main([
+        "--harness-comparison", str(harness),
+        "--schema-conformance", str(schema),
+        "--agent-real-json", str(agent),
+        "--rag-matrix", str(rag),
+        "--performance-cost-json", str(perf),
+        "--output", str(md_output),
+        "--json-output", str(json_output),
+    ])
+
+    assert exit_code == 0
+    assert json_output.exists()
+    assert md_output.exists()
+
+    data = json.loads(json_output.read_text(encoding="utf-8"))
+    assert "layers" in data
+
+    md_text = md_output.read_text(encoding="utf-8")
+    for heading in REQUIRED_MARKDOWN_HEADINGS:
+        assert heading in md_text
+
+
+def test_cli_writes_outputs_before_release_block_exit(tmp_path: Path) -> None:
+    harness = tmp_path / "comparison.json"
+    schema = tmp_path / "schema.json"
+    rag = tmp_path / "rag.json"
+    perf = tmp_path / "perf.json"
+    _write_json(harness, _passing_harness_comparison())
+    _write_json(schema, _schema_conformance_pass())
+    _write_json(rag, _trusted_real_rag_matrix())
+    _write_json(perf, _trusted_performance_cost_report())
+
+    md_output = tmp_path / "eval_gate_summary.md"
+    json_output = tmp_path / "eval_gate_summary.json"
+
+    exit_code = eval_gates.main([
+        "--harness-comparison", str(harness),
+        "--schema-conformance", str(schema),
+        "--agent-real-json", str(tmp_path / "missing_agent.json"),
+        "--rag-matrix", str(rag),
+        "--performance-cost-json", str(perf),
+        "--output", str(md_output),
+        "--json-output", str(json_output),
+        "--fail-on-release-block",
+    ])
+
+    assert exit_code == 2
+    assert json_output.exists()
+    assert md_output.exists()
+
+
+def test_cli_ci_failure_returns_one(tmp_path: Path) -> None:
+    harness = tmp_path / "comparison.json"
+    schema = tmp_path / "schema.json"
+    _write_json(harness, _failing_harness_comparison())
+    _write_json(schema, _schema_conformance_pass())
+
+    exit_code = eval_gates.main([
+        "--harness-comparison", str(harness),
+        "--schema-conformance", str(schema),
+        "--agent-real-json", str(tmp_path / "missing_agent.json"),
+        "--rag-matrix", str(tmp_path / "missing_rag.json"),
+        "--performance-cost-json", str(tmp_path / "missing_perf.json"),
+        "--output", str(tmp_path / "out.md"),
+        "--json-output", str(tmp_path / "out.json"),
+    ])
+
+    assert exit_code == 1
+
+
+def test_cli_default_does_not_fail_on_release_block(tmp_path: Path) -> None:
+    harness = tmp_path / "comparison.json"
+    schema = tmp_path / "schema.json"
+    _write_json(harness, _passing_harness_comparison())
+    _write_json(schema, _schema_conformance_pass())
+
+    exit_code = eval_gates.main([
+        "--harness-comparison", str(harness),
+        "--schema-conformance", str(schema),
+        "--agent-real-json", str(tmp_path / "missing_agent.json"),
+        "--rag-matrix", str(tmp_path / "missing_rag.json"),
+        "--performance-cost-json", str(tmp_path / "missing_perf.json"),
+        "--output", str(tmp_path / "out.md"),
+        "--json-output", str(tmp_path / "out.json"),
+    ])
+
+    assert exit_code == 0

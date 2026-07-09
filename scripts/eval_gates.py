@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import argparse
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 STAGE = "stage-24-eval-gate-layering"
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_HARNESS_COMPARISON = PROJECT_ROOT / "reports/eval_harness/comparison.json"
+DEFAULT_SCHEMA_CONFORMANCE = PROJECT_ROOT / "reports/agent_schema_conformance.json"
+DEFAULT_AGENT_REAL_JSON = PROJECT_ROOT / "reports/agent_eval_deepseek_flash_metrics.json"
+DEFAULT_RAG_MATRIX = PROJECT_ROOT / "reports/rag_quality_matrix.json"
+DEFAULT_PERFORMANCE_COST_JSON = PROJECT_ROOT / "reports/performance_cost_benchmark.json"
+DEFAULT_TRIAGE_JSON = PROJECT_ROOT / "reports/real_quality_triage.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "reports/eval_gate_summary.md"
+DEFAULT_JSON_OUTPUT = PROJECT_ROOT / "reports/eval_gate_summary.json"
 
 
 def build_eval_gate_summary(
@@ -43,6 +57,7 @@ def build_eval_gate_summary(
     }
 
     return {
+        "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "stage": STAGE,
         "overall_status": _overall_status(ci_layer, manual_layer, release_layer),
         "source_reports": _normalize_source_reports(source_reports),
@@ -533,3 +548,175 @@ def _claim_boundary() -> list[str]:
         "Release safety is based on effective policy-gated system output; raw provider "
         "safety metrics are diagnostic caveats only.",
     ]
+
+
+def write_gate_json(summary: dict[str, Any], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_gate_markdown(summary: dict[str, Any], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(_format_gate_markdown(summary), encoding="utf-8")
+
+
+def _format_gate_markdown(summary: dict[str, Any]) -> str:
+    lines = [
+        "# Evaluation Gate Summary",
+        "",
+        "| Key | Value |",
+        "|---|---|",
+        f"| Evaluated At | {summary.get('evaluated_at', 'N/A')} |",
+        f"| Stage | {summary.get('stage', 'N/A')} |",
+        f"| Overall Status | {summary.get('overall_status', 'N/A')} |",
+        "",
+        "## Source Reports",
+        "",
+        "| Report | Path |",
+        "|---|---|",
+    ]
+    for key, path in summary.get("source_reports", {}).items():
+        lines.append(f"| {key} | `{path if path else '(not present)'}` |")
+    lines.append("")
+
+    layers = summary.get("layers", {})
+    for layer_key, heading in [
+        ("ci", "## CI Layer"),
+        ("manual_diagnostic", "## Manual Diagnostic Layer"),
+        ("release", "## Release Layer"),
+    ]:
+        layer = layers.get(layer_key, {})
+        lines.append(heading)
+        lines.append("")
+        lines.append(f"- Status: `{layer.get('status', 'N/A')}`")
+        lines.append(f"- Blocks CI: {layer.get('blocks_ci', False)}")
+        lines.append(f"- Blocks Release: {layer.get('blocks_release', False)}")
+        lines.append(
+            f"- Required For Default CI: {layer.get('required_for_default_ci', False)}"
+        )
+        lines.append("")
+        lines.append("| Check | Status | Blocks CI | Blocks Release | Summary |")
+        lines.append("|---|---|---|---|---|")
+        for check in layer.get("checks", []):
+            lines.append(
+                f"| {check.get('id', '')} "
+                f"| {check.get('status', '')} "
+                f"| {check.get('blocks_ci', False)} "
+                f"| {check.get('blocks_release', False)} "
+                f"| {check.get('summary', '')} |"
+            )
+        lines.append("")
+
+    lines.append("## Claim Boundary")
+    lines.append("")
+    for item in summary.get("claim_boundary", []):
+        lines.append(f"- {item}")
+    lines.append("")
+
+    lines.append("## Exit Semantics")
+    lines.append("")
+    lines.append("- Return `0` when the CI layer passes, even if manual diagnostics or "
+                 "release gates show environment gaps.")
+    lines.append("- Return `1` when the CI layer fails.")
+    lines.append("- With `--fail-on-release-block`, return `2` when CI passes but the "
+                 "release layer is blocked.")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _load_optional_report(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Build a layered evaluation gate summary from existing reports."
+    )
+    parser.add_argument(
+        "--harness-comparison", type=Path, default=DEFAULT_HARNESS_COMPARISON,
+    )
+    parser.add_argument(
+        "--schema-conformance", type=Path, default=DEFAULT_SCHEMA_CONFORMANCE,
+    )
+    parser.add_argument(
+        "--agent-real-json", type=Path, default=DEFAULT_AGENT_REAL_JSON,
+    )
+    parser.add_argument(
+        "--rag-matrix", type=Path, default=DEFAULT_RAG_MATRIX,
+    )
+    parser.add_argument(
+        "--performance-cost-json", type=Path, default=DEFAULT_PERFORMANCE_COST_JSON,
+    )
+    parser.add_argument(
+        "--triage-json", type=Path, default=DEFAULT_TRIAGE_JSON,
+    )
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--json-output", type=Path, default=DEFAULT_JSON_OUTPUT)
+    parser.add_argument("--fail-on-release-block", action="store_true")
+    args = parser.parse_args(argv)
+
+    if not args.harness_comparison.exists():
+        print(f"error: required --harness-comparison not found: {args.harness_comparison}")
+        return 1
+
+    harness_comparison = _load_optional_report(args.harness_comparison)
+    if harness_comparison is None:
+        print(f"error: could not read --harness-comparison: {args.harness_comparison}")
+        return 1
+
+    schema_conformance = _load_optional_report(args.schema_conformance)
+    agent_real_report = _load_optional_report(args.agent_real_json)
+    rag_matrix = _load_optional_report(args.rag_matrix)
+    performance_cost_report = _load_optional_report(args.performance_cost_json)
+    triage_summary = _load_optional_report(args.triage_json)
+
+    source_reports = {
+        "harness_comparison": str(args.harness_comparison),
+        "schema_conformance": (
+            str(args.schema_conformance) if schema_conformance is not None else None
+        ),
+        "agent_real_json": (
+            str(args.agent_real_json) if agent_real_report is not None else None
+        ),
+        "rag_matrix": str(args.rag_matrix) if rag_matrix is not None else None,
+        "performance_cost_json": (
+            str(args.performance_cost_json)
+            if performance_cost_report is not None
+            else None
+        ),
+        "triage_json": str(args.triage_json) if triage_summary is not None else None,
+    }
+
+    summary = build_eval_gate_summary(
+        harness_comparison=harness_comparison,
+        schema_conformance=schema_conformance,
+        agent_real_report=agent_real_report,
+        rag_matrix=rag_matrix,
+        performance_cost_report=performance_cost_report,
+        triage_summary=triage_summary,
+        source_reports=source_reports,
+    )
+
+    if args.json_output:
+        write_gate_json(summary, args.json_output)
+    if args.output:
+        write_gate_markdown(summary, args.output)
+
+    if summary["layers"]["ci"]["status"] == "fail":
+        return 1
+    if args.fail_on_release_block and summary["layers"]["release"]["status"] == "blocked":
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
