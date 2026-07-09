@@ -324,6 +324,27 @@ def test_ci_gate_failure_blocks_ci_and_release() -> None:
     assert summary["overall_status"] == "blocked"
 
 
+def test_ci_gate_truthy_non_boolean_after_gate_fails() -> None:
+    harness = _passing_harness_comparison()
+    harness["gates"]["after"]["agent_unsafe_auto_fix_pass"] = "true"
+    harness["gates"]["after"]["agent_hard_constraint_violation_pass"] = 1
+
+    summary = eval_gates.build_eval_gate_summary(
+        harness_comparison=harness,
+        schema_conformance=_schema_conformance_pass(),
+        agent_real_report=_trusted_deepseek_agent_report(),
+        rag_matrix=_trusted_real_rag_matrix(),
+        performance_cost_report=_trusted_performance_cost_report(),
+    )
+
+    harness_check = _all_checks_by_id(summary)["ci_default_fake_hash_harness_gates"]
+    assert harness_check["status"] == "fail"
+    assert harness_check["blocks_ci"] is True
+    assert harness_check["blocks_release"] is True
+    assert "pass" not in harness_check["summary"].lower()
+    assert summary["layers"]["ci"]["status"] == "fail"
+
+
 def test_schema_conformance_below_one_fails_ci() -> None:
     summary = eval_gates.build_eval_gate_summary(
         harness_comparison=_passing_harness_comparison(),

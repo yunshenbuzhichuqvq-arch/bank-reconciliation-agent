@@ -90,7 +90,7 @@ def _check(
 def _ci_harness_gates_check(harness_comparison: dict[str, Any]) -> dict[str, Any]:
     after_gates = (harness_comparison or {}).get("gates", {}).get("after")
     has_gates = isinstance(after_gates, dict) and len(after_gates) > 0
-    all_pass = has_gates and all(bool(v) for v in after_gates.values())
+    all_pass = has_gates and all(v is True for v in after_gates.values())
 
     if all_pass:
         return _check(
