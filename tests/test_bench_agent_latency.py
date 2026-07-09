@@ -319,3 +319,249 @@ def test__p95_math() -> None:
     p95 = bench_agent_latency._p95(samples)
     assert p95 >= 9.0
     assert p95 <= 10.0
+
+
+def test_deepseek_stub_usage_sets_cost_and_trust(monkeypatch) -> None:
+    import bank_reconciliation_agent.core.config as _cfg
+    from bank_reconciliation_agent.core.llm import provider as _llm_provider
+    from bank_reconciliation_agent.core.llm.provider import LLMResult
+
+    monkeypatch.setattr(_cfg.settings, "deepseek_api_key", "sk-stub")
+
+    class StubDeepSeek:
+        def __init__(self, **kwargs):
+            pass
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            payload = {
+                "agent": "extraction",
+                "standard_type": "REVERSAL",
+                "original_flow_id": "FLOW-ORIGINAL-001",
+                "cleaned_remark": "识别到冲正线索",
+                "confidence": 0.92,
+            }
+            return LLMResult(
+                text=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                prompt_tokens=100,
+                completion_tokens=20,
+                model="deepseek-v4-flash",
+            )
+
+    monkeypatch.setattr(_llm_provider, "DeepSeekProvider", StubDeepSeek)
+
+    report = bench_agent_latency.run_benchmark(
+        runs=2, provider_name="deepseek", model="deepseek-v4-flash"
+    )
+
+    assert report["status"] == "measured"
+    assert report["provider_requested"] == "deepseek"
+    assert report["provider_effective"] == "deepseek"
+    assert report["model_requested"] == "deepseek-v4-flash"
+    assert report["model_effective"] == "deepseek-v4-flash"
+    assert report["tokens"]["input_tokens"] == 200
+    assert report["tokens"]["output_tokens"] == 40
+    assert report["tokens"]["total_tokens"] == 240
+    assert report["tokens"]["token_usage_available"] is True
+    assert report["cost"]["cost_available"] is True
+    Decimal(report["cost"]["estimated_cost_usd"])
+    Decimal(report["cost"]["per_case_estimated_cost_usd"])
+    assert report["trust"]["trusted"] is True
+    assert report["trust"]["real_provider_evidence"] is True
+    assert report["trust"]["cost_evidence_available"] is True
+    assert report["environment_gap"] is None
+
+
+def test_deepseek_stub_missing_usage_records_environment_gap(monkeypatch) -> None:
+    import bank_reconciliation_agent.core.config as _cfg
+    from bank_reconciliation_agent.core.llm import provider as _llm_provider
+    from bank_reconciliation_agent.core.llm.provider import LLMResult
+
+    monkeypatch.setattr(_cfg.settings, "deepseek_api_key", "sk-stub")
+
+    class StubDeepSeek:
+        def __init__(self, **kwargs):
+            pass
+
+        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+            payload = {
+                "agent": "extraction",
+                "standard_type": "REVERSAL",
+                "original_flow_id": "FLOW-ORIGINAL-001",
+                "cleaned_remark": "识别到冲正线索",
+                "confidence": 0.92,
+            }
+            return LLMResult(
+                text=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                prompt_tokens=0,
+                completion_tokens=0,
+                model="deepseek-v4-flash",
+            )
+
+    monkeypatch.setattr(_llm_provider, "DeepSeekProvider", StubDeepSeek)
+
+    report = bench_agent_latency.run_benchmark(
+        runs=2, provider_name="deepseek", model="deepseek-v4-flash"
+    )
+
+    assert report["status"] == "environment_gap"
+    assert report["provider_effective"] == "deepseek"
+    assert len(report["latency"]["extraction_agent"]["samples_ms"]) > 0
+    assert report["tokens"]["token_usage_available"] is False
+    assert report["tokens"]["unavailable_reason"] == "token_usage_unavailable"
+    assert report["cost"]["cost_available"] is False
+    assert report["cost"]["unavailable_reason"] == "token_usage_unavailable"
+    assert report["trust"]["trusted"] is False
+    assert report["environment_gap"]["reason"] == "token_usage_unavailable"
+
+
+def test_bench_cli_missing_deepseek_key_writes_environment_gap_report(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import bank_reconciliation_agent.core.config as _cfg
+
+    monkeypatch.setattr(_cfg.settings, "deepseek_api_key", None)
+
+    md_path = tmp_path / "bench.md"
+    json_path = tmp_path / "bench.json"
+
+    exit_code = bench_agent_latency.main(
+        [
+            "--runs",
+            "1",
+            "--provider",
+            "deepseek",
+            "--report",
+            str(md_path),
+            "--json-report",
+            str(json_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert md_path.exists()
+    assert json_path.exists()
+
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["status"] == "environment_gap"
+    assert report["provider_requested"] == "deepseek"
+    assert report["provider_effective"] is None
+    assert report["environment_gap"]["reason"] == "missing_deepseek_api_key"
+
+
+def test_trusted_markdown_includes_cost_and_per_case_cost() -> None:
+    report = {
+        "evaluated_at": "2026-07-09T00:00:00Z",
+        "stage": "stage-23-real-provider-cost-benchmark",
+        "status": "measured",
+        "run_count": 2,
+        "provider_requested": "deepseek",
+        "provider_effective": "deepseek",
+        "model_requested": "deepseek-v4-flash",
+        "model_effective": "deepseek-v4-flash",
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": {
+                "avg_latency_ms": 1200.0,
+                "p95_latency_ms": 1350.0,
+                "min_latency_ms": 1100.0,
+                "max_latency_ms": 1400.0,
+                "samples_ms": [1100.0, 1350.0],
+            },
+            "rag_search": {
+                "avg_latency_ms": 50.0,
+                "p95_latency_ms": 55.0,
+                "min_latency_ms": 45.0,
+                "max_latency_ms": 56.0,
+                "samples_ms": [45.0, 56.0],
+            },
+        },
+        "tokens": {
+            "token_usage_available": True,
+            "input_tokens": 1000,
+            "output_tokens": 60,
+            "total_tokens": 1060,
+            "unavailable_reason": None,
+        },
+        "cost": {
+            "cost_available": True,
+            "estimated_cost_usd": str(Decimal("0.0004842")),
+            "per_case_estimated_cost_usd": str(Decimal("0.0002421")),
+            "assumptions": "DeepSeek v4 Pro pricing",
+            "unavailable_reason": None,
+        },
+        "trust": {
+            "trusted": True,
+            "real_provider_evidence": True,
+            "cost_evidence_available": True,
+            "reasons": [],
+        },
+        "environment_gap": None,
+    }
+
+    md = bench_agent_latency._format_benchmark_markdown(report)
+    assert "deepseek" in md
+    assert "Estimated Cost (USD)" in md
+    assert "Per Case Estimated Cost (USD)" in md
+    assert "Not real LLM latency" not in md
+    assert "No real LLM cost" not in md
+    assert "## Environment Gap" not in md
+
+
+def test_environment_gap_markdown_excludes_fake_cost_wording() -> None:
+    report = {
+        "evaluated_at": "2026-07-09T00:00:00Z",
+        "stage": "stage-23-real-provider-cost-benchmark",
+        "status": "environment_gap",
+        "run_count": 1,
+        "provider_requested": "deepseek",
+        "provider_effective": "deepseek",
+        "model_requested": "deepseek-v4-flash",
+        "model_effective": "deepseek-v4-flash",
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": {
+                "avg_latency_ms": 1200.0,
+                "p95_latency_ms": 1200.0,
+                "min_latency_ms": 1200.0,
+                "max_latency_ms": 1200.0,
+                "samples_ms": [1200.0],
+            },
+            "rag_search": {
+                "avg_latency_ms": 50.0,
+                "p95_latency_ms": 50.0,
+                "min_latency_ms": 50.0,
+                "max_latency_ms": 50.0,
+                "samples_ms": [50.0],
+            },
+        },
+        "tokens": {
+            "token_usage_available": False,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "unavailable_reason": "token_usage_unavailable",
+        },
+        "cost": {
+            "cost_available": False,
+            "estimated_cost_usd": None,
+            "per_case_estimated_cost_usd": None,
+            "assumptions": "real provider but no token usage data available",
+            "unavailable_reason": "token_usage_unavailable",
+        },
+        "trust": {
+            "trusted": False,
+            "real_provider_evidence": True,
+            "cost_evidence_available": False,
+            "reasons": ["token_usage_unavailable"],
+        },
+        "environment_gap": {
+            "reason": "token_usage_unavailable",
+            "message": "DeepSeek provider returned no token usage metadata.",
+        },
+    }
+
+    md = bench_agent_latency._format_benchmark_markdown(report)
+    assert "## Environment Gap" in md
+    assert "token_usage_unavailable" in md
+    assert "Not real LLM latency" not in md
+    assert "No real LLM cost" not in md
