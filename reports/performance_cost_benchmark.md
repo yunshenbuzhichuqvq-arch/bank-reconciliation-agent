@@ -5,44 +5,47 @@
 | Key | Value |
 |---|---|
 | Run Count | 5 |
-| Provider Requested | `fake` |
-| Provider Effective | `fake` |
+| Provider Requested | `deepseek` |
+| Provider Effective | `deepseek` |
 | Model Requested | `deepseek-v4-flash` |
-| Model Effective | `fake-llm` |
-| Evaluated At | 2026-07-07T10:10:07.347082Z |
+| Model Effective | `deepseek-v4-flash` |
+| Evaluated At | 2026-07-09T07:45:52.133525Z |
 
 ## Latency
 
 | Component | Avg (ms) | P95 (ms) | Min (ms) | Max (ms) | Samples (ms) |
 | --- | ---: | ---: | ---: | ---: | --- |
-| ExtractionAgent | 0.062 | 0.108 | 0.040 | 0.108 | 0.066, 0.108, 0.057, 0.04, 0.04 |
-| RAG Search | 49.342 | 243.564 | 0.707 | 243.564 | 243.564, 0.88, 0.782, 0.779, 0.707 |
+| ExtractionAgent | 3312.742 | 4661.419 | 1493.089 | 4661.419 | 3240.832, 4495.113, 2673.257, 4661.419, 1493.089 |
+| RAG Search | 1308.533 | 6278.735 | 59.224 | 6278.735 | 6278.735, 59.224, 68.768, 67.165, 68.774 |
 
 ## Token Usage
 
 | Key | Value |
 |---|---|
-| Token Usage Available | False |
+| Token Usage Available | True |
+| Input Tokens | 1115 |
+| Output Tokens | 1105 |
+| Total Tokens | 2220 |
 
 ## Cost
 
 | Key | Value |
 |---|---|
-| Cost Available | False |
-| Assumptions | fake provider; no real LLM cost |
+| Cost Available | True |
+| Estimated Cost (USD) | 0.001446375 |
+| Per Case Estimated Cost (USD) | 0.000289275 |
+| Assumptions | DeepSeek v4 Pro pricing: input $0.435/1M, output $0.87/1M |
 
 ## Claim Boundary
 
 - offline benchmark; not production SLA
-- **Not real LLM latency**: fake provider; ExtractionAgent latency here does not represent a real LLM.
-- **No real LLM cost**: fake provider; cost data is not available.
 
 ## Per-Run Latency
 
 | Run | ExtractionAgent (ms) | RAG Search (ms) |
 | ---: | ---: | ---: |
-| 1 | 0.066 | 243.564 |
-| 2 | 0.108 | 0.88 |
-| 3 | 0.057 | 0.782 |
-| 4 | 0.04 | 0.779 |
-| 5 | 0.04 | 0.707 |
+| 1 | 3240.832 | 6278.735 |
+| 2 | 4495.113 | 59.224 |
+| 3 | 2673.257 | 68.768 |
+| 4 | 4661.419 | 67.165 |
+| 5 | 1493.089 | 68.774 |

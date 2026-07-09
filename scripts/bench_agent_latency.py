@@ -6,6 +6,7 @@ import statistics
 import sys
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -132,11 +133,15 @@ def run_benchmark(
 
     cost_available = False
     estimated_cost_usd: str | None = None
+    per_case_estimated_cost_usd: str | None = None
+    cost_unavailable_reason: str | None = None
     cost_assumptions: str = "fake provider; no real LLM cost"
+    token_unavailable_reason: str | None = None
 
     if token_usage_available:
         cost_value = compute_cost(total_prompt_tokens, total_completion_tokens)
         estimated_cost_usd = str(cost_value)
+        per_case_estimated_cost_usd = str(cost_value / Decimal(runs))
         cost_available = True
         cost_assumptions = (
             f"DeepSeek v4 Pro pricing: "
@@ -145,12 +150,49 @@ def run_benchmark(
         )
     elif is_real_provider and not token_usage_available:
         cost_assumptions = "real provider but no token usage data available; cost cannot be estimated"
+        token_unavailable_reason = "token_usage_unavailable"
+        cost_unavailable_reason = "token_usage_unavailable"
+
+    status = "measured"
+    environment_gap: dict[str, str] | None = None
+    trust_reasons: list[str] = []
+
+    if is_real_provider:
+        if token_usage_available:
+            trust = {
+                "trusted": True,
+                "real_provider_evidence": True,
+                "cost_evidence_available": True,
+                "reasons": trust_reasons,
+            }
+        else:
+            status = "environment_gap"
+            environment_gap = {
+                "reason": "token_usage_unavailable",
+                "message": "DeepSeek provider returned no token usage metadata; "
+                "cost cannot be estimated from provider response.",
+            }
+            trust = {
+                "trusted": False,
+                "real_provider_evidence": True,
+                "cost_evidence_available": False,
+                "reasons": ["token_usage_unavailable"],
+            }
+    else:
+        trust = {
+            "trusted": False,
+            "real_provider_evidence": False,
+            "cost_evidence_available": False,
+            "reasons": ["fake_provider"],
+        }
 
     extraction_latency = _latency_stats(extraction_samples)
     rag_latency = _latency_stats(rag_samples)
 
     return {
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "stage": "stage-23-real-provider-cost-benchmark",
+        "status": status,
         "run_count": runs,
         "provider_requested": provider_requested,
         "provider_effective": provider_effective,
@@ -168,11 +210,66 @@ def run_benchmark(
             "total_tokens": (total_prompt_tokens + total_completion_tokens)
             if token_usage_available
             else None,
+            "unavailable_reason": token_unavailable_reason,
         },
         "cost": {
             "cost_available": cost_available,
             "estimated_cost_usd": estimated_cost_usd,
+            "per_case_estimated_cost_usd": per_case_estimated_cost_usd,
             "assumptions": cost_assumptions,
+            "unavailable_reason": cost_unavailable_reason,
+        },
+        "trust": trust,
+        "environment_gap": environment_gap,
+    }
+
+
+def build_environment_gap_report(
+    *,
+    provider_requested: str,
+    model_requested: str,
+    reason: str,
+    message: str,
+    runs: int,
+) -> dict[str, Any]:
+    empty_latency = _latency_stats([])
+    return {
+        "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "stage": "stage-23-real-provider-cost-benchmark",
+        "status": "environment_gap",
+        "run_count": runs,
+        "provider_requested": provider_requested,
+        "provider_effective": None,
+        "model_requested": model_requested,
+        "model_effective": None,
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": empty_latency,
+            "rag_search": empty_latency,
+        },
+        "tokens": {
+            "token_usage_available": False,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "unavailable_reason": reason,
+        },
+        "cost": {
+            "cost_available": False,
+            "estimated_cost_usd": None,
+            "per_case_estimated_cost_usd": None,
+            "assumptions": "real provider unavailable; cost cannot be estimated",
+            "unavailable_reason": reason,
+        },
+        "trust": {
+            "trusted": False,
+            "real_provider_evidence": False,
+            "cost_evidence_available": False,
+            "reasons": [reason],
+        },
+        "environment_gap": {
+            "reason": reason,
+            "message": message,
         },
     }
 
@@ -258,8 +355,23 @@ def _format_benchmark_markdown(report: dict[str, Any]) -> str:
     )
     if cost.get("cost_available") and cost.get("estimated_cost_usd") is not None:
         lines.append(f"| Estimated Cost (USD) | {cost['estimated_cost_usd']} |")
+        if cost.get("per_case_estimated_cost_usd") is not None:
+            lines.append(f"| Per Case Estimated Cost (USD) | {cost['per_case_estimated_cost_usd']} |")
     lines.append(f"| Assumptions | {cost.get('assumptions', 'N/A')} |")
     lines.append("")
+
+    if report.get("status") == "environment_gap":
+        env_gap = report.get("environment_gap", {})
+        lines.extend(
+            [
+                "## Environment Gap",
+                "",
+                f"**Reason**: {env_gap.get('reason', 'unknown')}",
+                "",
+                f"{env_gap.get('message', 'Environment gap prevents benchmark measurement.')}",
+                "",
+            ]
+        )
 
     lines.extend(
         [
@@ -350,36 +462,58 @@ def main(argv: list[str] | None = None) -> int:
 
     from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
 
+    report = None
+    exit_code = 0
+
     try:
         report = run_benchmark(
             runs=args.runs, provider_name=args.provider, model=args.model
         )
-    except (LLMUnavailable, ValueError) as exc:
+    except LLMUnavailable as exc:
+        if args.report is not None or args.json_report is not None:
+            reason = "missing_deepseek_api_key" if "api_key" in str(exc).lower() else "provider_unavailable"
+            report = build_environment_gap_report(
+                provider_requested=args.provider,
+                model_requested=args.model,
+                reason=reason,
+                message=str(exc),
+                runs=args.runs,
+            )
+        else:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        exit_code = 1
+    except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    latency = report["latency"]
-    extraction_avg = latency["extraction_agent"]["avg_latency_ms"]
-    rag_avg = latency["rag_search"]["avg_latency_ms"]
-    extraction_samples = latency["extraction_agent"]["samples_ms"]
-    rag_samples = latency["rag_search"]["samples_ms"]
+    if report is not None:
+        if report["status"] == "environment_gap":
+            exit_code = 1
 
-    _print_stdout_report(
-        extraction_avg,
-        rag_avg,
-        extraction_samples,
-        rag_samples,
-        runs=args.runs,
-        provider_name=args.provider,
-        model_effective=report["model_effective"],
-    )
+        if exit_code == 0:
+            latency = report["latency"]
+            extraction_avg = latency["extraction_agent"]["avg_latency_ms"]
+            rag_avg = latency["rag_search"]["avg_latency_ms"]
+            extraction_samples = latency["extraction_agent"]["samples_ms"]
+            rag_samples = latency["rag_search"]["samples_ms"]
 
-    if args.report is not None:
-        write_benchmark_markdown(report, args.report)
-    if args.json_report is not None:
-        write_benchmark_json(report, args.json_report)
+            _print_stdout_report(
+                extraction_avg,
+                rag_avg,
+                extraction_samples,
+                rag_samples,
+                runs=args.runs,
+                provider_name=args.provider,
+                model_effective=report["model_effective"],
+            )
 
-    return 0
+        if args.report is not None:
+            write_benchmark_markdown(report, args.report)
+        if args.json_report is not None:
+            write_benchmark_json(report, args.json_report)
+
+    return exit_code
 
 
 if __name__ == "__main__":

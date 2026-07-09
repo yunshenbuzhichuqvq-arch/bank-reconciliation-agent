@@ -1,5 +1,5 @@
 {
-  "evaluated_at": "2026-07-08T06:22:51.313315Z",
+  "evaluated_at": "2026-07-09T07:46:19.562574Z",
   "source_reports": {
     "harness_comparison": "reports/eval_harness/comparison.json",
     "rag_matrix": "reports/rag_quality_matrix.json",
@@ -24,38 +24,48 @@
     {
       "category": "measured_gap",
       "area": "rag_hash",
-      "summary": "RAG hash baseline (hybrid_rerank) below PRD targets: Recall@5=0.658, MRR=0.568, NDCG@5=0.553",
+      "summary": "RAG hash baseline (hybrid_rerank) below PRD targets: Recall@5=0.700, MRR=0.644, NDCG@5=0.617",
       "evidence": {
         "backend": "hash",
         "selected_mode": "hybrid_rerank",
         "metrics": {
-          "hit_at_1": 0.43333333333333335,
-          "recall_at_5": 0.6583333333333333,
-          "mrr": 0.5681944444444444,
-          "ndcg_at_5": 0.5528158133454631
+          "hit_at_1": 0.5333333333333333,
+          "recall_at_5": 0.7,
+          "mrr": 0.6443055555555556,
+          "ndcg_at_5": 0.6168479692395881
         }
       }
     },
     {
-      "category": "environment_gap",
-      "area": "rag_bge_small",
-      "summary": "RAG backend bge_small is not_run (real backend policy is skip).",
+      "category": "measured_gap",
+      "area": "rag_bge_small_dense",
+      "summary": "RAG backend bge_small (dense) measured but below PRD targets: Recall@5=0.787, MRR=0.713, NDCG@5=0.695",
       "evidence": {
-        "requested_backend": "bge_small",
-        "effective_backend": null,
-        "status": "not_run",
-        "reason": "real backend policy is skip"
+        "backend": "bge_small",
+        "effective_backend": "bge_small",
+        "selected_mode": "dense",
+        "metrics": {
+          "hit_at_1": 0.5916666666666667,
+          "recall_at_5": 0.7875,
+          "mrr": 0.712638888888889,
+          "ndcg_at_5": 0.6947968918851234
+        }
       }
     },
     {
-      "category": "environment_gap",
-      "area": "rag_bge_m3",
-      "summary": "RAG backend bge_m3 is not_run (real backend policy is skip).",
+      "category": "measured_gap",
+      "area": "rag_bge_m3_dense",
+      "summary": "RAG backend bge_m3 (dense) measured but below PRD targets: Recall@5=0.825, MRR=0.735, NDCG@5=0.721",
       "evidence": {
-        "requested_backend": "bge_m3",
-        "effective_backend": null,
-        "status": "not_run",
-        "reason": "real backend policy is skip"
+        "backend": "bge_m3",
+        "effective_backend": "bge_m3",
+        "selected_mode": "dense",
+        "metrics": {
+          "hit_at_1": 0.6333333333333333,
+          "recall_at_5": 0.825,
+          "mrr": 0.7352777777777778,
+          "ndcg_at_5": 0.7209402917441399
+        }
       }
     },
     {
@@ -76,45 +86,60 @@
     },
     {
       "category": "measured_pass",
-      "area": "performance_latency_fake",
-      "summary": "Offline latency benchmark measured (fake provider); not representative of real LLM latency.",
+      "area": "performance_cost_real",
+      "summary": "Real DeepSeek benchmark measured with trusted token/cost evidence. Estimated cost: 0.001446375 USD (0.000289275 per case).",
       "evidence": {
+        "provider_effective": "deepseek",
+        "model_effective": "deepseek-v4-flash",
         "latency": {
           "extraction_agent": {
-            "avg_latency_ms": 0.062,
-            "p95_latency_ms": 0.108,
-            "min_latency_ms": 0.04,
-            "max_latency_ms": 0.108,
+            "avg_latency_ms": 3312.742,
+            "p95_latency_ms": 4661.419,
+            "min_latency_ms": 1493.089,
+            "max_latency_ms": 4661.419,
             "samples_ms": [
-              0.066,
-              0.108,
-              0.057,
-              0.04,
-              0.04
+              3240.832,
+              4495.113,
+              2673.257,
+              4661.419,
+              1493.089
             ]
           },
           "rag_search": {
-            "avg_latency_ms": 49.342,
-            "p95_latency_ms": 243.564,
-            "min_latency_ms": 0.707,
-            "max_latency_ms": 243.564,
+            "avg_latency_ms": 1308.533,
+            "p95_latency_ms": 6278.735,
+            "min_latency_ms": 59.224,
+            "max_latency_ms": 6278.735,
             "samples_ms": [
-              243.564,
-              0.88,
-              0.782,
-              0.779,
-              0.707
+              6278.735,
+              59.224,
+              68.768,
+              67.165,
+              68.774
             ]
           }
         },
-        "boundary": "fake provider; offline benchmark"
+        "tokens": {
+          "token_usage_available": true,
+          "input_tokens": 1115,
+          "output_tokens": 1105,
+          "total_tokens": 2220,
+          "unavailable_reason": null
+        },
+        "cost": {
+          "cost_available": true,
+          "estimated_cost_usd": "0.001446375",
+          "per_case_estimated_cost_usd": "0.000289275",
+          "assumptions": "DeepSeek v4 Pro pricing: input $0.435/1M, output $0.87/1M",
+          "unavailable_reason": null
+        },
+        "trust": {
+          "trusted": true,
+          "real_provider_evidence": true,
+          "cost_evidence_available": true,
+          "reasons": []
+        }
       }
-    },
-    {
-      "category": "deferred_online_metric",
-      "area": "performance_cost_real",
-      "summary": "Real LLM token usage, latency and cost are deferred (fake provider used).",
-      "evidence": {}
     },
     {
       "category": "deferred_online_metric",
@@ -150,9 +175,21 @@
   "resume_safe_facts": [
     {
       "area": "rag",
-      "fact": "RAG hash baseline (hybrid_rerank) measured Hit@1=0.433, Recall@5=0.658, MRR=0.568, NDCG@5=0.553",
+      "fact": "RAG hash baseline (hybrid_rerank) measured Hit@1=0.533, Recall@5=0.700, MRR=0.644, NDCG@5=0.617",
       "source_report": "reports/rag_quality_matrix.json",
       "boundary": "offline eval set; hash embedding"
+    },
+    {
+      "area": "rag",
+      "fact": "RAG bge_small baseline (dense) measured Hit@1=0.592, Recall@5=0.787, MRR=0.713, NDCG@5=0.695",
+      "source_report": "reports/rag_quality_matrix.json",
+      "boundary": "offline eval set; bge_small embedding"
+    },
+    {
+      "area": "rag",
+      "fact": "RAG bge_m3 baseline (dense) measured Hit@1=0.633, Recall@5=0.825, MRR=0.735, NDCG@5=0.721",
+      "source_report": "reports/rag_quality_matrix.json",
+      "boundary": "offline eval set; bge_m3 embedding"
     },
     {
       "area": "agent",
@@ -162,33 +199,35 @@
       "blocking": false
     },
     {
-      "area": "latency",
-      "fact": "Offline latency benchmark: ExtractionAgent avg=0ms, P95=0ms; RAG avg=49ms, P95=244ms",
+      "area": "cost",
+      "fact": "Estimated cost 0.001446375 USD (0.000289275 per case, 5 runs)",
       "source_report": "reports/performance_cost_benchmark.json",
-      "boundary": "offline benchmark; fake provider"
+      "boundary": "offline benchmark; estimated from token counts"
+    },
+    {
+      "area": "latency",
+      "fact": "Offline latency benchmark: ExtractionAgent avg=3313ms, P95=4661ms; RAG avg=1309ms, P95=6279ms",
+      "source_report": "reports/performance_cost_benchmark.json",
+      "boundary": "offline benchmark; real provider"
     }
   ],
   "resume_bullet_draft": [
     "RAG quality measured on 120-case offline eval set with hash baseline.",
-    "Agent safety evaluation: DeepSeek Agent Eval: decision_accuracy=1.000, risk_accuracy=1.000, unsafe_auto_fix_rate=0.000, hard_constraint_violation_rate=0.000"
+    "Agent safety evaluation: DeepSeek Agent Eval: decision_accuracy=1.000, risk_accuracy=1.000, unsafe_auto_fix_rate=0.000, hard_constraint_violation_rate=0.000",
+    "Performance/cost benchmark: Estimated cost 0.001446375 USD (0.000289275 per case, 5 runs)"
   ],
   "claim_boundary": [
     "offline benchmark only; not production SLA",
     "no online adoption rate measured",
     "no production traffic or real user data",
     "DeepSeek Agent Eval safety gates pass with no policy intervention.",
-    "performance/cost benchmark uses fake provider; not real LLM latency/cost"
+    "performance/cost benchmark uses real provider"
   ],
   "next_stage_recommendations": [
     {
       "target": "rag",
       "reason": "RAG hash baseline is below PRD targets. Consider tuning chunk structure or retrieval parameters.",
       "scope_hint": "Pick one measured miss bucket; do not relabel eval data to fit output."
-    },
-    {
-      "target": "rag",
-      "reason": "Real embedding backends are not measured. Set up sentence-transformers and rerun with --real-backend-policy auto.",
-      "scope_hint": "Install sentence-transformers, then compare real embedding quality before changing production defaults."
     }
   ]
 }

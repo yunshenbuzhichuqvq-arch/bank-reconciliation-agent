@@ -560,6 +560,144 @@ def test_missing_agent_real_json_is_environment_gap(
 # ---------------------------------------------------------------------------
 
 
+def _performance_cost_real_trusted() -> dict:
+    return {
+        "stage": "stage-23-real-provider-cost-benchmark",
+        "status": "measured",
+        "provider_requested": "deepseek",
+        "provider_effective": "deepseek",
+        "model_requested": "deepseek-v4-flash",
+        "model_effective": "deepseek-v4-flash",
+        "run_count": 2,
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": {
+                "avg_latency_ms": 1200.0, "p95_latency_ms": 1350.0,
+                "min_latency_ms": 1100.0, "max_latency_ms": 1400.0,
+                "samples_ms": [1100.0, 1350.0],
+            },
+            "rag_search": {
+                "avg_latency_ms": 50.0, "p95_latency_ms": 55.0,
+                "min_latency_ms": 45.0, "max_latency_ms": 56.0,
+                "samples_ms": [45.0, 56.0],
+            },
+        },
+        "tokens": {
+            "token_usage_available": True,
+            "input_tokens": 1000, "output_tokens": 60, "total_tokens": 1060,
+            "unavailable_reason": None,
+        },
+        "cost": {
+            "cost_available": True,
+            "estimated_cost_usd": "0.0001218",
+            "per_case_estimated_cost_usd": "0.0000609",
+            "assumptions": "DeepSeek v4 Pro pricing",
+            "unavailable_reason": None,
+        },
+        "trust": {
+            "trusted": True,
+            "real_provider_evidence": True,
+            "cost_evidence_available": True,
+            "reasons": [],
+        },
+        "environment_gap": None,
+    }
+
+
+def _performance_cost_real_missing_tokens() -> dict:
+    return {
+        "stage": "stage-23-real-provider-cost-benchmark",
+        "status": "environment_gap",
+        "provider_requested": "deepseek",
+        "provider_effective": "deepseek",
+        "model_requested": "deepseek-v4-flash",
+        "model_effective": "deepseek-v4-flash",
+        "run_count": 2,
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": {
+                "avg_latency_ms": 1200.0, "p95_latency_ms": 1350.0,
+                "min_latency_ms": 1100.0, "max_latency_ms": 1400.0,
+                "samples_ms": [1100.0, 1350.0],
+            },
+            "rag_search": {
+                "avg_latency_ms": 50.0, "p95_latency_ms": 55.0,
+                "min_latency_ms": 45.0, "max_latency_ms": 56.0,
+                "samples_ms": [45.0, 56.0],
+            },
+        },
+        "tokens": {
+            "token_usage_available": False,
+            "input_tokens": None, "output_tokens": None, "total_tokens": None,
+            "unavailable_reason": "token_usage_unavailable",
+        },
+        "cost": {
+            "cost_available": False,
+            "estimated_cost_usd": None,
+            "per_case_estimated_cost_usd": None,
+            "assumptions": "real provider but no token usage data available",
+            "unavailable_reason": "token_usage_unavailable",
+        },
+        "trust": {
+            "trusted": False,
+            "real_provider_evidence": True,
+            "cost_evidence_available": False,
+            "reasons": ["token_usage_unavailable"],
+        },
+        "environment_gap": {
+            "reason": "token_usage_unavailable",
+            "message": "DeepSeek provider returned no token usage metadata.",
+        },
+    }
+
+
+def _performance_cost_missing_key_gap() -> dict:
+    return {
+        "stage": "stage-23-real-provider-cost-benchmark",
+        "status": "environment_gap",
+        "provider_requested": "deepseek",
+        "provider_effective": None,
+        "model_requested": "deepseek-v4-flash",
+        "model_effective": None,
+        "run_count": 1,
+        "boundary": "offline benchmark; not production SLA",
+        "latency": {
+            "extraction_agent": {
+                "avg_latency_ms": 0.0, "p95_latency_ms": 0.0,
+                "min_latency_ms": 0.0, "max_latency_ms": 0.0,
+                "samples_ms": [],
+            },
+            "rag_search": {
+                "avg_latency_ms": 0.0, "p95_latency_ms": 0.0,
+                "min_latency_ms": 0.0, "max_latency_ms": 0.0,
+                "samples_ms": [],
+            },
+        },
+        "tokens": {
+            "token_usage_available": False,
+            "input_tokens": None, "output_tokens": None, "total_tokens": None,
+            "unavailable_reason": "missing_deepseek_api_key",
+        },
+        "cost": {
+            "cost_available": False,
+            "estimated_cost_usd": None,
+            "per_case_estimated_cost_usd": None,
+            "assumptions": "real provider unavailable; cost cannot be estimated",
+            "unavailable_reason": "missing_deepseek_api_key",
+        },
+        "trust": {
+            "trusted": False,
+            "real_provider_evidence": False,
+            "cost_evidence_available": False,
+            "reasons": ["missing_deepseek_api_key"],
+        },
+        "environment_gap": {
+            "reason": "missing_deepseek_api_key",
+            "message": "DEEPSEEK_API_KEY is not configured.",
+        },
+    }
+
+
 def _performance_cost_fake() -> dict:
     return {
         "run_count": 5,
@@ -725,7 +863,7 @@ class TestBuildTriageSummaryExtended:
         cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
         assert len(cost_facts) == 0
 
-    def test_cost_fact_when_real_and_available(self) -> None:
+    def test_legacy_real_provider_no_cost_fact_without_trust(self) -> None:
         summary = eval_quality_triage.build_triage_summary(
             harness_comparison=_harness_comparison(),
             rag_matrix=_rag_matrix_skip(),
@@ -733,7 +871,13 @@ class TestBuildTriageSummaryExtended:
             performance_cost_report=_performance_cost_real(),
         )
         cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
-        assert len(cost_facts) == 1
+        assert len(cost_facts) == 0
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] != "measured_pass"
 
     def test_claim_boundary_present(self) -> None:
         summary = eval_quality_triage.build_triage_summary(
@@ -885,6 +1029,122 @@ class TestBuildTriageSummaryExtended:
         ]
         assert len(perf_findings) == 1
         assert perf_findings[0]["category"] == "environment_gap"
+
+
+    def test_performance_cost_real_trusted_is_measured_pass(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_real_trusted(),
+        )
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] == "measured_pass"
+        evidence = perf[0]["evidence"]
+        assert evidence["provider_effective"] == "deepseek"
+        assert "tokens" in evidence
+        assert "cost" in evidence
+
+    def test_resume_safe_facts_include_real_cost_only_when_trusted(self) -> None:
+        trusted_summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_real_trusted(),
+        )
+        cost_facts = [f for f in trusted_summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) >= 1
+        cost_text = cost_facts[0]["fact"]
+        assert "Estimated cost" in cost_text or "cost" in cost_text.lower()
+        assert "per case" in cost_text.lower()
+        assert "USD" in cost_text
+
+        missing_summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_real_missing_tokens(),
+        )
+        cost_facts = [f for f in missing_summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) == 0
+
+    def test_performance_cost_missing_tokens_is_environment_gap(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_real_missing_tokens(),
+        )
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] == "environment_gap"
+        assert "token usage" in perf[0]["summary"].lower()
+        bullets_text = " ".join(summary.get("resume_bullet_draft", []))
+        assert "USD" not in bullets_text or "cost" not in bullets_text.lower()
+
+    def test_performance_cost_missing_key_gap_is_environment_gap(self) -> None:
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=_performance_cost_missing_key_gap(),
+        )
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] == "environment_gap"
+        env_gap = perf[0]["evidence"].get("environment_gap", {})
+        assert env_gap.get("reason") == "missing_deepseek_api_key"
+
+    def test_legacy_no_trust_report_is_not_measured_pass(self) -> None:
+        pc = _performance_cost_real()
+        pc["cost"]["per_case_estimated_cost_usd"] = pc["cost"]["estimated_cost_usd"]
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=pc,
+        )
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] != "measured_pass"
+        cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) == 0
+        bullets_text = " ".join(summary.get("resume_bullet_draft", []))
+        assert "USD" not in bullets_text or "cost" not in bullets_text.lower()
+
+    def test_trust_false_with_cost_available_is_not_measured_pass(self) -> None:
+        report = _performance_cost_real_trusted()
+        report["trust"]["trusted"] = False
+        report["trust"]["cost_evidence_available"] = False
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=report,
+        )
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] != "measured_pass"
+        cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) == 0
+        bullets_text = " ".join(summary.get("resume_bullet_draft", []))
+        assert "USD" not in bullets_text or "cost" not in bullets_text.lower()
 
 
 # ---------------------------------------------------------------------------
