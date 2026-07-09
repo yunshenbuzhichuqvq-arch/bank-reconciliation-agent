@@ -318,6 +318,20 @@ def _add_agent_real_findings(
         })
 
 
+def _is_trusted_stage23_performance_report(report: dict[str, Any]) -> bool:
+    return (
+        report.get("status") == "measured"
+        and report.get("provider_requested") == "deepseek"
+        and report.get("provider_effective") == "deepseek"
+        and report.get("tokens", {}).get("token_usage_available") is True
+        and report.get("cost", {}).get("cost_available") is True
+        and report.get("cost", {}).get("per_case_estimated_cost_usd") is not None
+        and report.get("trust", {}).get("trusted") is True
+        and report.get("trust", {}).get("real_provider_evidence") is True
+        and report.get("trust", {}).get("cost_evidence_available") is True
+    )
+
+
 def _add_performance_cost_findings(
     performance_cost_report: dict[str, Any] | None,
     findings: list[dict[str, Any]],
@@ -372,69 +386,60 @@ def _add_performance_cost_findings(
 def _classify_performance_cost_report(
     report: dict[str, Any],
 ) -> tuple[FindingCategory, str, dict[str, Any]]:
-    status = report.get("status", "")
-    trust = report.get("trust")
+    trust = report.get("trust") or {}
     env_gap = report.get("environment_gap") or {}
     provider_eff = report.get("provider_effective")
     cost = report.get("cost", {})
     tokens = report.get("tokens", {})
     latency = report.get("latency", {})
 
-    if trust is not None and status:
-        if status == "measured" and trust.get("trusted"):
-            summary = (
-                "Real DeepSeek benchmark measured with trusted token/cost evidence. "
-                f"Estimated cost: {cost.get('estimated_cost_usd', 'N/A')} USD "
-                f"({cost.get('per_case_estimated_cost_usd', 'N/A')} per case)."
-            )
-            evidence = {
-                "provider_effective": provider_eff,
-                "model_effective": report.get("model_effective"),
-                "latency": latency,
-                "tokens": tokens,
-                "cost": cost,
-                "trust": trust,
-            }
-            return ("measured_pass", summary, evidence)
+    if _is_trusted_stage23_performance_report(report):
+        summary = (
+            "Real DeepSeek benchmark measured with trusted token/cost evidence. "
+            f"Estimated cost: {cost.get('estimated_cost_usd', 'N/A')} USD "
+            f"({cost.get('per_case_estimated_cost_usd', 'N/A')} per case)."
+        )
+        evidence = {
+            "provider_effective": provider_eff,
+            "model_effective": report.get("model_effective"),
+            "latency": latency,
+            "tokens": tokens,
+            "cost": cost,
+            "trust": trust,
+        }
+        return ("measured_pass", summary, evidence)
 
-        if status == "environment_gap" or not trust.get("trusted", False):
-            gap_reason = env_gap.get("reason", "unknown") if env_gap else "unknown"
-            if gap_reason == "token_usage_unavailable":
-                summary = (
-                    "Real DeepSeek benchmark ran but token usage metadata is "
-                    "unavailable; cost cannot be estimated."
-                )
-            elif gap_reason == "missing_deepseek_api_key":
-                summary = (
-                    "Real DeepSeek benchmark not run: DEEPSEEK_API_KEY is not configured."
-                )
-            else:
-                summary = f"Real DeepSeek benchmark not available: {gap_reason}."
-            evidence = {
-                "provider_effective": provider_eff,
-                "environment_gap": env_gap,
-                "trust": trust,
-                "tokens": tokens,
-                "cost": cost,
-            }
-            return ("environment_gap", summary, evidence)
+    gap_reason = env_gap.get("reason") if env_gap else None
+    if not gap_reason:
+        gap_reason = report.get("status", "missing_trust_metadata")
+    if report.get("status") == "measured" and trust.get("trusted") is True:
+        gap_reason = "partial_trust_metadata"
 
-    cost_available = cost.get("cost_available", False)
-    token_available = tokens.get("token_usage_available", False)
-    category: FindingCategory = (
-        "measured_pass" if cost_available else "deferred_online_metric"
-    )
-    summary = (
-        f"Real provider benchmark: "
-        f"cost_available={cost_available}, "
-        f"token_usage_available={token_available}"
-    )
+    if gap_reason == "token_usage_unavailable":
+        summary = (
+            "Real DeepSeek benchmark ran but token usage metadata is "
+            "unavailable; cost cannot be estimated."
+        )
+    elif gap_reason == "missing_deepseek_api_key":
+        summary = (
+            "Real DeepSeek benchmark not run: DEEPSEEK_API_KEY is not configured."
+        )
+    elif gap_reason == "partial_trust_metadata":
+        summary = (
+            "Real DeepSeek benchmark has trust.trusted=True but missing required "
+            "Stage 23 metadata; cannot promote as trusted evidence."
+        )
+    else:
+        summary = f"Real DeepSeek benchmark not trusted: {gap_reason}."
+
     evidence = {
-        "latency": latency,
+        "provider_effective": provider_eff,
+        "environment_gap": env_gap,
+        "trust": trust,
         "tokens": tokens,
         "cost": cost,
     }
-    return (category, summary, evidence)
+    return ("environment_gap", summary, evidence)
 
 
 def _add_deferred_online_metrics(findings: list[dict[str, Any]]) -> None:
@@ -699,20 +704,18 @@ def _build_resume_safe_facts(
         ext = latency.get("extraction_agent", {})
         rag_l = latency.get("rag_search", {})
         cost = performance_cost_report.get("cost", {})
-        trust = performance_cost_report.get("trust")
 
-        if provider_eff != "fake" and cost.get("cost_available"):
-            if trust is None or trust.get("trusted"):
-                per_case = cost.get("per_case_estimated_cost_usd")
-                cost_detail = f"Estimated cost {cost.get('estimated_cost_usd')} USD"
-                if per_case is not None:
-                    cost_detail += f" ({per_case} per case, {performance_cost_report.get('run_count', 0)} runs)"
-                facts.append({
-                    "area": "cost",
-                    "fact": cost_detail,
-                    "source_report": "reports/performance_cost_benchmark.json",
-                    "boundary": "offline benchmark; estimated from token counts",
-                })
+        if _is_trusted_stage23_performance_report(performance_cost_report):
+            per_case = cost.get("per_case_estimated_cost_usd")
+            cost_detail = f"Estimated cost {cost.get('estimated_cost_usd')} USD"
+            if per_case is not None:
+                cost_detail += f" ({per_case} per case, {performance_cost_report.get('run_count', 0)} runs)"
+            facts.append({
+                "area": "cost",
+                "fact": cost_detail,
+                "source_report": "reports/performance_cost_benchmark.json",
+                "boundary": "offline benchmark; estimated from token counts",
+            })
 
         facts.append({
             "area": "latency",

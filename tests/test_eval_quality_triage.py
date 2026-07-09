@@ -863,7 +863,7 @@ class TestBuildTriageSummaryExtended:
         cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
         assert len(cost_facts) == 0
 
-    def test_cost_fact_when_real_and_available(self) -> None:
+    def test_legacy_real_provider_no_cost_fact_without_trust(self) -> None:
         summary = eval_quality_triage.build_triage_summary(
             harness_comparison=_harness_comparison(),
             rag_matrix=_rag_matrix_skip(),
@@ -871,7 +871,13 @@ class TestBuildTriageSummaryExtended:
             performance_cost_report=_performance_cost_real(),
         )
         cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
-        assert len(cost_facts) == 1
+        assert len(cost_facts) == 0
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] != "measured_pass"
 
     def test_claim_boundary_present(self) -> None:
         summary = eval_quality_triage.build_triage_summary(
@@ -1098,6 +1104,47 @@ class TestBuildTriageSummaryExtended:
         assert perf[0]["category"] == "environment_gap"
         env_gap = perf[0]["evidence"].get("environment_gap", {})
         assert env_gap.get("reason") == "missing_deepseek_api_key"
+
+    def test_legacy_no_trust_report_is_not_measured_pass(self) -> None:
+        pc = _performance_cost_real()
+        pc["cost"]["per_case_estimated_cost_usd"] = pc["cost"]["estimated_cost_usd"]
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=pc,
+        )
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] != "measured_pass"
+        cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) == 0
+        bullets_text = " ".join(summary.get("resume_bullet_draft", []))
+        assert "USD" not in bullets_text or "cost" not in bullets_text.lower()
+
+    def test_trust_false_with_cost_available_is_not_measured_pass(self) -> None:
+        report = _performance_cost_real_trusted()
+        report["trust"]["trusted"] = False
+        report["trust"]["cost_evidence_available"] = False
+        summary = eval_quality_triage.build_triage_summary(
+            harness_comparison=_harness_comparison(),
+            rag_matrix=_rag_matrix_skip(),
+            agent_real_report=None,
+            performance_cost_report=report,
+        )
+        perf = [
+            f for f in summary["findings"]
+            if f["area"] == "performance_cost_real"
+        ]
+        assert len(perf) == 1
+        assert perf[0]["category"] != "measured_pass"
+        cost_facts = [f for f in summary["resume_safe_facts"] if f["area"] == "cost"]
+        assert len(cost_facts) == 0
+        bullets_text = " ".join(summary.get("resume_bullet_draft", []))
+        assert "USD" not in bullets_text or "cost" not in bullets_text.lower()
 
 
 # ---------------------------------------------------------------------------
