@@ -74,7 +74,7 @@
                          │
                          ▼
 ┌────────────────────────────────────────────────────────────┐
-│ 可观测性与评测层  structlog + 可回放 trace + token 成本 + Prompt 版本 + RAG 评测 │
+│ 可观测性与评测层  trace + System/RAG/Agent Eval + 分层 gate + 成本证据 │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -306,17 +306,50 @@ MySQL 主要业务表:对账任务、主账源流水 `t_source_a_transaction`、
 
 ### 2.7 可观测性与评测层
 
-大模型应用区别于传统软件的核心工程问题。本层产物必须可展示:
+本层同时承载运行可观测性和离线 Evaluation Harness。评测路径不进入线上对账请求,只读取固定输入、评测集或已有报告,输出可复跑的 Markdown + JSON 证据。
 
 - **结构化日志**:`structlog` 输出 JSON,每条携带 `trace_id`、`agent_name`、`step`、`prompt_version`。
 - **可回放 trace**:`logs/*.jsonl` 能回放单笔异常的规则命中、RAG 命中、Agent 输出和落库结果。
 - **token 成本统计**:每次 LLM 调用的 token 消耗与按模型定价折算的成本。
 - **Prompt 版本管理**:Prompt 以独立文件纳入版本控制,`t_agent_execution_log.prompt_version` 让每次决策可追溯到具体版本。
-- **RAG 评测集**:手写 `(query, expected_rule_ids)`,每次调整切片策略或检索参数后跑评测脚本,输出 Recall@5、MRR、NDCG@5。
-- **Agent Schema 符合性测试**:用 Pytest + Pydantic `model_validate`,对每种异常类型构造 mock 输入,验证 Agent 输出符合 Schema,统计通过率。
+- **三层离线评测**:System Eval、RAG Eval、Agent Eval 分别定位端到端结果、检索质量和 Agent 决策问题。
+- **Combined Harness**:聚合三层结果,生成 baseline、after、comparison 和确定性安全门禁。
+- **Gate Summary**:把现有报告分类为 CI、manual diagnostic、release 三层,统一输出 trust 和 claim boundary。
 - **LangFuse**:可选,作为 trace 可视化增强,不作为必需依赖。
 
-没有上述证据时,相关指标只作为目标,不写成"已经达到"。
+#### 2.7.1 Evaluation Harness 组件
+
+| 组件 | 输入 | 职责 | 输出 |
+|------|------|------|------|
+| `scripts/eval_system.py` | 固定 seed 的批次流水与 ground truth | 校验最终状态、异常分类、分支和危险自动处理 | `reports/system_eval*` |
+| `scripts/eval_rag.py` | 120 条 query + expected chunks/tags | 比较 backend × retrieval mode,计算 Hit@1、Recall@5、MRR、NDCG@5 和 miss buckets | `reports/rag_quality_matrix.*` |
+| `scripts/eval_agent.py` | 40 条结构化异常 case | 校验 schema、decision、risk、evidence 和金融安全红线 | `reports/agent_eval*` |
+| `scripts/eval_harness.py` | 三层 evaluator 结果 | 生成 baseline/after/comparison,聚合确定性 gates | `reports/eval_harness/` |
+| `scripts/eval_gates.py` | 已有 JSON reports | 纯函数分类 CI/manual/release 状态,不触发外部调用 | `reports/eval_gate_summary.*` |
+
+三层 evaluator 保持独立:端到端失败不直接归因给 LLM,RAG 排名问题不混入 Agent 决策准确率,Agent 安全问题也不能被全局检索指标掩盖。Combined Harness 只做编排和聚合,不改变 evaluator 的数据集或评分语义。
+
+#### 2.7.2 报告与 gate 数据流
+
+```text
+固定 seed / 人工标注 eval sets
+  ├─ System evaluator ───────────────┐
+  ├─ RAG evaluator ──────────────────┼─→ Markdown + JSON reports
+  └─ Agent evaluator(fake/real opt-in)┘             │
+                                                     ▼
+                                             eval gate summary
+                                      ┌──────────────┼──────────────┐
+                                      ▼              ▼              ▼
+                                deterministic CI  manual diagnostic  release
+```
+
+- **CI layer**:只包含无凭证、无网络、无需真实 embedding 模型加载的 fake/hash、schema 和安全红线检查。
+- **Manual diagnostic layer**:真实 DeepSeek Agent Eval、real embedding matrix 和真实 provider latency/token/cost;依赖外部资源,保持 opt-in。
+- **Release layer**:以 effective policy-gated 输出和 trust metadata 判断能否诚实声称真实 provider/backend 评测通过;缺失或不可信证据 fail closed。
+
+requested provider/backend、effective provider/backend、fallback、`real_provider_call`、`status` 和 `trust` 必须随报告保留。fake/hash/fallback/missing/stale 证据不能被聚合成真实结果。before/after 优化必须使用同一 eval set、top_k 和 backend/mode,同时报告目标桶、全局 delta 和副作用;未通过门禁的实验保留 `success=false`。
+
+没有上述证据时,相关指标只作为目标,不写成"已经达到"。当前项目只做离线评测,不把 5 次真实 provider benchmark 写成生产 SLA,也不把 40 条 fake-provider Agent Eval 写成 40 条真实 DeepSeek 结果。
 
 ### 2.8 工程化与部署
 
@@ -634,14 +667,14 @@ Reranker 默认使用**本地轻量模型**(无 API 调用成本、离线可用)
 |------|------|---------|------|
 | 自动平账率 | 规则引擎直接匹配的比例 | 任务统计表 | 实测(演示数据目标 > 95%) |
 | Agent 审计采纳率 | AuditAgent 建议被人工采纳的比例 | 人工复核表统计 | 目标 > 85%(需人工标注样本) |
-| RAG Recall@5 | 规则召回率 | 评测脚本 | 实测(目标 ≥ 0.85) |
-| RAG MRR | 平均倒数排名 | 评测脚本 | 实测(目标 ≥ 0.70) |
-| Agent Schema 一次通过率 | JSON 输出一次通过 Pydantic 校验的比例 | 校验管线计数 | 实测(目标 > 92%) |
+| RAG Hit@1 / Recall@5 / MRR / NDCG@5 | 检索召回与排序质量 | 120 条 RAG Eval | 实测值见 `reports/rag_quality_matrix.json` |
+| Agent schema / decision / risk / evidence | 结构与业务决策质量 | 40 条 Agent Eval | fake baseline;真实 provider 单独标注 |
+| unsafe auto-fix / hard constraint violation | effective 输出安全红线 | Agent Eval + release gate | 必须为 0 |
 | 人工复核触发率 | 所有异常中最终转人工的比例 | 状态统计 | 实测 |
 | Fallback 触发率 | 触发二级及以上 Fallback 的比例 | Agent 日志 fallback_level | 实测 |
-| LLM Token 消耗 / 成本 | 每批次对账的 token 总消耗与折算成本 | 日志聚合 | 实测 |
+| LLM latency / Token / 成本 | 真实调用的工程代价 | offline benchmark | 非生产 SLA |
 
-评估重点:能打开评测报告说明哪些 query 没命中、为什么没命中、下一步怎么优化切片或 Query Rewrite。已删除 P50/P95/P99 时延分位与 SLA 目标表(属 SRE 信号,非本项目核心)。
+评估重点:能从三层报告定位问题来自完整对账结果、RAG 检索还是 Agent 决策,并用同一评测集说明 baseline、修改点、after、失败桶和副作用。指标是否可信由 effective provider/backend 和 gate summary 判定,不是只看数值大小。
 
 ## 9. 数据与安全边界
 
@@ -655,7 +688,7 @@ Reranker 默认使用**本地轻量模型**(无 API 调用成本、离线可用)
 
 ## 10. 阶段演进与当前进度
 
-六阶段(MVP-0 ~ V2)收敛为三阶段。当前进度如实标注(2026-06)。
+六阶段(MVP-0 ~ V2)收敛为三阶段。当前进度如实标注(2026-07)。
 
 ### 阶段一 · 最小闭环  ✅ 基本完成
 
@@ -675,7 +708,7 @@ Reranker 默认使用**本地轻量模型**(无 API 调用成本、离线可用)
 - Agent 输出校验管线 4 阶段 + 硬约束 C1–C6。
 - Prompt 独立文件 + 版本管理;structlog 覆盖所有 LLM 调用点。
 - 工具调用权限边界(L0 只读 / L1 结构化输出 / L2 禁止直写库)。
-- RAG 评测集(真实 Recall@5/MRR)+ Agent 决策质量评估(统计方法)。
+- 三层离线 Evaluation Harness:System / RAG / Agent evaluator、baseline/after/comparison、真实 provider/embedding opt-in diagnostic 和 CI/manual/release 分层 gate。
 
 ### 阶段三 · 作品化  🚧 进行中
 
