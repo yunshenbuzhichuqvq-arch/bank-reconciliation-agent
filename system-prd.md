@@ -23,7 +23,7 @@
 
 ## 3. 产品范围与阶段规划
 
-围绕同一条银企对账主链路逐层加厚,每阶段都有可验收产物。当前进度标注于 2026-06。
+围绕同一条银企对账主链路逐层加厚,每阶段都有可验收产物。当前进度标注于 2026-07。
 
 ### 3.1 阶段一:最小闭环  ✅ 基本完成
 
@@ -73,7 +73,8 @@
 - **structlog 结构化日志**:所有 LLM 调用点输出 JSON 日志(`trace_id`、`agent_name`、`step`、`prompt_version`)。
 - **Prompt 版本管理**:Prompt 以独立文件存放并纳入版本控制;`t_agent_execution_log.prompt_version` 可追溯;附 Prompt 版本对比脚本。
 - **工具调用权限边界**:L0 只读 / L1 结构化输出 / L2 禁止直写库(见 §15)。
-- **RAG 评测集(真实 Recall@5/MRR)+ Agent 决策质量评估**(统计方法,不对 LLM 非确定性做严格一致性断言)。
+- **三层离线 Evaluation Harness**:System Eval 校验批次对账结果,RAG Eval 在 120 条用例上比较 embedding backend × retrieval mode,Agent Eval 用 40 条人工策划用例评估 schema、decision、risk、evidence 和安全红线。
+- **评测门禁分层**:fake/hash 确定性检查作为 CI baseline;真实 DeepSeek、real embedding 和 latency/token/cost 作为 opt-in diagnostic;release gate 对安全红线和 trust metadata fail closed。
 - 数据库新增字段:`prompt_version`、`fallback_level`、`llm_tokens`、`rag_scores_json` 等。
 
 产物:真实 LLM Agent 输出 + 增强 RAG trace + Fallback 日志 + 评测报告 + Prompt 版本对比。
@@ -698,12 +699,15 @@ Prompt 要求:输出空格分隔关键词(非完整句子);口语化映射为标
 
 ### 9.3 RAG 评测体系
 
-| 阶段 | 评测集规模 | 用途 |
+| 评测资产 | 规模 / 组合 | 用途 |
 |------|-----------|------|
-| 二 | ~50 条(核心分支 × 10) | 验证检索基本可用,发现明显缺陷 |
-| 三 | 120+ 条 | 系统化输出 Recall@5/MRR/NDCG@5 |
+| `data/rag_eval_set.json` | 120 条人工标注 query | 覆盖场景、异常类型和 expected chunk |
+| backend matrix | `hash / bge_small / bge_m3` | 区分离线 baseline 与真实 embedding 结果 |
+| retrieval mode matrix | `dense / hybrid / hybrid_rerank` | 比较召回和排序效果,输出 miss buckets |
 
-指标:Recall@5、MRR、NDCG@5。每次调整切片策略、检索参数或 Embedding 模型后运行评测脚本(`scripts/eval_rag.py`,评测集 `data/rag_eval_set.json`),输出 Markdown 表格 + JSON 详细结果。评测脚本跑通前不把提升幅度写成实测结论。
+指标:Hit@1、Recall@5、MRR、NDCG@5。每次调整切片策略、检索参数或 Embedding 模型后运行 `scripts/eval_rag.py`,输出 Markdown + JSON 报告。矩阵行必须记录 requested backend、effective backend、status 和 fallback reason;只有 requested 等于 effective 的 measured non-hash 行可称为真实 embedding 结果。
+
+RAG 优化遵循 baseline → miss bucket → 单变量修改 → 同集复测。before/after 报告必须同时给出目标桶、全局 delta 和副作用;未达到目标桶门禁时保留 `success=false`,不能为了得到正向结论而更换评测集或隐藏回退桶。
 
 ### 9.4 兜底策略
 
@@ -789,15 +793,46 @@ ExceptionRouter 按优先级逐一匹配,第一个命中即返回。`RuleEngine.
 |------|---------|------|
 | 自动平账率 | `t_reconciliation_task` 统计 | 实测(演示数据目标 > 95%) |
 | Agent 审计采纳率 | `t_human_review` 与 `ai_suggestion` 对比 | 目标 > 85%(需人工标注样本) |
-| RAG Recall@5 | 评测脚本 | 实测(目标 ≥ 0.85) |
-| RAG MRR | 评测脚本 | 实测(目标 ≥ 0.70) |
-| RAG NDCG@5 | 评测脚本 | 实测(目标 ≥ 0.78) |
-| Agent Schema 一次通过率 | 校验管线计数器 | 实测(目标 > 92%) |
+| RAG Hit@1 / Recall@5 / MRR / NDCG@5 | 120 条离线 RAG Eval | 实测值见 `reports/rag_quality_matrix.json` |
+| Agent schema / decision / risk / evidence | 40 条离线 Agent Eval | fake-provider baseline;真实 provider 另行标注 |
+| unsafe auto-fix / hard constraint violation | Agent Eval + release gate | effective rate 必须为 0 |
 | 人工复核触发率 | 状态统计 | 实测 |
 | Fallback 触发率 | Agent 日志 fallback_level | 实测 |
-| LLM Token 消耗 / 成本 | 日志聚合 | 实测 |
+| LLM latency / Token / 成本 | 真实 provider offline benchmark | 只作工程代价证据,不是生产 SLA |
 
 实测值以仓库内评测产物(`reports/`、`logs/`)为准。已删除 P50/P95/P99 时延分位与 SLA 目标表(属 SRE 信号,非本项目核心)。
+
+### 13.1 三层离线 Evaluation Harness
+
+| 层级 | 输入与规模 | 评测职责 | 主要入口 / 报告 |
+|------|-----------|---------|----------------|
+| System Eval | 固定 seed 的批次流水与 ground truth | 校验最终状态、异常分类、分支和危险自动处理 | `scripts/eval_system.py` / `reports/system_eval*` |
+| RAG Eval | 120 条 query + expected chunks/tags | 比较 backend、retrieval mode、召回和排序质量 | `scripts/eval_rag.py` / `reports/rag_quality_matrix.*` |
+| Agent Eval | 40 条结构化异常 case | 校验 schema、decision、risk、evidence 和安全红线 | `scripts/eval_agent.py` / `reports/agent_eval*` |
+| Combined Harness | 三层评测结果 | 生成 baseline、after 和 comparison,聚合确定性门禁 | `scripts/eval_harness.py` / `reports/eval_harness/` |
+
+三层评测回答不同问题:System Eval 判断完整对账结果是否正确;RAG Eval 定位检索召回或排序短板;Agent Eval 判断给定 evidence 和工具结果后是否做出符合业务与安全约束的决策。三层保持独立数据集和指标,避免用单一端到端数字掩盖问题来源。
+
+### 13.2 Gate 分层与证据边界
+
+```text
+评测集 / 固定输入
+  → System / RAG / Agent evaluator
+  → Markdown + JSON reports
+  → eval gate summary
+      ├─ CI: fake/hash、schema、安全红线等确定性检查
+      ├─ Manual diagnostic: 真实 DeepSeek、real embedding、latency/token/cost
+      └─ Release: effective 安全指标 + provider/backend trust metadata
+```
+
+`scripts/eval_gates.py` 只消费现有报告,输出 `reports/eval_gate_summary.json` 和 `reports/eval_gate_summary.md`,不进入线上对账请求路径。默认 CI 不调用外部 provider、不下载 embedding 模型;真实环境证据缺失时记录 `environment_gap`,不能伪装成通过。release gate 对以下情况 fail closed:
+
+- effective `unsafe_auto_fix_rate` 或 `hard_constraint_violation_rate` 非 0 或缺失;
+- `provider_effective`、`real_provider_call` 等真实 provider 证据不可信;
+- requested embedding backend 与 effective backend 不一致或 fallback 到 hash;
+- latency/token/cost 报告缺少真实 provider 或 usage metadata。
+
+当前证据边界:40 条 Agent Eval 只完成 fake-provider baseline,真实 DeepSeek 报告覆盖早期 6 条集合;Stage 22 before/after 实验已完成但目标桶 miss count 未下降,因此报告为 `success=false`;Stage 23 是 5 次调用的 offline benchmark,不能写成生产 SLA。
 
 ## 14. 验收标准
 
@@ -821,7 +856,11 @@ ExceptionRouter 按优先级逐一匹配,第一个命中即返回。`RuleEngine.
 - 输出校验管线 4 阶段可工作;硬约束 C1–C6 生效。
 - Prompt 独立文件 + 版本;structlog 覆盖所有 LLM 调用点;附 Prompt 版本对比脚本。
 - 工具调用权限边界落地(L0/L1/L2)。
-- RAG 评测脚本输出 Recall@5/MRR;Agent 决策质量评估(同一输入跑 10 次统计 decision 分布)可运行。
+- System / RAG / Agent 三层评测均可独立运行并输出 Markdown + JSON;combined harness 可生成 baseline、after 和 comparison。
+- Agent Eval 40 条 fake-provider baseline 通过 coverage 校验;effective unsafe auto-fix rate 与 hard constraint violation rate 均为 0。
+- RAG matrix 至少有一个 requested backend 等于 effective backend 的 measured real embedding 行,并输出 Hit@1、Recall@5、MRR、NDCG@5 和 miss buckets。
+- before/after 报告保留目标桶、全局 delta、副作用和 trust metadata;实验失败必须记录 `success=false`,不视为 harness 失败。
+- gate summary 明确输出 CI / manual diagnostic / release 三层状态;fake/hash/fallback 证据不得被解释为真实 provider/backend 结果。
 - 数据库完成阶段二字段新增(prompt_version、fallback_level、llm_tokens、rag_scores_json 等)。
 
 ### 14.3 阶段三
@@ -866,6 +905,10 @@ AI 不做金额计算(只读 READ-ONLY 结果);AI 不直接修改账务状态(�
 ### 16.3 安全与隔离边界
 
 所有 API 携带 `X-User-ID`;启用 JWT 时业务查询按 `user_id` 行过滤;RAG 无命中不臆造 evidence。基础安全验证(越权访问、user_id 隔离、日志脱敏、Prompt injection 基础防护)作为**可选加分项**,依赖扫描与 OWASP 检查不在核心范围。
+
+### 16.4 评测声称边界
+
+Evaluation Harness 是离线工程验证体系,不是线上监控系统。没有真实线上流量和人工复核标注时,不宣称生产 SLA、线上采纳率或 override rate;没有 `real_provider_call=true` 时不宣称真实 DeepSeek 结果;真实 embedding fallback 到 hash 时不宣称 real embedding 指标。评测实验完成不等于优化成功,结论以仓库报告中的 `status`、`success`、`trust` 和 effective provider/backend 为准。
 
 ## 17. LLM 选型说明
 
