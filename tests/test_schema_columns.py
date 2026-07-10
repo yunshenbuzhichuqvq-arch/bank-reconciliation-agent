@@ -144,6 +144,86 @@ def test_fuzzy_candidate_fits_existing_error_type_columns() -> None:
     assert "error_type VARCHAR(32)" in read_schema_sql()
 
 
+def test_stage_25_recovery_columns_in_service_table() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    reconciliation_task_table.metadata.create_all(engine, tables=[reconciliation_task_table])
+    inspector = inspect(engine)
+
+    assert_columns(
+        inspector,
+        "t_reconciliation_task",
+        {
+            "job_attempt",
+            "retry_recovered",
+            "retry_exhausted",
+            "failure_type",
+            "failure_summary",
+            "failed_at",
+            "force_requeue_count",
+        },
+    )
+
+    job_col = inspector.get_columns("t_reconciliation_task")[
+        next(
+            i
+            for i, c in enumerate(inspector.get_columns("t_reconciliation_task"))
+            if c["name"] == "job_attempt"
+        )
+    ]
+    assert job_col["nullable"] is False
+    assert job_col["default"] in ("0", "'0'")
+
+    exhausted_col = inspector.get_columns("t_reconciliation_task")[
+        next(
+            i
+            for i, c in enumerate(inspector.get_columns("t_reconciliation_task"))
+            if c["name"] == "retry_exhausted"
+        )
+    ]
+    assert exhausted_col["nullable"] is False
+
+    force_col = inspector.get_columns("t_reconciliation_task")[
+        next(
+            i
+            for i, c in enumerate(inspector.get_columns("t_reconciliation_task"))
+            if c["name"] == "force_requeue_count"
+        )
+    ]
+    assert force_col["nullable"] is False
+    assert force_col["default"] in ("0", "'0'")
+
+    for nullable_col in ("failure_type", "failure_summary", "failed_at"):
+        col_info = inspector.get_columns("t_reconciliation_task")[
+            next(
+                i
+                for i, c in enumerate(inspector.get_columns("t_reconciliation_task"))
+                if c["name"] == nullable_col
+            )
+        ]
+        assert col_info["nullable"] is True, f"{nullable_col} should be nullable"
+
+    assert isinstance(reconciliation_task_table.c.failure_type.type.length, int)
+    assert reconciliation_task_table.c.failure_type.type.length == 64
+    assert isinstance(reconciliation_task_table.c.failure_summary.type.length, int)
+    assert reconciliation_task_table.c.failure_summary.type.length == 255
+
+
+def test_stage_25_recovery_columns_in_schema_sql() -> None:
+    schema_sql = read_schema_sql()
+
+    expected_fragments = [
+        "job_attempt INT NOT NULL DEFAULT 0",
+        "retry_recovered BOOLEAN NOT NULL DEFAULT 0",
+        "retry_exhausted BOOLEAN NOT NULL DEFAULT 0",
+        "failure_type VARCHAR(64) NULL",
+        "failure_summary VARCHAR(255) NULL",
+        "failed_at TIMESTAMP NULL",
+        "force_requeue_count INT NOT NULL DEFAULT 0",
+    ]
+    for fragment in expected_fragments:
+        assert fragment in schema_sql, f"Missing in schema.sql: {fragment}"
+
+
 def assert_columns(inspector, table_name: str, expected_columns: set[str]) -> None:
     actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
     assert expected_columns <= actual_columns

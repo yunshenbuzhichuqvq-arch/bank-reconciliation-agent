@@ -255,3 +255,68 @@ def test_review_approve_rejects_task_owned_by_other_user() -> None:
         assert getattr(exc, "detail", None) == "forbidden task access"
     else:
         raise AssertionError("expected HTTPException")
+
+
+def test_task_25_1_mark_attempt_started_is_user_scoped() -> None:
+    ts = TaskService()
+    for uid in ("u1", "u2"):
+        ts.replace_task(
+            user_id=uid, task_id="TASK_CAS_ISO",
+            scenario_type="BANK_ENTERPRISE",
+            total_bank_rows=0, total_clear_rows=0,
+            auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+            status="QUEUED",
+        )
+    result = ts.mark_attempt_started(user_id="u1", task_id="TASK_CAS_ISO", attempt=1)
+    assert result is True
+    t1 = ts.get(user_id="u1", task_id="TASK_CAS_ISO")
+    assert t1 is not None
+    assert t1.job_attempt == 1
+    t2 = ts.get(user_id="u2", task_id="TASK_CAS_ISO")
+    assert t2 is not None
+    assert t2.job_attempt == 0
+
+
+def test_task_25_1_mark_failed_if_active_is_user_scoped() -> None:
+    ts = TaskService()
+    for uid in ("u1", "u2"):
+        ts.replace_task(
+            user_id=uid, task_id="TASK_CAS_ISO",
+            scenario_type="BANK_ENTERPRISE",
+            total_bank_rows=0, total_clear_rows=0,
+            auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+            status="QUEUED",
+        )
+    result = ts.mark_failed_if_active(
+        user_id="u1", task_id="TASK_CAS_ISO",
+        attempt=3, failure_type="OperationalError",
+        failure_summary="database operation unavailable",
+    )
+    assert result is True
+    t1 = ts.get(user_id="u1", task_id="TASK_CAS_ISO")
+    assert t1 is not None
+    assert t1.status == "FAILED"
+    t2 = ts.get(user_id="u2", task_id="TASK_CAS_ISO")
+    assert t2 is not None
+    assert t2.status == "QUEUED"
+
+
+def test_task_25_1_mark_attempt_succeeded_is_user_scoped() -> None:
+    ts = TaskService()
+    for uid in ("u1", "u2"):
+        ts.replace_task(
+            user_id=uid, task_id="TASK_CAS_ISO",
+            scenario_type="BANK_ENTERPRISE",
+            total_bank_rows=10, total_clear_rows=10,
+            auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+            status="UPLOADED",
+        )
+        ts.update_status(user_id=uid, task_id="TASK_CAS_ISO", status="COMPLETED")
+    result = ts.mark_attempt_succeeded(user_id="u1", task_id="TASK_CAS_ISO", attempt=2)
+    assert result is True
+    t1 = ts.get(user_id="u1", task_id="TASK_CAS_ISO")
+    assert t1 is not None
+    assert t1.retry_recovered is True
+    t2 = ts.get(user_id="u2", task_id="TASK_CAS_ISO")
+    assert t2 is not None
+    assert t2.retry_recovered is False

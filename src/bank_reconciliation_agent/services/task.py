@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import datetime
 from typing import NamedTuple
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Index,
@@ -18,6 +20,7 @@ from sqlalchemy import (
     func,
     insert,
     select,
+    text,
     update,
 )
 from sqlalchemy.engine import Engine
@@ -50,6 +53,13 @@ reconciliation_task_table = Table(
     Column("fallback_l3_rows", Integer, nullable=False, server_default="0"),
     Column("total_llm_tokens", Integer, nullable=False, server_default="0"),
     Column("total_llm_cost", Numeric(10, 4), nullable=False, server_default="0.0000"),
+    Column("job_attempt", Integer, nullable=False, server_default="0"),
+    Column("retry_recovered", Boolean, nullable=False, server_default=text("0")),
+    Column("retry_exhausted", Boolean, nullable=False, server_default=text("0")),
+    Column("failure_type", String(64), nullable=True),
+    Column("failure_summary", String(255), nullable=True),
+    Column("failed_at", DateTime, nullable=True),
+    Column("force_requeue_count", Integer, nullable=False, server_default="0"),
     Column("created_at", DateTime, server_default=func.now()),
     Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
     UniqueConstraint("user_id", "task_id", name="uk_task_user_task"),
@@ -72,6 +82,13 @@ class ReconciliationTaskRow(NamedTuple):
     fallback_l3_rows: int
     total_llm_tokens: int
     total_llm_cost: Decimal
+    job_attempt: int = 0
+    retry_recovered: bool = False
+    retry_exhausted: bool = False
+    failure_type: str | None = None
+    failure_summary: str | None = None
+    failed_at: datetime | None = None
+    force_requeue_count: int = 0
 
 
 class TaskService:
@@ -91,6 +108,7 @@ class TaskService:
         pending_ai_rows: int,
         pending_human_rows: int,
         status: str = "UPLOADED",
+        force_requeue_count: int = 0,
         connection: Connection | None = None,
     ) -> None:
         """写入上传后的任务状态；同 task_id 重试时覆盖旧任务统计。"""
@@ -117,6 +135,7 @@ class TaskService:
                     pending_ai_rows=pending_ai_rows,
                     pending_human_rows=pending_human_rows,
                     unresolved_rows=unresolved_rows,
+                    force_requeue_count=force_requeue_count,
                 )
             )
 
@@ -202,7 +221,97 @@ class TaskService:
             fallback_l3_rows=row["fallback_l3_rows"],
             total_llm_tokens=row["total_llm_tokens"],
             total_llm_cost=Decimal(str(row["total_llm_cost"])),
+            job_attempt=int(row["job_attempt"]),
+            retry_recovered=bool(row["retry_recovered"]),
+            retry_exhausted=bool(row["retry_exhausted"]),
+            failure_type=row["failure_type"],
+            failure_summary=row["failure_summary"],
+            failed_at=row["failed_at"],
+            force_requeue_count=int(row["force_requeue_count"]),
         )
+
+    def mark_attempt_started(
+        self, *, user_id: str, task_id: str, attempt: int
+    ) -> bool:
+        if attempt < 1:
+            raise ValueError(f"attempt must be a positive integer, got {attempt}")
+        self._ensure_initialized()
+        with self._engine.begin() as connection:
+            result = connection.execute(
+                update(reconciliation_task_table)
+                .where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.task_id == task_id,
+                    reconciliation_task_table.c.status.in_(["QUEUED", "RUNNING"]),
+                )
+                .values(status="RUNNING", job_attempt=attempt, updated_at=func.now())
+            )
+        return result.rowcount > 0
+
+    def mark_failed_if_active(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        attempt: int,
+        failure_type: str,
+        failure_summary: str,
+    ) -> bool:
+        if len(failure_type) > 64:
+            raise ValueError(
+                f"failure_type must be at most 64 characters, got {len(failure_type)}"
+            )
+        if len(failure_summary) > 255:
+            raise ValueError(
+                f"failure_summary must be at most 255 characters, got {len(failure_summary)}"
+            )
+        self._ensure_initialized()
+        with self._engine.begin() as connection:
+            result = connection.execute(
+                update(reconciliation_task_table)
+                .where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.task_id == task_id,
+                    reconciliation_task_table.c.status.in_(["QUEUED", "RUNNING"]),
+                )
+                .values(
+                    status="FAILED",
+                    job_attempt=attempt,
+                    retry_exhausted=True,
+                    retry_recovered=False,
+                    failure_type=failure_type,
+                    failure_summary=failure_summary,
+                    failed_at=func.now(),
+                    updated_at=func.now(),
+                )
+            )
+        return result.rowcount > 0
+
+    def mark_attempt_succeeded(
+        self, *, user_id: str, task_id: str, attempt: int
+    ) -> bool:
+        self._ensure_initialized()
+        with self._engine.begin() as connection:
+            result = connection.execute(
+                update(reconciliation_task_table)
+                .where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.task_id == task_id,
+                    reconciliation_task_table.c.status.in_(
+                        ["UPLOADED", "AI_RUNNING", "COMPLETED"]
+                    ),
+                )
+                .values(
+                    job_attempt=attempt,
+                    retry_recovered=(attempt > 1),
+                    retry_exhausted=False,
+                    failure_type=None,
+                    failure_summary=None,
+                    failed_at=None,
+                    updated_at=func.now(),
+                )
+            )
+        return result.rowcount > 0
 
     def _ensure_initialized(self) -> None:
         if self._initialized:
