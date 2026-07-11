@@ -6,14 +6,7 @@
 
 ## 当前阶段
 
-当前代码处于 **V1-3 开发版**，重点是：
-
-- by-taskId SSE 看板实时结果推送
-- 量化指标仪表盘
-- 银企对账与银行清算对账双场景
-- RAG 证据、Fallback、Hook、Checkpoint 等 Agent 链路演进
-
-这不是稳定部署版。2026-06-17 的本地 smoke 显示：基础页面和多数 API 可以访问，但看板实时链路仍有阻断问题，见“当前 smoke 状态”和“已知问题”。
+当前代码处于 **Stage 27 可复现交付** 开发版，JWT 鉴权、ARQ/Redis 异步队列、五服务 Docker Compose、外部黑盒 smoke 和 GitHub CI 均已落地。默认使用 Fake LLM provider + hash embedding，不调用 DeepSeek、不下载真实模型。
 
 ## 能力概览
 
@@ -37,8 +30,11 @@
 - MySQL (`mysql+pymysql`)
 - SQLite 测试库
 - ChromaDB
+- Redis（LLM 缓存、限流、幂等去重）
+- ARQ 异步任务队列
+- JWT Bearer 鉴权（`POST /api/v1/auth/login`）
 - OpenAI-compatible LLM provider abstraction，默认 Fake provider
-- LangGraph / checkpoint sqlite
+- LangGraph / checkpoint sqlite（HumanReview 子图）
 - ruff + pytest
 
 前端：
@@ -70,12 +66,50 @@ frontend/
   src/router/     路由
 mock_data/        本地演示 Excel
 rules/            YAML 规则和规则资料
-scripts/          数据生成、RAG 构建、DB reset 等脚本
+scripts/          数据生成、RAG 构建、smoke demo 等脚本
 tests/            后端 pytest
 decisions/        ADR
 ```
 
-## 本地启动
+## 一键启动（五服务 Compose，零外部凭证）
+
+本 Stage 提供一条命令启动整个演示拓扑（无需预装 MySQL/Redis/uv/Node）：
+
+```bash
+cp .env.example .env
+docker compose up --build -d --wait
+```
+
+五服务拓扑：
+
+| 服务 | 端口 | 说明 |
+| --- | --- | --- |
+| `mysql` | Compose 内 `3306` | MySQL 8.4，database `AI_agent` |
+| `redis` | Compose 内 `6379` | Redis 7.4，DB 0 |
+| `backend` | host `8000` | Uvicorn，JWT auth，Fake LLM + hash embedding |
+| `worker` | 无 host 端口 | ARQ worker，消费 Redis 异步对账任务 |
+| `frontend` | host `4173` | Vite preview，`/api` proxy 到 backend |
+
+backend 与 worker 复用同一 Python 镜像并共享 `uploads_data` 卷；MySQL/Redis 使用具名数据卷，不暴露 host 端口。默认不需要 DeepSeek key 或真实 embedding 下载。
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+# {"status":"ok","service":"Bank Reconciliation Agent","db":"ok"}
+```
+
+前端：`http://127.0.0.1:4173/`
+
+清理：
+
+```bash
+docker compose down --volumes --remove-orphans
+```
+
+> demo 密码和 JWT secret 仅为本地 non-production 默认值，已通过 `${NAME:-demo-value}` 提供；真实环境请用环境变量覆盖。
+
+## 本地开发启动
 
 ### 1. 后端
 
@@ -106,7 +140,7 @@ npm run dev
 
 前端默认地址：`http://127.0.0.1:5173/`
 
-Vite 会把 `/api` 代理到 `127.0.0.1:8000`。前端 API 客户端会统一带 `X-User-ID: demo_user`。
+Vite 会把 `/api` 代理到 `127.0.0.1:8000`。当前 API 鉴权使用 JWT Bearer Token（`POST /api/v1/auth/login`），前端通过 `Authorization: Bearer <token>` 访问业务 API。
 
 ## 演示数据
 
@@ -121,34 +155,56 @@ Vite 会把 `/api` 代理到 `127.0.0.1:8000`。前端 API 客户端会统一带
 - 自动平账 2 行
 - 异常 6 行，进入人工复核
 
-## 当前 smoke 状态
+## 外部黑盒 Smoke
 
-最近一次本地 smoke 时间：2026-06-17。
+容器外执行 `scripts/smoke_demo.py` 可验证 JWT、ARQ 异步队列、SSE 实时事件、人工复核和审计报告。脚本连续运行两次以证明 `force=true` 重走 worker，并输出 v1.0 JSON summary。
 
-已确认可返回 `200`：
+```bash
+uv sync --extra dev
+uv run python -m scripts.smoke_demo --summary-json artifacts/smoke-run-1.json
+uv run python -m scripts.smoke_demo --summary-json artifacts/smoke-run-2.json
+```
 
-- 前端首页
-- 后端 Swagger
-- `GET /api/v1/metrics/dashboard`
-- `POST /api/v1/reconcile/upload`
-- `GET /api/v1/reconcile/{task_id}/status`
-- `GET /api/v1/reconcile/{task_id}/exceptions`
-- `GET /api/v1/ledger`
-- `GET /api/v1/review/pending`
+两条路径：
+- **ARQ path**：`BANK_ENTERPRISE`，`force=true` → Redis/ARQ worker → 异常 → 人工复核 → 报告
+- **SSE path**：`BANK_CLEARING`，`start-live → events → TASK_DONE` → 状态 → 报告
 
-当前阻断点：
+summary JSON 输出包含 `schema_version: "1.0"`、9 个稳定步骤名、`boundary: {llm_provider: "fake", embedding_backend: "hash"}` 和两条 path 的 task IDs。成功返回 0，失败仍尽力写 summary 并返回非零。
 
-- `POST /api/v1/reconcile/{task_id}/start-live` 返回 `200`
-- 紧接着 `GET /api/v1/reconcile/{task_id}/events` 返回 `404 live event stream not found`
+## 手动 JWT 调用示例
 
-初步定位：`start_live()` 注册 emitter 后，后台任务很快发出 `task_progress` 和 `task_done`，随后立刻 `unregister(task_id)`。真实浏览器顺序是 start-live 返回后再发起 events 订阅，此时 emitter 可能已经被清理，因此看板实时链路失败。
+```bash
+BASE=http://127.0.0.1:8000/api/v1
 
-## 已知问题
+# 获取 token
+TOKEN=$(curl -s -X POST "$BASE/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo_user","password":"demo12345"}' | jq -r '.data.access_token')
 
-- 看板实时链路：`start-live -> events` 存在 404，当前不应宣称看板 SSE 链路已稳定。
-- 旁路日志：本地运行时出现过 `rag_log` / `agent_log` 的 `OperationalError`，主流程可返回，但日志或证据链落库需要继续排查。
-- dev reload 噪音：`uvicorn --reload` 运行时会频繁出现 `changes detected`，可能与运行时文件写入被 watcher 捕获有关。
-- Docker Compose：暂不建议作为主入口。建议先修复核心 smoke，再补 Compose 编排和容器内冒烟测试。
+# 上传文件
+curl -X POST "$BASE/reconcile/upload-async" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F bank_file=@mock_data/mvp1_bank.xlsx \
+  -F clear_file=@mock_data/mvp1_clear.xlsx \
+  -F scenario_type=BANK_ENTERPRISE -F force=true
+
+# 查询状态
+curl "$BASE/reconcile/<task_id>/status" -H "Authorization: Bearer $TOKEN"
+
+# 异常列表
+curl "$BASE/reconcile/<task_id>/exceptions" -H "Authorization: Bearer $TOKEN"
+
+# 待复核
+curl "$BASE/review/pending?task_id=<task_id>" -H "Authorization: Bearer $TOKEN"
+
+# 审批
+curl -X POST "$BASE/review/<queue_id>/approve" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"action":"APPROVED_MATCH","handler_username":"demo_user","remark":"人工确认"}'
+
+# 查看报告
+curl "$BASE/reconcile/<task_id>/report" -H "Authorization: Bearer $TOKEN"
+```
 
 ## 常用命令
 
@@ -156,21 +212,10 @@ Vite 会把 `/api` 代理到 `127.0.0.1:8000`。前端 API 客户端会统一带
 
 ```bash
 uv run pytest
-uv run pytest tests/test_reconciliation_start_live.py tests/test_reconciliation_live_events_endpoint.py -q
 uv run ruff check .
 uv run python -m scripts.generate_mock_excel
 uv run python -m scripts.reset_db --yes
 ```
-
-真实 embedding 测试默认不跑，CI 默认使用 hash 后端。需要手工验证本地模型路径时：
-
-```bash
-uv sync --extra dev --extra embedding
-export HF_HOME=/path/to/hf-cache
-uv run pytest -m embedding_real -v
-```
-
-`embedding_real` 测试只读取本地 Hugging Face / sentence-transformers 缓存；模型或依赖不可用时会 skip，不会在测试中下载模型。首次下载请在测试外完成，后续复用同一个 `HF_HOME`。
 
 前端：
 
@@ -181,46 +226,33 @@ npm run build
 npm run typecheck
 ```
 
-## 手工 smoke 示例
+## Hosted CI
 
-```bash
-BASE=http://127.0.0.1:8000/api/v1
-HEADER='X-User-ID: demo_user'
+GitHub Actions workflow（`.github/workflows/ci.yml`）在 PR 上运行四个 check：
 
-curl -X POST "$BASE/reconcile/upload" \
-  -H "$HEADER" \
-  -F bank_file=@mock_data/mvp1_bank.xlsx \
-  -F clear_file=@mock_data/mvp1_clear.xlsx \
-  -F scenario_type=BANK_ENTERPRISE
+- `backend-quality`：`uv sync --frozen` → `uv run pytest` + `uv run ruff check .`
+- `frontend-quality`：`npm ci` → `npm run test` + `npm run typecheck` + `npm run build`
+- `deterministic-eval`：fresh 生成 dense baseline、hybrid_rerank comparison、Agent schema conformance，CI layer gate 阻断
+- `delivery-smoke`：`docker compose up --build -d --wait` → smoke 两次 → always 清理
 
-curl "$BASE/reconcile/<task_id>/status" -H "$HEADER"
-curl "$BASE/reconcile/<task_id>/exceptions" -H "$HEADER"
-curl -X POST "$BASE/reconcile/<task_id>/start-live" -H "$HEADER"
-curl "$BASE/reconcile/<task_id>/events" -H "$HEADER"
-curl "$BASE/ledger?page=1&page_size=20" -H "$HEADER"
-curl "$BASE/review/pending?page=1&page_size=10" -H "$HEADER"
-curl "$BASE/metrics/dashboard" -H "$HEADER"
-```
+全部使用 `LLM_PROVIDER=fake` + `EMBEDDING_BACKEND=hash`，不调用 DeepSeek、不读仓库 secrets。真实 provider/embedding/cost 缺失表现为 `environment_gap`，不阻断默认 PR。
 
 ## 开发约束
 
 - 金额计算使用 `Decimal`，不要交给 LLM 或 float。
 - RAG 无命中必须转人工，不得臆造 evidence。
 - 所有业务查询显式按 `user_id` 过滤。
-- 前端请求统一带 `X-User-ID: demo_user`。
+- 当前鉴权为 JWT Bearer Token；`X-User-ID` 仅为历史设计，不再作为当前 API 调用契约。
 - `db/schema.sql` 与 service 内 `Table` 定义需要保持同步。
 - 不要把真实 `.env`、真实数据、运行时数据库文件提交到仓库。
 
-## Docker Compose 状态
+## 已知限制
 
-当前还未把 Docker Compose 作为推荐运行方式。建议顺序：
-
-1. 修复 `start-live -> events` 404。
-2. 排查 `rag_log` / `agent_log` `OperationalError`。
-3. 本地跑通 smoke 和测试。
-4. 再添加后端、前端、MySQL 的 Compose 编排。
-5. 在 Compose 环境里重跑 smoke。
+- SSE 实时事件是进程内 emitter（单 backend 实例），不具备断线回放或水平扩展能力。
+- `vite preview` 仅适合本地演示；生产部署需另立 ADR 决定静态资源服务器和反向代理。
+- 镜像使用版本 tag (`mysql:8.4`, `redis:7.4-alpine`) 而非 digest，不能宣称字节级跨架构复现。
+- 默认路径为 Fake/hash，不调用真实模型；真实 DeepSeek 和 embedding 仅允许显式 opt-in。
 
 ## 协作说明
 
-架构决策记录在 `decisions/`。开发协作约定见 `AGENTS.md`。当前文档描述的是开发态真实状态；修复已知问题后，需要同步更新 README 的 smoke 状态和 Docker Compose 章节。
+架构决策记录在 `decisions/`。开发协作约定见 `AGENTS.md`。当前文档描述的是开发态真实状态。
