@@ -6,7 +6,11 @@ from typing import Any, ClassVar, Literal
 import structlog
 from redis.exceptions import RedisError
 
-from bank_reconciliation_agent.core.llm.provider import LLMProvider, LLMResult
+from bank_reconciliation_agent.core.llm.provider import (
+    LLMProvider,
+    LLMResult,
+    ResponseValidator,
+)
 
 
 log = structlog.get_logger()
@@ -37,6 +41,7 @@ class CachingLLMProvider:
         *,
         temperature: float = 0.0,
         response_format: Literal["text", "json_object"] = "json_object",
+        response_validator: ResponseValidator | None = None,
     ) -> LLMResult:
         cache_key = self._cache_key(
             messages,
@@ -57,16 +62,18 @@ class CachingLLMProvider:
             result = LLMResult.model_validate_json(cached_value).model_copy(
                 update={"cached": True}
             )
-            with self._metrics_lock:
-                type(self)._hits += 1
-                type(self)._saved_prompt_tokens += result.prompt_tokens
-                type(self)._saved_completion_tokens += result.completion_tokens
-            log.info(
-                "llm_cache_hit",
-                model=result.model,
-                cache_key=cache_key[:24],
-            )
-            return result
+            if response_validator is None or response_validator(result.text):
+                with self._metrics_lock:
+                    type(self)._hits += 1
+                    type(self)._saved_prompt_tokens += result.prompt_tokens
+                    type(self)._saved_completion_tokens += result.completion_tokens
+                log.info(
+                    "llm_cache_hit",
+                    model=result.model,
+                    cache_key=cache_key[:24],
+                )
+                return result
+            self._evict_invalid(cache_key, result.model)
 
         with self._metrics_lock:
             type(self)._misses += 1
@@ -75,14 +82,8 @@ class CachingLLMProvider:
             temperature=temperature,
             response_format=response_format,
         )
-        try:
-            self.redis_client.setex(
-                cache_key,
-                self.ttl_seconds,
-                result.model_dump_json(),
-            )
-        except RedisError as exc:
-            self._log_degraded("setex", exc)
+        if response_validator is None or response_validator(result.text):
+            self._store(cache_key, result)
         return result
 
     @classmethod
@@ -129,6 +130,27 @@ class CachingLLMProvider:
             response_format=response_format,
         )
         return result.model_copy(update={"cached": False})
+
+    def _store(self, cache_key: str, result: LLMResult) -> None:
+        try:
+            self.redis_client.setex(
+                cache_key,
+                self.ttl_seconds,
+                result.model_copy(update={"attempts": []}).model_dump_json(),
+            )
+        except RedisError as exc:
+            self._log_degraded("setex", exc)
+
+    def _evict_invalid(self, cache_key: str, model: str) -> None:
+        try:
+            self.redis_client.delete(cache_key)
+        except RedisError as exc:
+            self._log_degraded("delete", exc)
+        log.info(
+            "llm_cache_evict_invalid",
+            model=model,
+            cache_key=cache_key[:24],
+        )
 
     def _log_degraded(self, op: str, exc: RedisError) -> None:
         self.degraded_count += 1

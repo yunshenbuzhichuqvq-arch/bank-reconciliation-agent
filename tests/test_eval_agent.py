@@ -612,7 +612,7 @@ def test_deepseek_auto_redirects_from_fake_baseline_paths(monkeypatch, tmp_path:
         def __init__(self, **kwargs):
             self.model = kwargs.get("model", "unknown")
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             return LLMResult(
                 text=json.dumps({
                     "decision": "PENDING_HUMAN",
@@ -663,7 +663,7 @@ def test_deepseek_protects_json_baseline_independently(monkeypatch, tmp_path: Pa
         def __init__(self, **kwargs):
             self.model = kwargs.get("model", "unknown")
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             return LLMResult(
                 text=json.dumps({
                     "decision": "PENDING_HUMAN",
@@ -707,7 +707,7 @@ def test_deepseek_protects_md_baseline_independently(monkeypatch, tmp_path: Path
         def __init__(self, **kwargs):
             self.model = kwargs.get("model", "unknown")
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             return LLMResult(
                 text=json.dumps({
                     "decision": "PENDING_HUMAN",
@@ -751,7 +751,7 @@ def test_stubbed_deepseek_success_sets_real_provider_call(monkeypatch) -> None:
         def __init__(self, **kwargs):
             self.model = kwargs.get("model", "unknown")
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             return LLMResult(
                 text=json.dumps({
                     "decision": "PENDING_HUMAN",
@@ -786,7 +786,7 @@ def test_deepseek_unavailable_raises_before_report(monkeypatch) -> None:
         def __init__(self, **kwargs):
             pass
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             raise LLMUnavailable("stub network error")
 
     original = eval_agent.DeepSeekProvider
@@ -809,7 +809,7 @@ def test_deepseek_short_circuits_no_evidence_case(monkeypatch) -> None:
         def __init__(self, **kwargs):
             self.call_count = 0
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             self.call_count += 1
             return LLMResult(
                 text=json.dumps({
@@ -898,7 +898,7 @@ def test_deepseek_fallback_on_invalid_json_raises_and_no_report(monkeypatch) -> 
         def __init__(self, **kwargs) -> None:
             self.model = kwargs.get("model", "unknown")
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             return LLMResult(
                 text='{"garbage": true, "not_a_valid_decision": 1}',
                 prompt_tokens=10,
@@ -927,7 +927,7 @@ def test_cli_deepseek_fallback_no_report_written(monkeypatch, tmp_path: Path) ->
         def __init__(self, **kwargs) -> None:
             self.model = kwargs.get("model", "unknown")
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             return LLMResult(
                 text='{"garbage": true}',
                 prompt_tokens=10,
@@ -1129,7 +1129,7 @@ def test_stub_provider_raw_unsafe_is_gated_in_eval(monkeypatch, tmp_path: Path) 
         def __init__(self, **kwargs):
             self.model = kwargs.get("model", "stub")
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             return LLMResult(
                 text=json.dumps({
                     "decision": "AUTO_FIXED",

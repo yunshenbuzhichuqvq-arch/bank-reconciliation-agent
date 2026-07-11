@@ -332,7 +332,7 @@ def test_deepseek_stub_usage_sets_cost_and_trust(monkeypatch) -> None:
         def __init__(self, **kwargs):
             pass
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             payload = {
                 "agent": "extraction",
                 "standard_type": "REVERSAL",
@@ -382,7 +382,7 @@ def test_deepseek_stub_missing_usage_records_environment_gap(monkeypatch) -> Non
         def __init__(self, **kwargs):
             pass
 
-        def complete(self, messages, *, temperature=0.0, response_format="json_object"):
+        def complete(self, messages, *, temperature=0.0, response_format="json_object", response_validator=None):
             payload = {
                 "agent": "extraction",
                 "standard_type": "REVERSAL",

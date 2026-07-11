@@ -512,8 +512,9 @@ class UnsafeHighRiskProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text=(
                 '{"decision":"AUTO_FIXED","risk_level":"LOW","reason":"金额一致可自动平账",'
@@ -548,8 +549,9 @@ class InvalidDecisionLiteralProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text=(
                 '{"decision":"APPROVED_MATCH","risk_level":"LOW","reason":"模型建议自动平账",'

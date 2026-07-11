@@ -1,9 +1,12 @@
 import json
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from bank_reconciliation_agent.core.llm.provider import LLMProvider, get_llm_provider
-from bank_reconciliation_agent.core.logging import log
+from bank_reconciliation_agent.core.llm.structured import (
+    StructuredLLMError,
+    complete_structured,
+)
 from bank_reconciliation_agent.core.prompts import load_prompt
 
 
@@ -25,14 +28,13 @@ class TraceAgent:
         provider: LLMProvider | None = None,
         prompt_text: str | None = None,
         prompt_version: str | None = None,
-        max_retries: int = 1,
     ) -> None:
         loaded_prompt_text, loaded_prompt_version = load_prompt("trace")
         self.provider = provider or get_llm_provider()
         self.prompt_text = prompt_text or loaded_prompt_text
         self.prompt_version = prompt_version or loaded_prompt_version
-        self.max_retries = max_retries
         self.last_llm_result = None
+        self.last_llm_summary = None
 
     def trace(
         self,
@@ -63,30 +65,23 @@ class TraceAgent:
             },
         ]
 
-        last_error: Exception | None = None
-        for attempt in range(self.max_retries + 1):
-            log.info(
-                "agent_llm_call",
+        try:
+            completion = complete_structured(
+                self.provider,
+                messages,
+                schema=TraceResult,
                 agent_name="TraceAgent",
                 step="trace",
                 prompt_version=self.prompt_version,
-                attempt=attempt + 1,
             )
-            result = self.provider.complete(messages, temperature=0.0, response_format="json_object")
-            self.last_llm_result = result
-            try:
-                return TraceResult.model_validate(json.loads(result.text))
-            except (json.JSONDecodeError, ValidationError) as exc:
-                last_error = exc
-                log.warning(
-                    "agent_llm_invalid_output",
-                    agent_name="TraceAgent",
-                    step="trace",
-                    prompt_version=self.prompt_version,
-                    attempt=attempt + 1,
-                )
+        except StructuredLLMError as exc:
+            self.last_llm_result = exc.last_result
+            self.last_llm_summary = exc.summary
+            raise TraceAgentError("invalid LLM JSON for TraceAgent") from exc
 
-        raise TraceAgentError("invalid LLM JSON for TraceAgent") from last_error
+        self.last_llm_result = completion.last_result
+        self.last_llm_summary = completion.summary
+        return completion.value
 
 
 trace_agent = TraceAgent()
