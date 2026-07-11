@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -245,6 +246,8 @@ def _mock_transport_handler(
             )
 
         if "/status" in url:
+            if task_id_sse and task_id_sse in url:
+                return httpx.Response(200, json=_status_response(task_id_sse, "COMPLETED"))
             poll_count[0] += 1
             if poll_count[0] <= 2:
                 status = "RUNNING" if poll_count[0] == 1 else "QUEUED"
@@ -262,6 +265,8 @@ def _mock_transport_handler(
             return httpx.Response(200, json=_approve_response(1))
 
         if "/report" in url:
+            if task_id_sse and task_id_sse in url:
+                return httpx.Response(200, json=_report_response(task_id_sse))
             return httpx.Response(200, json=_report_response(task_id_async))
 
         return httpx.Response(404, json={"code": 404, "message": "not found"})
@@ -331,6 +336,8 @@ class TestAuthAndHeaders:
             if "/api/v1/reconcile/upload-async" in url:
                 return httpx.Response(200, json=_async_upload_response("tid-1"))
             if "/status" in url:
+                if "tsse-1" in url:
+                    return httpx.Response(200, json=_status_response("tsse-1", "COMPLETED"))
                 return httpx.Response(200, json=_status_response("tid-1", "UPLOADED"))
             if "/exceptions" in url:
                 return httpx.Response(200, json=_exceptions_response("tid-1", 1))
@@ -339,6 +346,8 @@ class TestAuthAndHeaders:
             if "/approve" in url:
                 return httpx.Response(200, json=_approve_response(1))
             if "/report" in url:
+                if "tsse-1" in url:
+                    return httpx.Response(200, json=_report_response("tsse-1"))
                 return httpx.Response(200, json=_report_response("tid-1"))
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response("tsse-1", "UPLOADED"))
@@ -383,14 +392,18 @@ class TestArqForceRequeue:
                 upload_calls.append(request)
                 return httpx.Response(200, json=_async_upload_response("tid-force"))
             if "/status" in url:
+                if "tsse-f" in url:
+                    return httpx.Response(200, json=_status_response("tsse-f", "COMPLETED"))
                 return httpx.Response(200, json=_status_response("tid-force", "UPLOADED"))
             if "/exceptions" in url:
-                return httpx.Response(200, json=_exceptions_response("tid-force", 0))
+                return httpx.Response(200, json=_exceptions_response("tid-force", 1))
             if "/review/pending" in url:
                 return httpx.Response(200, json=_pending_response("tid-force", 1, 1))
             if "/approve" in url:
                 return httpx.Response(200, json=_approve_response(1))
             if "/report" in url:
+                if "tsse-f" in url:
+                    return httpx.Response(200, json=_report_response("tsse-f"))
                 return httpx.Response(200, json=_report_response("tid-force"))
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response("tsse-f", "UPLOADED"))
@@ -562,7 +575,7 @@ class TestSSEPath:
             if "/status" in url:
                 return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
             if "/exceptions" in url:
-                return httpx.Response(200, json=_exceptions_response("tid-a", 0))
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
             if "/review/pending" in url:
                 return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
             if "/approve" in url:
@@ -606,7 +619,7 @@ class TestSSEPath:
             if "/status" in url:
                 return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
             if "/exceptions" in url:
-                return httpx.Response(200, json=_exceptions_response("tid-a", 0))
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
             if "/review/pending" in url:
                 return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
             if "/approve" in url:
@@ -649,6 +662,82 @@ class TestRedaction:
         assert "mysql+pymysql" not in text
         assert "demo_root_pw" not in text
 
+    def test_summary_redacts_dsn_userinfo(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise RuntimeError(
+                "db unavailable: mysql+pymysql://root:secret123@mysql:3306/AI_agent"
+            )
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        text = json.dumps(summary)
+        assert "secret123" not in text
+        assert "root" not in text
+        assert "mysql:3306" not in text
+
+    def test_summary_redacts_redis_dsn(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                raise RuntimeError("login failed: redis://redis:6379/0 connection refused")
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        text = json.dumps(summary)
+        assert "redis://" not in text
+
+    def test_summary_redacts_dynamic_password(self, tmp_path: Path) -> None:
+        old_pw = os.environ.get("DEMO_USER_PASSWORD")
+        os.environ["DEMO_USER_PASSWORD"] = "secret-dynamic-pw"
+        try:
+            def handler(request: httpx.Request) -> httpx.Response:
+                url = str(request.url)
+                if "/health" in url:
+                    return httpx.Response(200, json=_health_ok())
+                if "/api/v1/auth/login" in url:
+                    raise RuntimeError("auth: backend error")
+                return httpx.Response(404)
+
+            from scripts.smoke_demo import run_smoke
+            summary_file = tmp_path / "summary.json"
+            client = httpx.Client(transport=httpx.MockTransport(handler))
+            exit_code, summary = run_smoke(
+                base_url="http://test:8000",
+                summary_json=str(summary_file),
+                request_timeout=30,
+                task_timeout=60,
+                client=client,
+            )
+            assert exit_code != 0
+            text = json.dumps(summary)
+            assert "secret-dynamic-pw" not in text
+        finally:
+            if old_pw is not None:
+                os.environ["DEMO_USER_PASSWORD"] = old_pw
+            else:
+                os.environ.pop("DEMO_USER_PASSWORD", None)
+
 
 class TestSecondRun:
     def test_two_runs_both_use_force(self, tmp_path: Path) -> None:
@@ -666,14 +755,18 @@ class TestSecondRun:
                 upload_calls[0] += 1
                 return httpx.Response(200, json=_async_upload_response(f"tid-run{upload_calls[0]}"))
             if "/status" in url:
+                if "tsse-run" in url:
+                    return httpx.Response(200, json=_status_response(f"tsse-run{upload_calls[0]}", "COMPLETED"))
                 return httpx.Response(200, json=_status_response(f"tid-run{upload_calls[0]}", "UPLOADED"))
             if "/exceptions" in url:
-                return httpx.Response(200, json=_exceptions_response(f"tid-run{upload_calls[0]}", 0))
+                return httpx.Response(200, json=_exceptions_response(f"tid-run{upload_calls[0]}", 1))
             if "/review/pending" in url:
                 return httpx.Response(200, json=_pending_response(f"tid-run{upload_calls[0]}", 1, 1))
             if "/approve" in url:
                 return httpx.Response(200, json=_approve_response(1))
             if "/report" in url:
+                if "tsse-run" in url:
+                    return httpx.Response(200, json=_report_response(f"tsse-run{upload_calls[0]}"))
                 return httpx.Response(200, json=_report_response(f"tid-run{upload_calls[0]}"))
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response(f"tsse-run{upload_calls[0]}", "UPLOADED"))
@@ -720,7 +813,7 @@ class TestTimeout:
             if "/status" in url:
                 return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
             if "/exceptions" in url:
-                return httpx.Response(200, json=_exceptions_response("tid-a", 0))
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
             if "/review/pending" in url:
                 return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
             if "/approve" in url:
@@ -747,6 +840,356 @@ class TestTimeout:
             summary_json=str(summary_file),
             request_timeout=30,
             task_timeout=1,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "sse_terminal"
+
+
+# ---------------------------------------------------------------------------
+# TASK-27.5 Response correlation tests
+# ---------------------------------------------------------------------------
+
+
+class TestExceptionValidation:
+    def test_exceptions_total_zero_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(
+                    200, json=_exceptions_response("tid-a", 0)
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "exceptions"
+
+    def test_exceptions_task_id_mismatch_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-real"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-real", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-wrong", 1))
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "exceptions"
+
+    def test_exceptions_items_empty_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-e"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-e", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(
+                    200,
+                    json={
+                        "code": 200,
+                        "data": {"task_id": "tid-e", "total": 1, "items": []},
+                    },
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "exceptions"
+
+
+class TestAsyncStatusCorrelation:
+    def test_async_status_task_id_mismatch_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-wrong", "UPLOADED"))
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "queue_completion"
+
+
+class TestReportCorrelation:
+    def test_report_task_id_mismatch_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                return httpx.Response(200, json=_report_response("tid-wrong"))
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "report"
+
+
+class TestSSEStartLive:
+    def test_start_live_data_missing_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                return httpx.Response(200, json=_report_response("tid-a"))
+            if "/upload" in url:
+                return httpx.Response(200, json=_async_upload_response("tsse-s", "UPLOADED"))
+            if "/start-live" in url:
+                return httpx.Response(200, json={"code": 200, "message": "ok"})
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "sse_terminal"
+
+
+class TestSSETaskIdCorrelation:
+    def test_sse_task_done_task_id_mismatch_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                return httpx.Response(200, json=_report_response("tid-a"))
+            if "/upload" in url:
+                return httpx.Response(200, json=_async_upload_response("tsse-real", "UPLOADED"))
+            if "/start-live" in url:
+                return httpx.Response(
+                    200,
+                    json={"code": 200, "data": {"task_id": "tsse-real", "status": "RUNNING"}},
+                )
+            if "/events" in url:
+                return httpx.Response(
+                    200,
+                    content=_build_sse_frame("TASK_DONE", "tsse-wrong", "COMPLETED").encode(),
+                    headers={"content-type": "text/event-stream"},
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "sse_terminal"
+
+    def test_sse_final_status_task_id_mismatch_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                if "tsse-final" in url:
+                    return httpx.Response(200, json=_status_response("tsse-wrong", "COMPLETED"))
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                return httpx.Response(200, json=_report_response("tid-a"))
+            if "/upload" in url:
+                return httpx.Response(200, json=_async_upload_response("tsse-final", "UPLOADED"))
+            if "/start-live" in url:
+                return httpx.Response(
+                    200,
+                    json={"code": 200, "data": {"task_id": "tsse-final", "status": "RUNNING"}},
+                )
+            if "/events" in url:
+                return httpx.Response(
+                    200,
+                    content=_build_sse_frame("TASK_DONE", "tsse-final", "COMPLETED").encode(),
+                    headers={"content-type": "text/event-stream"},
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "sse_terminal"
+
+    def test_sse_final_status_not_completed_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                if "tsse-nc" in url:
+                    return httpx.Response(200, json=_status_response("tsse-nc", "RUNNING"))
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                return httpx.Response(200, json=_report_response("tid-a"))
+            if "/upload" in url:
+                return httpx.Response(200, json=_async_upload_response("tsse-nc", "UPLOADED"))
+            if "/start-live" in url:
+                return httpx.Response(
+                    200,
+                    json={"code": 200, "data": {"task_id": "tsse-nc", "status": "RUNNING"}},
+                )
+            if "/events" in url:
+                return httpx.Response(
+                    200,
+                    content=_build_sse_frame("TASK_DONE", "tsse-nc", "COMPLETED").encode(),
+                    headers={"content-type": "text/event-stream"},
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
             client=client,
         )
         assert exit_code != 0

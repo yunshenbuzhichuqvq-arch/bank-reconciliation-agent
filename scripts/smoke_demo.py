@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -78,9 +79,20 @@ def _build_summary() -> dict[str, Any]:
     }
 
 
+_REDACT_DSN_PATTERN = re.compile(
+    r"((?:mysql\+pymysql|redis)://)([^:@]+):[^@\s]+(@[^\s]+)"
+)
+_REDACT_FULL_DSN = re.compile(r"(mysql\+pymysql|redis)://\S+")
+
+
 def _redact_text(text: str) -> str:
+    text = _REDACT_DSN_PATTERN.sub(r"\1[REDACTED]:[REDACTED]\3", text)
+    text = _REDACT_FULL_DSN.sub(r"\1://[REDACTED]", text)
     for pattern in _SENSITIVE_PATTERNS:
         text = text.replace(pattern, "[REDACTED]")
+    password = os.environ.get("DEMO_USER_PASSWORD", DEFAULT_DEMO_PASSWORD)
+    if password:
+        text = text.replace(password, "[REDACTED]")
     return text
 
 
@@ -149,18 +161,25 @@ def _async_upload(
 
 
 def _poll_until_terminal(
-    base_url: str, client: httpx.Client, token: str, task_id: str, timeout: int
+    base_url: str, client: httpx.Client, token: str, task_id: str,
+    request_timeout: int, task_timeout: int,
 ) -> str:
     start = time.monotonic()
-    while time.monotonic() - start < timeout:
+    while time.monotonic() - start < task_timeout:
         resp = client.get(
             f"{base_url}/api/v1/reconcile/{task_id}/status",
             headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
+            timeout=request_timeout,
         )
         if resp.status_code != 200:
             raise RuntimeError(f"queue_completion: HTTP {resp.status_code}")
         data = _extract_data(resp, "queue_completion")
+        resp_task_id = data.get("task_id", "")
+        if resp_task_id != task_id:
+            raise RuntimeError(
+                f"queue_completion: status task_id mismatch "
+                f"(expected {task_id}, got {resp_task_id})"
+            )
         status = data.get("status", "")
         if status in ("UPLOADED", "COMPLETED"):
             return status
@@ -169,12 +188,12 @@ def _poll_until_terminal(
         if status not in ("QUEUED", "RUNNING"):
             raise RuntimeError(f"queue_completion: unknown status {status}")
         time.sleep(POLL_INTERVAL_SECONDS)
-    raise RuntimeError(f"queue_completion: timeout after {timeout}s")
+    raise RuntimeError(f"queue_completion: timeout after {task_timeout}s")
 
 
 def _check_exceptions(
     base_url: str, client: httpx.Client, token: str, task_id: str, timeout: int
-) -> int:
+) -> None:
     resp = client.get(
         f"{base_url}/api/v1/reconcile/{task_id}/exceptions",
         headers={"Authorization": f"Bearer {token}"},
@@ -183,8 +202,17 @@ def _check_exceptions(
     if resp.status_code != 200:
         raise RuntimeError(f"exceptions: HTTP {resp.status_code}")
     data = _extract_data(resp, "exceptions")
+    resp_task_id = data.get("task_id", "")
+    if resp_task_id != task_id:
+        raise RuntimeError(
+            f"exceptions: task_id mismatch (expected {task_id}, got {resp_task_id})"
+        )
     total = data.get("total", 0)
-    return total
+    if total <= 0:
+        raise RuntimeError(f"exceptions: total={total}, expected > 0")
+    items = data.get("items", [])
+    if not items:
+        raise RuntimeError("exceptions: items list is empty")
 
 
 def _get_pending_review(
@@ -239,6 +267,11 @@ def _get_report(
     if resp.status_code != 200:
         raise RuntimeError(f"report: HTTP {resp.status_code}")
     data = _extract_data(resp, "report")
+    resp_task_id = data.get("task_id", "")
+    if resp_task_id != task_id:
+        raise RuntimeError(
+            f"report: task_id mismatch (expected {task_id}, got {resp_task_id})"
+        )
     return data
 
 
@@ -279,11 +312,17 @@ def _sse_terminal(
     )
     if start_live_resp.status_code != 200:
         raise RuntimeError(f"sse_terminal: start-live HTTP {start_live_resp.status_code}")
+    start_data = _extract_data(start_live_resp, "sse_terminal")
+    sl_task_id = start_data.get("task_id", "")
+    if sl_task_id != task_id:
+        raise RuntimeError(
+            f"sse_terminal: start-live task_id mismatch "
+            f"(expected {task_id}, got {sl_task_id})"
+        )
 
     events_url = f"{base_url}/api/v1/reconcile/{task_id}/events"
     sse_start = time.monotonic()
     got_task_done = False
-    sse_task_id = task_id
     final_status = None
 
     with client.stream(
@@ -295,9 +334,12 @@ def _sse_terminal(
         if response.status_code != 200:
             raise RuntimeError(f"sse_terminal: events HTTP {response.status_code}")
         for line in response.iter_lines():
-            if time.monotonic() - sse_start > task_timeout:
+            dt = time.monotonic() - sse_start
+            if dt > task_timeout:
                 raise RuntimeError("sse_terminal: timeout")
             if not line.startswith("data:"):
+                if dt > task_timeout * 1.5:
+                    raise RuntimeError("sse_terminal: idle timeout (no data)")
                 continue
             data_part = line[len("data:"):].strip()
             if not data_part:
@@ -307,7 +349,12 @@ def _sse_terminal(
             except json.JSONDecodeError:
                 raise RuntimeError("sse_terminal: invalid SSE data frame")
             event_type = frame.get("event_type", "")
-            sse_task_id = frame.get("task_id", sse_task_id)
+            frame_task_id = frame.get("task_id", "")
+            if frame_task_id and frame_task_id != task_id:
+                raise RuntimeError(
+                    f"sse_terminal: SSE frame task_id mismatch "
+                    f"(expected {task_id}, got {frame_task_id})"
+                )
             if event_type == "TASK_DONE":
                 payload = frame.get("payload", {})
                 final_status = payload.get("status", "")
@@ -319,23 +366,35 @@ def _sse_terminal(
     if not got_task_done:
         raise RuntimeError("sse_terminal: stream ended without TASK_DONE")
 
+    _verify_sse_status_and_report(
+        base_url, client, token, task_id, request_timeout,
+    )
+
+
+def _verify_sse_status_and_report(
+    base_url: str, client: httpx.Client, token: str, task_id: str, timeout: int,
+) -> None:
     status_resp = client.get(
-        f"{base_url}/api/v1/reconcile/{sse_task_id}/status",
+        f"{base_url}/api/v1/reconcile/{task_id}/status",
         headers={"Authorization": f"Bearer {token}"},
-        timeout=request_timeout,
+        timeout=timeout,
     )
     if status_resp.status_code != 200:
         raise RuntimeError(f"sse_terminal: status HTTP {status_resp.status_code}")
-    _extract_data(status_resp, "sse_terminal")
+    status_data = _extract_data(status_resp, "sse_terminal")
+    st_task_id = status_data.get("task_id", "")
+    if st_task_id != task_id:
+        raise RuntimeError(
+            f"sse_terminal: status task_id mismatch "
+            f"(expected {task_id}, got {st_task_id})"
+        )
+    st_status = status_data.get("status", "")
+    if st_status != "COMPLETED":
+        raise RuntimeError(
+            f"sse_terminal: expected status COMPLETED, got {st_status}"
+        )
 
-    report_resp = client.get(
-        f"{base_url}/api/v1/reconcile/{sse_task_id}/report",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=request_timeout,
-    )
-    if report_resp.status_code != 200:
-        raise RuntimeError(f"sse_terminal: report HTTP {report_resp.status_code}")
-    _extract_data(report_resp, "sse_terminal")
+    _get_report(base_url, client, token, task_id, timeout)
 
 
 def _add_step(
@@ -397,7 +456,7 @@ def run_smoke(
                 async_task_id, _ = _async_upload(base_url, client, token, request_timeout)
                 summary["task_ids"]["async"] = async_task_id
             elif name == "queue_completion":
-                _poll_until_terminal(base_url, client, token, async_task_id, task_timeout)
+                _poll_until_terminal(base_url, client, token, async_task_id, request_timeout, task_timeout)
             elif name == "exceptions":
                 _check_exceptions(base_url, client, token, async_task_id, request_timeout)
             elif name == "review":
@@ -410,20 +469,6 @@ def run_smoke(
                 summary["task_ids"]["sse"] = sse_task_id
             elif name == "sse_terminal":
                 _sse_terminal(base_url, client, token, sse_task_id, request_timeout, task_timeout)
-                status_resp = client.get(
-                    f"{base_url}/api/v1/reconcile/{sse_task_id}/status",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=request_timeout,
-                )
-                if status_resp.status_code != 200:
-                    raise RuntimeError(f"sse_terminal: status HTTP {status_resp.status_code}")
-                report_resp = client.get(
-                    f"{base_url}/api/v1/reconcile/{sse_task_id}/report",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=request_timeout,
-                )
-                if report_resp.status_code != 200:
-                    raise RuntimeError(f"sse_terminal: report HTTP {report_resp.status_code}")
             else:
                 return
             duration_ms = (time.monotonic() - t0) * 1000
