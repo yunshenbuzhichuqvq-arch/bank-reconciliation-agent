@@ -33,6 +33,7 @@ frontend
 
 *.md
 !README.md
+!prompts/*.md
 
 Dockerfile
 .dockerignore

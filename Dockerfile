@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev --no-extra embedding
 
 COPY scripts/ ./scripts/
 COPY rules/ ./rules/
+COPY prompts/ ./prompts/
 COPY data/rag/ ./data/rag/
 COPY mock_data/ ./mock_data/
 

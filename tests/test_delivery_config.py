@@ -226,6 +226,20 @@ def test_dockerignore_exists() -> None:
     assert DOCKERIGNORE_PATH.exists(), f".dockerignore not found at {DOCKERIGNORE_PATH}"
 
 
+def test_dockerfile_copies_prompts() -> None:
+    content = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "COPY prompts/ ./prompts/" in content, (
+        "Dockerfile must COPY prompts/ ./prompts/"
+    )
+
+
+def test_dockerignore_has_prompts_md() -> None:
+    content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
+    assert "!prompts/*.md" in content, (
+        ".dockerignore must re-include prompts/*.md"
+    )
+
+
 def test_dockerignore_excludes_env_and_runtime() -> None:
     content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
     assert ".env" in content, ".dockerignore must exclude .env"
