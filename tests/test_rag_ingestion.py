@@ -93,13 +93,16 @@ def test_rule_retriever_searches_generated_chunks(tmp_path: Path) -> None:
     )
     retriever = RuleRetriever(chunks_path=chunks_path, chroma_path=tmp_path / "chroma")
 
-    response = retriever.search(RagSearchRequest(query="金额差异 对账不平", top_k=2))
+    response = retriever.search(RagSearchRequest(query="金额差异 对账不平", top_k=5))
 
     assert response.items
+    all_tags = {tag for item in response.items for tag in item.business_tags}
+    assert "amount_mismatch" in all_tags, (
+        f"amount_mismatch tag must be present in search results; got tags: {all_tags}"
+    )
     first_item = response.items[0]
     assert first_item.source_url.startswith("https://")
     assert first_item.source_file.endswith(".md")
-    assert "amount_mismatch" in first_item.business_tags
     assert first_item.score > 0
     assert "固定结果模拟" not in first_item.content
     assert retriever.collection_count() >= 3

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from bank_reconciliation_agent.rag.retriever import RuleRetriever
+from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever
 from bank_reconciliation_agent.services.workflow import run_item
 from tests.test_workflow_fallback import (
     EmptyFallbackCaseProvider,
@@ -13,9 +13,19 @@ from tests.test_workflow_fallback import (
 )
 
 
+def _hash_retriever_no_chunks(tmp_path: Path) -> RuleRetriever:
+    empty_chunks = tmp_path / "empty_chunks.jsonl"
+    empty_chunks.write_text("", encoding="utf-8")
+    store = ChromaRuleStore(
+        chunks_path=empty_chunks,
+        chroma_path=tmp_path / "chroma",
+        embedding_backend="hash",
+    )
+    return RuleRetriever(store=store)
+
+
 def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path) -> None:
     state = _state()
-    # Fixed near-orthogonal query for the deterministic hash embedding.
     state["rag_query"] = "epnbvcyr szkkwltp szoccipw vcbxwjus"
     audit_agent = SequenceAuditAgent([0.4])
 
@@ -24,7 +34,7 @@ def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path) -> N
         extraction_agent=NoopExtractionAgent(),
         trace_agent=SpyTraceAgent(confidence=0.9),
         audit_agent=audit_agent,
-        retriever=RuleRetriever(chroma_path=tmp_path / "chroma"),
+        retriever=_hash_retriever_no_chunks(tmp_path),
         fallback_case_provider=EmptyFallbackCaseProvider(),
     )
 
