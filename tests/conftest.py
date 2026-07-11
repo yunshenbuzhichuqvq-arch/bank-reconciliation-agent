@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -7,9 +8,10 @@ from arq.connections import ArqRedis
 from fakeredis.aioredis import FakeRedis
 
 
-TEST_DB_PATH = Path("/private/tmp/bank_reconciliation_agent_tests.sqlite")
-TEST_MEMORY_DB_PATH = Path("/private/tmp/bank_reconciliation_agent_memory_tests.sqlite")
-TEST_CHECKPOINT_DB_PATH = Path("/private/tmp/bank_reconciliation_agent_checkpoint_tests.sqlite")
+_TMP = Path(tempfile.gettempdir())
+TEST_DB_PATH = _TMP / "bank_reconciliation_agent_tests.sqlite"
+TEST_MEMORY_DB_PATH = _TMP / "bank_reconciliation_agent_memory_tests.sqlite"
+TEST_CHECKPOINT_DB_PATH = _TMP / "bank_reconciliation_agent_checkpoint_tests.sqlite"
 BGE_SMALL_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 
 if TEST_DB_PATH.exists():

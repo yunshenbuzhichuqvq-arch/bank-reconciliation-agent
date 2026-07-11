@@ -379,6 +379,16 @@ def test_ci_runner_versions(ci_workflow_data: dict) -> None:
         assert "ubuntu-24.04" in runner, f"{job_id} must run on ubuntu-24.04"
 
 
+def test_ci_python_version(ci_workflow_data: dict) -> None:
+    python_jobs = ("backend-quality", "deterministic-eval", "delivery-smoke")
+    for job_id in python_jobs:
+        steps_text = yaml.dump(ci_workflow_data["jobs"][job_id].get("steps", []))
+        assert "setup-python@v5" in steps_text, f"{job_id} must use setup-python@v5"
+        assert 'python-version: "3.11"' in steps_text or "python-version: '3.11'" in steps_text, (
+            f"{job_id} must pin python-version: 3.11"
+        )
+
+
 def test_backend_quality_uses_frozen_uv(ci_workflow_data: dict) -> None:
     backend = ci_workflow_data["jobs"]["backend-quality"]
     steps_text = yaml.dump(backend.get("steps", []))
