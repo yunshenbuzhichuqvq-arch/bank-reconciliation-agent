@@ -9,7 +9,7 @@ from bank_reconciliation_agent.services.queue import QueueService
 from bank_reconciliation_agent.services.rag_log import RagLogService
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.review import review_service
-from bank_reconciliation_agent.services.task import TaskService
+from bank_reconciliation_agent.services.task import TaskService, reconciliation_task_table
 from bank_reconciliation_agent.services.transactions import TransactionService
 
 
@@ -320,3 +320,59 @@ def test_task_25_1_mark_attempt_succeeded_is_user_scoped() -> None:
     t2 = ts.get(user_id="u2", task_id="TASK_CAS_ISO")
     assert t2 is not None
     assert t2.retry_recovered is False
+
+
+def test_arq_recovery_snapshot_is_user_scoped() -> None:
+    from bank_reconciliation_agent.db.session import get_engine
+    from bank_reconciliation_agent.services.metrics import MetricsService
+    from sqlalchemy import delete, insert
+
+    ts = TaskService()
+    ts._ensure_initialized()
+
+    with get_engine().begin() as conn:
+        conn.execute(
+            delete(reconciliation_task_table).where(
+                reconciliation_task_table.c.user_id.in_(["u1", "u2"]),
+            )
+        )
+
+    with get_engine().begin() as conn:
+        conn.execute(
+            insert(reconciliation_task_table).values(
+                user_id="u1", task_id="T_SNAP_U1",
+                scenario_type="BANK_ENTERPRISE",
+                task_name="snap test",
+                status="FAILED",
+                total_bank_rows=0, total_clear_rows=0,
+                auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+                ai_processed_rows=0, fallback_l2_rows=0, fallback_l3_rows=0,
+                total_llm_tokens=0, total_llm_cost=Decimal("0"),
+                job_attempt=3, retry_exhausted=True, force_requeue_count=2,
+            )
+        )
+        conn.execute(
+            insert(reconciliation_task_table).values(
+                user_id="u2", task_id="T_SNAP_U2",
+                scenario_type="BANK_ENTERPRISE",
+                task_name="snap test",
+                status="COMPLETED",
+                total_bank_rows=0, total_clear_rows=0,
+                auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+                ai_processed_rows=0, fallback_l2_rows=0, fallback_l3_rows=0,
+                total_llm_tokens=0, total_llm_cost=Decimal("0"),
+                job_attempt=4, retry_exhausted=True, retry_recovered=False,
+                force_requeue_count=5,
+            )
+        )
+
+    ms = MetricsService()
+    snap_u1 = ms.get_arq_recovery_snapshot(user_id="u1")
+    assert snap_u1["retry_exhausted_count"] == 1
+    assert snap_u1["force_requeue_count"] == 2
+    assert snap_u1["retry_recovered_count"] == 0
+
+    snap_u2 = ms.get_arq_recovery_snapshot(user_id="u2")
+    assert snap_u2["retry_exhausted_count"] == 1
+    assert snap_u2["force_requeue_count"] == 5
+    assert snap_u2["retry_recovered_count"] == 0

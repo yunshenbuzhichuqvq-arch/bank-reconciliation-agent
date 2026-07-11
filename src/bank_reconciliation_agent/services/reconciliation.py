@@ -180,6 +180,10 @@ class ReconciliationService:
         bank_path.write_bytes(bank_content)
         clear_path.write_bytes(clear_content)
 
+        new_force_count = 0
+        if existing_task is not None and force:
+            new_force_count = existing_task.force_requeue_count + 1
+
         task_service.replace_task(
             user_id=user_id,
             task_id=task_id,
@@ -190,7 +194,17 @@ class ReconciliationService:
             pending_ai_rows=0,
             pending_human_rows=0,
             status="QUEUED",
+            force_requeue_count=new_force_count,
         )
+        if new_force_count > 0:
+            log.info(
+                "force_requeued",
+                user_id=user_id,
+                task_id=task_id,
+                previous_status=existing_task.status,
+                force_requeue_count=new_force_count,
+                outcome="force_requeued",
+            )
         await enqueue_reconciliation(
             task_id,
             user_id,
