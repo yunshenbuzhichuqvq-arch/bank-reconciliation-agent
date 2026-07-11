@@ -272,7 +272,17 @@ def run_item(
             }
             if exception_branch == "BC-R003":
                 trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
-            trace_result = trace_agent.trace(**trace_kwargs)
+            try:
+                trace_result = trace_agent.trace(**trace_kwargs)
+            except TraceAgentError:
+                return _fail_closed_item(
+                    state,
+                    flow_id=flow_id,
+                    agent=trace_agent,
+                    agent_name="TraceAgent",
+                    step="trace",
+                    emitter=emitter,
+                )
             trace_payload = _model_or_mapping_dump(trace_result)
             _append_agent_log(state, {
                 "agent_name": "TraceAgent",

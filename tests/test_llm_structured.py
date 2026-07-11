@@ -167,6 +167,23 @@ def test_cache_hit_contributes_zero_new_tokens() -> None:
     assert completion.summary.cached_calls == 1
 
 
+def test_cache_hit_has_zero_transport_attempts() -> None:
+    provider = SequenceProvider([_result(_VALID, cached=True)])
+
+    completion = _run(provider)
+
+    assert completion.summary.cached_calls == 1
+    assert completion.summary.transport_attempts == 0
+
+
+def test_non_cache_empty_attempts_counts_one_transport() -> None:
+    provider = SequenceProvider([_result(_VALID)])
+
+    completion = _run(provider)
+
+    assert completion.summary.transport_attempts == 1
+
+
 def test_transport_failure_raises_structured_error_with_summary() -> None:
     provider = SequenceProvider([
         LLMCallError(

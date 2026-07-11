@@ -2,6 +2,7 @@ from typing import Literal
 
 import pytest
 from pydantic import ValidationError
+from structlog.testing import capture_logs
 
 from bank_reconciliation_agent.core.config import Settings, settings
 from bank_reconciliation_agent.core.llm.provider import (
@@ -388,6 +389,47 @@ def test_llm_breaker_half_open_failure_reopens() -> None:
         provider.complete([{"role": "user", "content": "x"}])
 
     assert breaker.state == "OPEN"
+
+
+def test_llm_attempt_event_contains_required_fields() -> None:
+    breaker = CircuitBreaker(fail_threshold=5, open_seconds=30, time_fn=lambda: 0.0)
+    inner = BreakerInner([_error("timeout", True), _result()])
+    breaking = CircuitBreakingLLMProvider(inner, breaker, time_fn=lambda: 0.0)
+    retrying = RetryingLLMProvider(
+        breaking,
+        max_attempts=3,
+        backoff_base_seconds=0.5,
+        backoff_max_seconds=2.0,
+        sleep_fn=lambda _seconds: None,
+        time_fn=lambda: 0.0,
+        provider_name="deepseek",
+    )
+
+    with capture_logs() as logs:
+        retrying.complete([{"role": "user", "content": "secret-prompt"}])
+
+    events = [entry for entry in logs if entry["event"] == "llm_attempt"]
+    assert len(events) == 2
+    for entry in events:
+        assert entry["provider"] == "deepseek"
+        assert entry["model"] == "breaker-inner"
+        assert "retryable" in entry
+        assert "physical_attempt" in entry
+        assert "outcome" in entry
+        assert "duration_ms" in entry
+        assert "backoff_seconds" in entry
+        assert "prompt_tokens" in entry
+        assert "completion_tokens" in entry
+        assert "breaker_state_before" in entry
+        assert "breaker_state_after" in entry
+        assert "messages" not in entry
+        assert "api_key" not in entry
+        assert "secret-prompt" not in str(entry)
+
+    by_outcome = {entry["outcome"]: entry for entry in events}
+    assert by_outcome["failure"]["retryable"] is True
+    assert by_outcome["failure"]["failure_type"] == "timeout"
+    assert by_outcome["success"]["retryable"] is False
 
 
 # --- Step 8: config validation and factory nesting --------------------------

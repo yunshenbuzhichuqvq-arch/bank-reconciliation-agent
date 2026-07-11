@@ -429,6 +429,7 @@ def get_llm_provider() -> LLMProvider:
             max_attempts=settings.llm_max_attempts,
             backoff_base_seconds=settings.llm_backoff_base_seconds,
             backoff_max_seconds=settings.llm_backoff_max_seconds,
+            provider_name=settings.llm_provider,
         )
 
     if not settings.enable_llm_cache:

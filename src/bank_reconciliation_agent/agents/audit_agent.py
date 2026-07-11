@@ -72,7 +72,7 @@ class AuditDecision(BaseModel):
 
 
 class LLMAuditDecision(BaseModel):
-    decision: str
+    decision: Literal["AUTO_FIXED", "PENDING_HUMAN", "UNRESOLVED"]
     risk_level: str
     reason: str
     ai_suggestion: str
@@ -204,6 +204,8 @@ class AuditAgent:
         match_candidate_context: dict[str, object] | None = None,
     ) -> AuditDecision:
         """LLM audit path; missing evidence still short-circuits to manual review."""
+        self.last_llm_result = None
+        self.last_llm_summary = None
         if not evidence:
             return self.decide(
                 flow_id=flow_id,

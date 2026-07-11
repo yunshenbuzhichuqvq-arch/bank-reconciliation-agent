@@ -34,6 +34,15 @@ __all__ = [
 
 
 _BREAKER_FAILURE_TYPES: frozenset[str] = frozenset({"timeout", "provider_5xx"})
+_RETRYABLE_FAILURE_TYPES: frozenset[str] = frozenset(
+    {"timeout", "rate_limited", "provider_5xx"}
+)
+
+
+def _attempt_retryable(record: LLMAttemptRecord) -> bool:
+    if record.outcome != "failure":
+        return False
+    return record.failure_type in _RETRYABLE_FAILURE_TYPES
 
 _llm_breaker: CircuitBreaker | None = None
 
@@ -153,9 +162,11 @@ class RetryingLLMProvider:
         backoff_max_seconds: float,
         sleep_fn: Callable[[float], None] = time.sleep,
         time_fn: Callable[[], float] = time.monotonic,
+        provider_name: str = "llm",
     ) -> None:
         self.inner = inner
         self.model = getattr(inner, "model", "")
+        self.provider_name = provider_name
         self.max_attempts = max_attempts
         self.backoff_base_seconds = backoff_base_seconds
         self.backoff_max_seconds = backoff_max_seconds
@@ -247,9 +258,11 @@ class RetryingLLMProvider:
                 "llm_attempt",
                 logical_call_id=logical_call_id,
                 physical_attempt=record.physical_attempt,
-                provider=self.model,
+                provider=self.provider_name,
+                model=self.model,
                 outcome=record.outcome,
                 failure_type=record.failure_type,
+                retryable=_attempt_retryable(record),
                 duration_ms=record.duration_ms,
                 backoff_seconds=record.backoff_seconds,
                 prompt_tokens=record.prompt_tokens,

@@ -74,12 +74,12 @@ class _Usage:
 
     def record_result(self, result: LLMResult) -> None:
         self.logical_calls += 1
-        self.transport_attempts += max(1, len(result.attempts))
         if result.cached:
             self.cached_calls += 1
-        else:
-            self.prompt_tokens += result.prompt_tokens
-            self.completion_tokens += result.completion_tokens
+            return
+        self.transport_attempts += max(1, len(result.attempts))
+        self.prompt_tokens += result.prompt_tokens
+        self.completion_tokens += result.completion_tokens
 
     def record_transport_failure(self, exc: BaseException) -> None:
         attempts = getattr(exc, "attempts", None) or []
