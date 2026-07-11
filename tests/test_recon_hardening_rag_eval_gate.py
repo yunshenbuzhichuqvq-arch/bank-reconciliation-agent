@@ -16,7 +16,11 @@ from tests.test_workflow_fallback import (
 )
 
 
-def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path) -> None:
+def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.core.config.settings.rag_dense_min_score", 0.5
+    )
+
     canonical_store = ChromaRuleStore(
         embedding_backend="hash", chroma_path=tmp_path / "chroma_canonical",
     )
@@ -35,7 +39,7 @@ def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path) -> N
         extraction_agent=NoopExtractionAgent(),
         trace_agent=SpyTraceAgent(confidence=0.9),
         audit_agent=audit_agent,
-        retriever=StaticRetriever([]),
+        retriever=retriever,
         fallback_case_provider=EmptyFallbackCaseProvider(),
     )
 

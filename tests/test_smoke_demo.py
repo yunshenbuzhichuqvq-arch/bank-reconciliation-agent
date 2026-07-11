@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import httpx
@@ -1273,8 +1274,18 @@ class TestTokenRedaction:
 
 
 class TestPollingBudget:
-    def test_polling_respects_remaining_budget(self, tmp_path: Path) -> None:
+    def test_polling_respects_remaining_budget(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
         times_checked = [0]
+        records: list[tuple[float, float]] = []
+        clock = [0.0]
+
+        def fake_monotonic():
+            return clock[0]
+
+        monkeypatch.setattr("scripts.smoke_demo.time.monotonic", fake_monotonic)
+        monkeypatch.setattr("scripts.smoke_demo.time.sleep", lambda s: None)
 
         def handler(request: httpx.Request) -> httpx.Response:
             url = str(request.url)
@@ -1286,6 +1297,11 @@ class TestPollingBudget:
                 return httpx.Response(200, json=_async_upload_response("tid-b"))
             if "/status" in url:
                 times_checked[0] += 1
+                elapsed = clock[0]
+                ext = request.extensions.get("timeout", {})
+                timeout_val = float(ext.get("read", 0)) if isinstance(ext, dict) else 0
+                records.append((elapsed, timeout_val))
+                clock[0] += 1.0
                 return httpx.Response(200, json=_status_response("tid-b", "QUEUED"))
             return httpx.Response(404)
 
@@ -1301,4 +1317,155 @@ class TestPollingBudget:
         )
         assert exit_code != 0
         assert summary["failure_step"] == "queue_completion"
-        assert times_checked[0] <= 2, "should not poll more than task_timeout/POLL_INTERVAL allows"
+        assert len(records) >= 1, "must have at least one recorded poll"
+        task_timeout = 2
+        for elapsed, timeout_val in records:
+            assert timeout_val > 0, (
+                f"timeout must be positive at elapsed={elapsed:.1f}"
+            )
+            assert timeout_val <= task_timeout - elapsed + 0.001, (
+                f"timeout {timeout_val:.2f} must not exceed remaining budget "
+                f"({task_timeout - elapsed:.2f}) at elapsed={elapsed:.1f}"
+            )
+
+
+class TestSilentSSEDeadline:
+    def test_silent_sse_times_out_on_deadline(
+        self, tmp_path: Path,
+    ) -> None:
+        import socket as _sock
+        import threading
+
+        host = "127.0.0.1"
+        server_sock = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        server_sock.bind((host, 0))
+        port = server_sock.getsockname()[1]
+        server_sock.listen(1)
+
+        serve_done_event = threading.Event()
+
+        def _serve():
+            conn, _addr = server_sock.accept()
+            try:
+                conn.recv(8192)
+                headers = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: text/event-stream\r\n"
+                    "Transfer-Encoding: chunked\r\n"
+                    "\r\n"
+                ).encode()
+                conn.sendall(headers)
+                conn.sendall(b'7\r\n:ping\r\n\r\n')
+                serve_done_event.wait(timeout=8)
+            finally:
+                conn.close()
+                serve_done_event.set()
+
+        t = threading.Thread(target=_serve, daemon=True)
+        t.start()
+
+        from scripts.smoke_demo import run_smoke
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                return httpx.Response(200, json=_report_response("tid-a"))
+            if "/upload" in url:
+                return httpx.Response(200, json=_async_upload_response("tsse-silent", "UPLOADED"))
+            if "/start-live" in url:
+                return httpx.Response(
+                    200,
+                    json={
+                        "code": 200,
+                        "data": {"task_id": "tsse-silent", "status": "AI_RUNNING"},
+                    },
+                )
+            return httpx.Response(404)
+
+        class _SSEHybridTransport(httpx.BaseTransport):
+            def handle_request(self, request):
+                url = str(request.url)
+                if "/events" in url:
+                    timeout_ext = request.extensions.get("timeout", {})
+                    read_timeout = (
+                        float(timeout_ext.get("read"))
+                        if isinstance(timeout_ext, dict) and timeout_ext.get("read") is not None
+                        else 5.0
+                    )
+                    sock = _sock.create_connection((host, port), timeout=3)
+                    raw_req = (
+                        f"GET /events HTTP/1.1\r\n"
+                        f"Host: {host}:{port}\r\n"
+                        f"Accept: */*\r\n"
+                        f"Connection: close\r\n"
+                        f"\r\n"
+                    )
+                    sock.sendall(raw_req.encode())
+
+                    def _body_iterator():
+                        buf = b""
+                        while b"\r\n\r\n" not in buf:
+                            buf += sock.recv(4096)
+                        header_end = buf.index(b"\r\n\r\n") + 4
+                        body_prefix = buf[header_end:]
+                        if body_prefix:
+                            yield body_prefix
+                        sock.settimeout(read_timeout)
+                        try:
+                            while True:
+                                try:
+                                    chunk = sock.recv(65536)
+                                    if not chunk:
+                                        break
+                                    yield chunk
+                                except (TimeoutError, OSError):
+                                    yield b""  # trigger ReadTimeout on client side
+                                    break
+                        finally:
+                            sock.close()
+
+                    return httpx.Response(
+                        200,
+                        content=_body_iterator(),
+                        headers={"content-type": "text/event-stream"},
+                    )
+
+                return httpx.MockTransport(handler).handle_request(request)
+
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=_SSEHybridTransport())
+        client.timeout = httpx.Timeout(30.0)
+        t0 = time.monotonic()
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=2,
+            client=client,
+        )
+        elapsed = time.monotonic() - t0
+
+        serve_done_event.set()
+        server_sock.close()
+        t.join(timeout=3)
+
+        assert exit_code != 0
+        assert summary["failure_step"] == "sse_terminal"
+        assert 1.5 < elapsed < 10, (
+            f"should fail near task_timeout 2s (took {elapsed:.1f}s), "
+            f"not request_timeout 30s"
+        )
