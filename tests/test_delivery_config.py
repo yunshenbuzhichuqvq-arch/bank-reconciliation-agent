@@ -1,0 +1,343 @@
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+import yaml
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+COMPOSE_PATH = REPO_ROOT / "compose.yaml"
+DOCKERFILE_PATH = REPO_ROOT / "Dockerfile"
+DOCKERIGNORE_PATH = REPO_ROOT / ".dockerignore"
+FRONTEND_DOCKERFILE_PATH = REPO_ROOT / "frontend" / "Dockerfile"
+FRONTEND_DOCKERIGNORE_PATH = REPO_ROOT / "frontend" / ".dockerignore"
+FRONTEND_PACKAGE_JSON_PATH = REPO_ROOT / "frontend" / "package.json"
+FRONTEND_VITE_CONFIG_PATH = REPO_ROOT / "frontend" / "vite.config.ts"
+ENV_EXAMPLE_PATH = REPO_ROOT / ".env.example"
+
+REQUIRED_SERVICES = {"backend", "worker", "frontend", "mysql", "redis"}
+REQUIRED_VOLUMES = {"mysql_data", "redis_data", "uploads_data"}
+
+
+# ---------------------------------------------------------------------------
+# compose.yaml tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def compose_data() -> dict:
+    if not COMPOSE_PATH.exists():
+        pytest.fail(f"compose.yaml not found at {COMPOSE_PATH}")
+    return yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
+
+
+def test_compose_services_exact_set(compose_data: dict) -> None:
+    services = set(compose_data.get("services", {}).keys())
+    assert services == REQUIRED_SERVICES, f"Expected {REQUIRED_SERVICES}, got {services}"
+
+
+def test_compose_volumes(compose_data: dict) -> None:
+    volumes = set(compose_data.get("volumes", {}).keys())
+    assert volumes == REQUIRED_VOLUMES, f"Expected {REQUIRED_VOLUMES}, got {volumes}"
+
+
+def test_backend_worker_share_image_and_uploads(compose_data: dict) -> None:
+    services = compose_data["services"]
+    backend = services["backend"]
+    worker = services["worker"]
+
+    assert "build" in backend, "backend must have build key"
+    assert "build" in worker, "worker must have build key"
+    assert backend["build"] == worker["build"], "backend and worker must share same build definition"
+    assert "image" not in backend, "backend should not have image key when using build"
+    assert "image" not in worker, "worker should not have image key when using build"
+
+    backend_command = backend.get("command", "")
+    worker_command = worker.get("command", "")
+    assert backend_command != worker_command, (
+        f"backend and worker must have different commands: {backend_command!r} vs {worker_command!r}"
+    )
+    assert "uvicorn" in str(backend_command), "backend command must include uvicorn"
+    assert "arq" in str(worker_command), "worker command must include arq"
+
+    backend_vols = [v.split(":")[0] if isinstance(v, str) else v for v in backend.get("volumes", [])]
+    worker_vols = [v.split(":")[0] if isinstance(v, str) else v for v in worker.get("volumes", [])]
+
+    assert any("uploads_data" in str(v) for v in backend_vols), (
+        "backend must mount uploads_data"
+    )
+    assert any("uploads_data" in str(v) for v in worker_vols), (
+        "worker must mount uploads_data"
+    )
+
+
+def test_backend_worker_env_mysql_redis_fake_async(compose_data: dict) -> None:
+    for service_name in ("backend", "worker"):
+        env = _collect_service_env(compose_data, service_name)
+        mysql_dsn = env.get("MYSQL_DSN", "")
+        redis_dsn = env.get("REDIS_DSN", "")
+        assert "@mysql:" in mysql_dsn or "mysql:" in mysql_dsn, (
+            f"{service_name} MYSQL_DSN must use 'mysql' host: {mysql_dsn!r}"
+        )
+        assert "127.0.0.1" not in mysql_dsn, (
+            f"{service_name} MYSQL_DSN must not use 127.0.0.1"
+        )
+        assert "@redis:" in redis_dsn or "redis:" in redis_dsn, (
+            f"{service_name} REDIS_DSN must use 'redis' host: {redis_dsn!r}"
+        )
+        assert "127.0.0.1" not in redis_dsn, (
+            f"{service_name} REDIS_DSN must not use 127.0.0.1"
+        )
+        assert env.get("LLM_PROVIDER") == "fake", (
+            f"{service_name} LLM_PROVIDER default must be fake"
+        )
+        assert env.get("EMBEDDING_BACKEND") == "hash", (
+            f"{service_name} EMBEDDING_BACKEND default must be hash"
+        )
+        assert env.get("ASYNC_QUEUE_ENABLED") == "true", (
+            f"{service_name} ASYNC_QUEUE_ENABLED default must be true"
+        )
+
+
+def test_mysql_redis_not_expose_host_ports(compose_data: dict) -> None:
+    mysql_ports = compose_data["services"]["mysql"].get("ports", [])
+    redis_ports = compose_data["services"]["redis"].get("ports", [])
+    assert not mysql_ports, f"mysql must not expose host ports: {mysql_ports}"
+    assert not redis_ports, f"redis must not expose host ports: {redis_ports}"
+
+
+def test_host_exposed_ports_only_backend_frontend(compose_data: dict) -> None:
+    host_ports = {
+        name: svc.get("ports", [])
+        for name, svc in compose_data["services"].items()
+        if svc.get("ports")
+    }
+    assert set(host_ports.keys()) <= {"backend", "frontend"}, (
+        f"Only backend/frontend may expose host ports: {host_ports}"
+    )
+    assert any("8000" in p for p in host_ports.get("backend", [])), (
+        "backend must expose port 8000"
+    )
+    assert any("4173" in p for p in host_ports.get("frontend", [])), (
+        "frontend must expose port 4173"
+    )
+
+
+def test_all_services_have_health_or_depends(compose_data: dict) -> None:
+    services = compose_data["services"]
+    for name, svc in services.items():
+        has_health = "healthcheck" in svc
+        depends = svc.get("depends_on", {})
+        has_healthy_dep = any(
+            isinstance(v, dict) and v.get("condition") == "service_healthy"
+            for v in depends.values()
+        )
+        assert has_health or has_healthy_dep, (
+            f"Service '{name}' must have healthcheck or depend on service_healthy"
+        )
+
+
+def test_mysql_redis_have_healthchecks(compose_data: dict) -> None:
+    mysql_hc = compose_data["services"]["mysql"]["healthcheck"]
+    redis_hc = compose_data["services"]["redis"]["healthcheck"]
+    assert "mysqladmin" in str(mysql_hc.get("test", "")), (
+        "mysql healthcheck must use mysqladmin ping"
+    )
+    assert "redis-cli" in str(redis_hc.get("test", "")), (
+        "redis healthcheck must use redis-cli ping"
+    )
+
+
+def test_frontend_depends_backend_healthy(compose_data: dict) -> None:
+    depends = compose_data["services"]["frontend"].get("depends_on", {})
+    backend_dep = depends.get("backend")
+    assert isinstance(backend_dep, dict) and backend_dep.get("condition") == "service_healthy", (
+        "frontend must depend on backend with condition: service_healthy"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dockerfile tests
+# ---------------------------------------------------------------------------
+
+def test_dockerfile_exists() -> None:
+    assert DOCKERFILE_PATH.exists(), f"Dockerfile not found at {DOCKERFILE_PATH}"
+
+
+def test_dockerfile_no_env_no_secret() -> None:
+    content = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert ".env" not in content, "Dockerfile must not copy .env"
+    assert "ENV DEEPSEEK_API_KEY" not in content, "Dockerfile must not set DEEPSEEK_API_KEY in ENV"
+    assert "ENV JWT_SECRET_KEY" not in content, "Dockerfile must not set JWT_SECRET_KEY in ENV"
+
+
+def test_dockerfile_uses_python_slim_bookworm() -> None:
+    content = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "python:3.11-slim-bookworm" in content or "FROM python:3.11-slim" in content, (
+        "Dockerfile must base on python:3.11-slim-bookworm"
+    )
+
+
+def test_dockerfile_uses_uv_frozen() -> None:
+    content = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "uv==" in content, "Dockerfile must pin uv version"
+    assert "--frozen" in content, "Dockerfile must use uv sync --frozen"
+
+
+def test_dockerfile_no_embedding_install() -> None:
+    content = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "[embedding]" not in content, "Dockerfile must not install embedding extra"
+
+
+def test_dockerfile_sets_pythonpath_workdir() -> None:
+    content = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "/app" in content, "Dockerfile must set WORKDIR /app"
+    assert "PYTHONPATH" in content, "Dockerfile must set PYTHONPATH"
+
+
+def test_dockerignore_exists() -> None:
+    assert DOCKERIGNORE_PATH.exists(), f".dockerignore not found at {DOCKERIGNORE_PATH}"
+
+
+def test_dockerignore_excludes_env_and_runtime() -> None:
+    content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
+    assert ".env" in content, ".dockerignore must exclude .env"
+    assert "__pycache__" in content or "**.pyc" in content, ".dockerignore must exclude Python cache"
+
+
+# ---------------------------------------------------------------------------
+# Frontend Dockerfile tests
+# ---------------------------------------------------------------------------
+
+def test_frontend_dockerfile_exists() -> None:
+    assert FRONTEND_DOCKERFILE_PATH.exists(), (
+        f"frontend/Dockerfile not found at {FRONTEND_DOCKERFILE_PATH}"
+    )
+
+
+def test_frontend_dockerfile_no_nginx() -> None:
+    content = FRONTEND_DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "nginx" not in content.lower(), "frontend Dockerfile must not use Nginx"
+
+
+def test_frontend_dockerfile_uses_vite_preview() -> None:
+    content = FRONTEND_DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "preview" in content, "frontend Dockerfile must use vite preview"
+
+
+def test_frontend_dockerfile_uses_node_22() -> None:
+    content = FRONTEND_DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "node:22" in content, "frontend Dockerfile must base on node:22"
+
+
+def test_frontend_dockerignore_exists() -> None:
+    assert FRONTEND_DOCKERIGNORE_PATH.exists(), (
+        f"frontend/.dockerignore not found at {FRONTEND_DOCKERIGNORE_PATH}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Frontend package.json tests
+# ---------------------------------------------------------------------------
+
+def test_frontend_package_json_has_preview_script() -> None:
+    data = json.loads(FRONTEND_PACKAGE_JSON_PATH.read_text(encoding="utf-8"))
+    assert "preview" in data.get("scripts", {}), (
+        "frontend/package.json must have 'preview' script"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Frontend vite.config.ts tests
+# ---------------------------------------------------------------------------
+
+def test_vite_config_proxy_target() -> None:
+    content = FRONTEND_VITE_CONFIG_PATH.read_text(encoding="utf-8")
+    assert "VITE_API_PROXY_TARGET" in content, (
+        "vite.config.ts must reference VITE_API_PROXY_TARGET"
+    )
+    assert "server" in content and "proxy" in content, (
+        "vite.config.ts must configure server.proxy"
+    )
+    assert "preview" in content and "proxy" in content, (
+        "vite.config.ts must configure preview.proxy"
+    )
+
+
+# ---------------------------------------------------------------------------
+# .env.example tests
+# ---------------------------------------------------------------------------
+
+REQUIRED_ENV_KEYS = {
+    "APP_NAME", "APP_ENV", "API_V1_PREFIX",
+    "JWT_SECRET_KEY", "JWT_ALGORITHM", "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
+    "DEMO_USER_PASSWORD",
+    "MYSQL_DSN", "CHROMA_PATH", "UPLOAD_DIR", "TRACE_DIR",
+    "CHECKPOINT_ENABLED", "CHECKPOINT_SQLITE_PATH",
+    "REDIS_DSN", "ASYNC_QUEUE_ENABLED", "JOB_IDEMPOTENCY_TTL_SECONDS",
+    "ARQ_JOB_MAX_ATTEMPTS", "ARQ_JOB_TIMEOUT_SECONDS",
+    "LLM_PROVIDER", "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL",
+    "LLM_TIMEOUT_SECONDS", "LLM_MAX_ATTEMPTS",
+    "LLM_BACKOFF_BASE_SECONDS", "LLM_BACKOFF_MAX_SECONDS",
+    "LLM_BREAKER_FAIL_THRESHOLD", "LLM_BREAKER_OPEN_SECONDS",
+    "ENABLE_LLM_CACHE", "LLM_CACHE_TTL_SECONDS",
+    "ENABLE_LLM_RATE_LIMIT", "LLM_RATE_LIMIT_RPM", "LLM_RATE_LIMIT_MAX_CONCURRENCY",
+    "LLM_RATE_LIMIT_MAX_WAIT_SECONDS", "LLM_RATE_LIMIT_WINDOW_SECONDS",
+    "EMBEDDING_BACKEND",
+    "ENABLE_RAG_REWRITE", "ENABLE_RAG_HYBRID", "ENABLE_RAG_RERANKER",
+    "RAG_DENSE_TOP_N", "RAG_BM25_TOP_N", "RAG_RERANK_TOP_K", "RAG_RRF_K",
+    "RAG_DENSE_MIN_SCORE", "RAG_DENSE_MIN_SCORE_BGE_SMALL",
+    "RAG_DENSE_MIN_SCORE_BGE_M3", "RAG_RERANKER_MIN_SCORE",
+    "RAG_LOW_SCORE", "RAG_BREAKER_FAIL_THRESHOLD", "RAG_BREAKER_OPEN_SECONDS",
+    "CUTOFF_WINDOW",
+    "DECISION_REGRESSION_RUNS", "MAX_UPLOAD_BYTES", "MAX_UPLOAD_ROWS",
+}
+
+
+def _parse_env_keys(filepath: Path) -> set[str]:
+    keys: set[str] = set()
+    pattern = re.compile(r"^([A-Z][A-Z0-9_]+)\s*=")
+    for line in filepath.read_text(encoding="utf-8").splitlines():
+        match = pattern.match(line.strip())
+        if match:
+            keys.add(match.group(1))
+    return keys
+
+
+def test_env_example_covers_all_settings_keys() -> None:
+    env_keys = _parse_env_keys(ENV_EXAMPLE_PATH)
+    missing = REQUIRED_ENV_KEYS - env_keys
+    assert not missing, f".env.example missing keys: {missing}"
+
+
+def test_env_example_no_real_secret() -> None:
+    content = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    deepseek_match = re.search(r'DEEPSEEK_API_KEY\s*=\s*"([^"]*)"', content)
+    if deepseek_match:
+        assert deepseek_match.group(1) == "", (
+            "DEEPSEEK_API_KEY must be empty string"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _collect_service_env(compose_data: dict, service_name: str) -> dict[str, str]:
+    service = compose_data["services"][service_name]
+    env_raw = service.get("environment", {})
+    result: dict[str, str] = {}
+    if isinstance(env_raw, dict):
+        result.update({str(k): str(v) for k, v in env_raw.items()})
+    elif isinstance(env_raw, list):
+        for item in env_raw:
+            if isinstance(item, str):
+                if "=" in item:
+                    key, _, val = item.partition("=")
+                    result[key.strip()] = val.strip()
+            elif isinstance(item, dict):
+                result.update({str(k): str(v) for k, v in item.items()})
+    return result
