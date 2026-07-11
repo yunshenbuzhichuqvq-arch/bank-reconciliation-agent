@@ -1194,3 +1194,111 @@ class TestSSETaskIdCorrelation:
         )
         assert exit_code != 0
         assert summary["failure_step"] == "sse_terminal"
+
+
+# ---------------------------------------------------------------------------
+# TASK-27.10 Regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestStartLiveStatus:
+    def test_start_live_wrong_status_fails(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                return httpx.Response(200, json=_report_response("tid-a"))
+            if "/upload" in url:
+                return httpx.Response(200, json=_async_upload_response("tsse-ws", "UPLOADED"))
+            if "/start-live" in url:
+                return httpx.Response(
+                    200,
+                    json={"code": 200, "data": {"task_id": "tsse-ws", "status": "RUNNING"}},
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "sse_terminal"
+
+
+class TestTokenRedaction:
+    def test_bearer_token_fully_redacted(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                raise RuntimeError(
+                    "auth: failed with header Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.secret-token-value"
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code != 0
+        text = json.dumps(summary)
+        assert "eyJhbGci" not in text, "JWT token must be redacted"
+        assert "secret-token-value" not in text, "JWT token must be redacted"
+
+
+class TestPollingBudget:
+    def test_polling_respects_remaining_budget(self, tmp_path: Path) -> None:
+        times_checked = [0]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-b"))
+            if "/status" in url:
+                times_checked[0] += 1
+                return httpx.Response(200, json=_status_response("tid-b", "QUEUED"))
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=2,
+            client=client,
+        )
+        assert exit_code != 0
+        assert summary["failure_step"] == "queue_completion"
+        assert times_checked[0] <= 2, "should not poll more than task_timeout/POLL_INTERVAL allows"

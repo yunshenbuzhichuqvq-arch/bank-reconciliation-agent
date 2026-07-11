@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from bank_reconciliation_agent.main import app
-from bank_reconciliation_agent.rag.retriever import RuleRetriever
+from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest
 from scripts.build_rule_chunks import (
     _build_searchable_content,
@@ -91,7 +91,9 @@ def test_rule_retriever_searches_generated_chunks(tmp_path: Path) -> None:
         sources_path=ROOT / "data/rag/sources_bank_enterprise.json",
         output_path=chunks_path,
     )
-    retriever = RuleRetriever(chunks_path=chunks_path, chroma_path=tmp_path / "chroma")
+    store = ChromaRuleStore(chunks_path=chunks_path, chroma_path=tmp_path / "chroma",
+                            embedding_backend="hash")
+    retriever = RuleRetriever(store=store)
 
     response = retriever.search(RagSearchRequest(query="金额差异 对账不平", top_k=5))
 
@@ -106,6 +108,7 @@ def test_rule_retriever_searches_generated_chunks(tmp_path: Path) -> None:
     assert first_item.score > 0
     assert "固定结果模拟" not in first_item.content
     assert retriever.collection_count() >= 3
+    assert retriever.store.embedding_backend == "hash"
     assert (tmp_path / "chroma").exists()
 
 

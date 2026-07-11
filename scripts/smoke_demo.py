@@ -174,7 +174,7 @@ def _poll_until_terminal(
         remaining = task_timeout - elapsed
         if remaining <= 0:
             raise RuntimeError(f"queue_completion: timeout after {task_timeout}s")
-        this_timeout = min(request_timeout, max(1, remaining))
+        this_timeout = min(request_timeout, remaining)
         resp = client.get(
             f"{base_url}/api/v1/reconcile/{task_id}/status",
             headers={"Authorization": f"Bearer {token}"},
