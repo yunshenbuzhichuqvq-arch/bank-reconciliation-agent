@@ -322,9 +322,132 @@ def test_env_example_no_real_secret() -> None:
         )
 
 
+
 # ---------------------------------------------------------------------------
-# Helpers
+# CI workflow tests
 # ---------------------------------------------------------------------------
+
+CI_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+REQUIRED_JOB_IDS = {
+    "backend-quality",
+    "frontend-quality",
+    "deterministic-eval",
+    "delivery-smoke",
+}
+
+
+@pytest.fixture(scope="module")
+def ci_workflow_data() -> dict:
+    if not CI_WORKFLOW_PATH.exists():
+        pytest.fail(f".github/workflows/ci.yml not found at {CI_WORKFLOW_PATH}")
+    return yaml.safe_load(CI_WORKFLOW_PATH.read_text(encoding="utf-8"))
+
+
+def test_ci_triggers(ci_workflow_data: dict) -> None:
+    triggers = ci_workflow_data.get("on", ci_workflow_data.get(True, {}))
+    trigger_types = set(triggers.keys()) if isinstance(triggers, dict) else set()
+    assert "pull_request" in trigger_types or True in trigger_types, (
+        "CI must trigger on pull_request"
+    )
+    assert "workflow_dispatch" in trigger_types, "CI must support workflow_dispatch"
+
+
+def test_ci_permissions_readonly(ci_workflow_data: dict) -> None:
+    permissions = ci_workflow_data.get("permissions", {})
+    assert permissions.get("contents") == "read", "CI must have contents: read only"
+    for perm_key in ("issues", "deployments", "packages", "pull-requests"):
+        val = permissions.get(perm_key, "read")
+        assert val != "write", f"CI must not have write permission for {perm_key}"
+
+
+def test_ci_job_ids(ci_workflow_data: dict) -> None:
+    jobs = set(ci_workflow_data.get("jobs", {}).keys())
+    assert jobs == REQUIRED_JOB_IDS, f"Expected {REQUIRED_JOB_IDS}, got {jobs}"
+
+
+def test_delivery_smoke_needs_all_others(ci_workflow_data: dict) -> None:
+    delivery = ci_workflow_data["jobs"]["delivery-smoke"]
+    needs = delivery.get("needs", [])
+    expected = sorted(["backend-quality", "frontend-quality", "deterministic-eval"])
+    assert sorted(needs) == expected, f"delivery-smoke must need {expected}, got {needs}"
+
+
+def test_ci_runner_versions(ci_workflow_data: dict) -> None:
+    for job_id in ("backend-quality", "delivery-smoke"):
+        runner = ci_workflow_data["jobs"][job_id].get("runs-on", "")
+        assert "ubuntu-24.04" in runner, f"{job_id} must run on ubuntu-24.04"
+
+
+def test_backend_quality_uses_frozen_uv(ci_workflow_data: dict) -> None:
+    backend = ci_workflow_data["jobs"]["backend-quality"]
+    steps_text = yaml.dump(backend.get("steps", []))
+    assert "--frozen" in steps_text, "backend-quality must use uv sync --frozen"
+    assert "uv run pytest" in steps_text, "backend-quality must run pytest"
+    assert "uv run ruff" in steps_text, "backend-quality must run ruff"
+
+
+def test_frontend_quality_uses_npm_ci(ci_workflow_data: dict) -> None:
+    frontend = ci_workflow_data["jobs"]["frontend-quality"]
+    steps_text = yaml.dump(frontend.get("steps", []))
+    assert "npm ci" in steps_text, "frontend-quality must use npm ci"
+    assert "npm run test" in steps_text, "frontend-quality must run test"
+    assert "npm run typecheck" in steps_text, "frontend-quality must run typecheck"
+    assert "npm run build" in steps_text, "frontend-quality must run build"
+
+
+def test_deterministic_eval_uses_fake_hash(ci_workflow_data: dict) -> None:
+    job = ci_workflow_data["jobs"]["deterministic-eval"]
+    steps_text = yaml.dump(job.get("steps", []))
+    env_text = yaml.dump(job.get("env", {}))
+    assert "LLM_PROVIDER" in env_text and "fake" in env_text, (
+        "eval must use LLM_PROVIDER=fake"
+    )
+    assert "EMBEDDING_BACKEND" in env_text and "hash" in env_text, (
+        "eval must use EMBEDDING_BACKEND=hash"
+    )
+    assert "--fail-on-release-block" not in steps_text, (
+        "eval must not use --fail-on-release-block"
+    )
+
+
+def test_deterministic_eval_fresh_harness(ci_workflow_data: dict) -> None:
+    steps_text = yaml.dump(ci_workflow_data["jobs"]["deterministic-eval"].get("steps", []))
+    assert "eval_harness" in steps_text, "eval must run harness"
+    assert "eval_gates" in steps_text, "eval must run gates"
+    assert "baseline" in steps_text, "eval must generate fresh baseline"
+
+
+def test_delivery_smoke_twice(ci_workflow_data: dict) -> None:
+    steps_text = yaml.dump(ci_workflow_data["jobs"]["delivery-smoke"].get("steps", []))
+    assert "smoke-run-1" in steps_text, "delivery must produce smoke-run-1"
+    assert "smoke-run-2" in steps_text, "delivery must produce smoke-run-2"
+    assert "docker compose up" in steps_text, "delivery must start compose"
+    assert "docker compose down" in steps_text, "delivery must clean up compose"
+
+
+def test_delivery_smoke_always_cleanup(ci_workflow_data: dict) -> None:
+    delivery = ci_workflow_data["jobs"]["delivery-smoke"]
+    steps_text = yaml.dump(delivery.get("steps", []))
+    assert "always()" in steps_text, "delivery cleanup must use always()"
+
+
+def test_ci_no_deepseek_key(ci_workflow_data: dict) -> None:
+    text = yaml.dump(ci_workflow_data)
+    assert "DEEPSEEK_API_KEY" not in text, "CI must not reference DEEPSEEK_API_KEY"
+    assert "git push" not in text, "CI must not git push"
+
+
+def test_ci_no_secrets_ref(ci_workflow_data: dict) -> None:
+    text = yaml.dump(ci_workflow_data)
+    assert "secrets." not in text, "CI must not read repository secrets"
+
+
+def test_ci_no_release_write(ci_workflow_data: dict) -> None:
+    text = yaml.dump(ci_workflow_data)
+    assert "release" not in text.lower(), "CI must not create releases"
+
+
 
 def _collect_service_env(compose_data: dict, service_name: str) -> dict[str, str]:
     service = compose_data["services"][service_name]

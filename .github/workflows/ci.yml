@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - run: uv sync --frozen --extra dev
+      - run: uv run pytest
+      - run: uv run ruff check .
+
+  frontend-quality:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run test
+      - run: npm run typecheck
+      - run: npm run build
+
+  deterministic-eval:
+    runs-on: ubuntu-24.04
+    env:
+      LLM_PROVIDER: fake
+      EMBEDDING_BACKEND: hash
+      AGENT_SCHEMA_REPORT_DIR: artifacts/eval
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - run: uv sync --frozen --extra dev
+
+      - name: "Fresh dense baseline"
+        run: >
+          uv run python -m scripts.eval_harness
+          --embedding-backend hash
+          --rag-mode dense
+          --output-dir artifacts/eval/harness
+          --report-name baseline
+
+      - name: "Fresh hybrid_rerank after and comparison"
+        run: >
+          uv run python -m scripts.eval_harness
+          --embedding-backend hash
+          --rag-mode hybrid_rerank
+          --output-dir artifacts/eval/harness
+          --report-name after
+          --compare-with artifacts/eval/harness/baseline.json
+          --comparison-report artifacts/eval/harness/comparison.md
+          --comparison-json artifacts/eval/harness/comparison.json
+
+      - name: "Fresh Agent schema conformance"
+        run: uv run pytest tests/test_v1_1_agent_schema_conformance.py -q
+
+      - name: "Run eval gates (CI layer only)"
+        run: >
+          uv run python -m scripts.eval_gates
+          --harness-comparison artifacts/eval/harness/comparison.json
+          --schema-conformance artifacts/eval/agent_schema_conformance.json
+          --agent-real-json artifacts/eval/not-generated-agent-real.json
+          --rag-matrix artifacts/eval/not-generated-rag-matrix.json
+          --performance-cost-json artifacts/eval/not-generated-performance-cost.json
+          --triage-json artifacts/eval/not-generated-triage.json
+          --output artifacts/eval/eval_gate_summary.md
+          --json-output artifacts/eval/eval_gate_summary.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deterministic-eval
+          path: artifacts/eval/
+          retention-days: 7
+
+  delivery-smoke:
+    runs-on: ubuntu-24.04
+    needs:
+      - backend-quality
+      - frontend-quality
+      - deterministic-eval
+    env:
+      LLM_PROVIDER: fake
+      EMBEDDING_BACKEND: hash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+      - run: uv sync --frozen --extra dev
+
+      - name: "Start Compose"
+        run: docker compose up --build -d --wait
+
+      - name: "Smoke run 1"
+        run: uv run python -m scripts.smoke_demo --summary-json artifacts/smoke-run-1.json
+
+      - name: "Smoke run 2"
+        run: uv run python -m scripts.smoke_demo --summary-json artifacts/smoke-run-2.json
+
+      - name: "Collect logs (always)"
+        if: always()
+        run: |
+          mkdir -p artifacts/logs
+          docker compose logs backend > artifacts/logs/backend.log 2>&1 || true
+          docker compose logs worker > artifacts/logs/worker.log 2>&1 || true
+          docker compose logs frontend > artifacts/logs/frontend.log 2>&1 || true
+
+      - name: "Teardown Compose (always)"
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delivery-smoke
+          path: |
+            artifacts/smoke-run-1.json
+            artifacts/smoke-run-2.json
+            artifacts/logs/
+          retention-days: 7

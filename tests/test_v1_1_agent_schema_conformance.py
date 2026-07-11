@@ -1,5 +1,6 @@
 from collections.abc import Callable
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,8 +16,25 @@ from bank_reconciliation_agent.schemas.rag import RagSearchItem
 # ADR-039 debt: 2b-3 regression assertions live inline in
 # tests/test_mvp2b3_decision_regression.py, so this conformance test keeps the
 # small invariant helpers local until a second caller needs a shared test module.
-REPORT_PATH = Path("reports/agent_schema_conformance.md")
-JSON_REPORT_PATH = Path("reports/agent_schema_conformance.json")
+
+
+def _get_report_dir() -> Path:
+    env_dir = os.environ.get("AGENT_SCHEMA_REPORT_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path("reports")
+
+
+def _get_report_path() -> Path:
+    return _get_report_dir() / "agent_schema_conformance.md"
+
+
+def _get_json_report_path() -> Path:
+    return _get_report_dir() / "agent_schema_conformance.json"
+
+
+REPORT_PATH = _get_report_path()
+JSON_REPORT_PATH = _get_json_report_path()
 
 
 def _evidence() -> list[RagSearchItem]:
@@ -66,10 +84,12 @@ def _write_report(results: list[tuple[str, bool]]) -> None:
         "| --- | --- |",
     ]
     lines.extend(f"| {name} | {'PASS' if ok else 'FAIL'} |" for name, ok in results)
-    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    JSON_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    JSON_REPORT_PATH.write_text(
+    report_path = _get_report_path()
+    json_path = _get_json_report_path()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
         json.dumps(
             {
                 "schema_conformance_rate": passed / total if total else 0.0,
@@ -81,6 +101,14 @@ def _write_report(results: list[tuple[str, bool]]) -> None:
         + "\n",
         encoding="utf-8",
     )
+
+
+def _cleanup_reports() -> None:
+    for path in (_get_report_path(), _get_json_report_path()):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def test_three_agent_outputs_parse_and_satisfy_schema_invariants(capsys) -> None:
@@ -149,6 +177,37 @@ def test_three_agent_outputs_parse_and_satisfy_schema_invariants(capsys) -> None
     assert len(results) == len(cases)
     assert all(ok for _, ok in results)
     assert "pass rate: 4/4" in capsys.readouterr().out
-    snapshot = json.loads(JSON_REPORT_PATH.read_text(encoding="utf-8"))
+    snapshot = json.loads(_get_json_report_path().read_text(encoding="utf-8"))
     assert snapshot["schema_conformance_rate"] == 1.0
     assert snapshot["evaluated_at"]
+
+
+def test_env_report_dir_override_does_not_write_default(tmp_path) -> None:
+    default_md = Path("reports/agent_schema_conformance.md")
+    default_json = Path("reports/agent_schema_conformance.json")
+    if default_md.exists():
+        default_md.unlink()
+    if default_json.exists():
+        default_json.unlink()
+
+    override_dir = tmp_path / "custom_reports"
+    os.environ["AGENT_SCHEMA_REPORT_DIR"] = str(override_dir)
+
+    cases = [
+        ("ExtractionAgent", True),
+    ]
+    _write_report(cases)
+
+    override_md = override_dir / "agent_schema_conformance.md"
+    override_json = override_dir / "agent_schema_conformance.json"
+    assert override_md.exists(), "report must be written to AGENT_SCHEMA_REPORT_DIR"
+    assert override_json.exists(), "JSON report must be written to AGENT_SCHEMA_REPORT_DIR"
+
+    assert not default_md.exists(), (
+        "must not write to default reports/ when AGENT_SCHEMA_REPORT_DIR is set"
+    )
+    assert not default_json.exists(), (
+        "must not write to default reports/ when AGENT_SCHEMA_REPORT_DIR is set"
+    )
+
+    del os.environ["AGENT_SCHEMA_REPORT_DIR"]
