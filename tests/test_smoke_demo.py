@@ -227,7 +227,7 @@ def _mock_transport_handler(
                 200,
                 json={
                     "code": 200,
-                    "data": {"task_id": task_id_sse, "status": "RUNNING"},
+                    "data": {"task_id": task_id_sse, "status": "AI_RUNNING"},
                 },
             )
 
@@ -352,7 +352,7 @@ class TestAuthAndHeaders:
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response("tsse-1", "UPLOADED"))
             if "/start-live" in url:
-                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-1", "status": "RUNNING"}})
+                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-1", "status": "AI_RUNNING"}})
             if "/events" in url:
                 return httpx.Response(200, content=_build_sse_frame("TASK_DONE", "tsse-1", "COMPLETED").encode(),
                                       headers={"content-type": "text/event-stream"})
@@ -408,7 +408,7 @@ class TestArqForceRequeue:
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response("tsse-f", "UPLOADED"))
             if "/start-live" in url:
-                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-f", "status": "RUNNING"}})
+                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-f", "status": "AI_RUNNING"}})
             if "/events" in url:
                 return httpx.Response(200, content=_build_sse_frame("TASK_DONE", "tsse-f", "COMPLETED").encode(),
                                       headers={"content-type": "text/event-stream"})
@@ -585,7 +585,7 @@ class TestSSEPath:
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response("tsse-b", "UPLOADED"))
             if "/start-live" in url:
-                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-b", "status": "RUNNING"}})
+                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-b", "status": "AI_RUNNING"}})
             if "/events" in url:
                 return httpx.Response(
                     200,
@@ -629,7 +629,7 @@ class TestSSEPath:
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response("tsse-fail", "UPLOADED"))
             if "/start-live" in url:
-                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-fail", "status": "RUNNING"}})
+                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-fail", "status": "AI_RUNNING"}})
             if "/events" in url:
                 return httpx.Response(
                     200,
@@ -771,7 +771,7 @@ class TestSecondRun:
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response(f"tsse-run{upload_calls[0]}", "UPLOADED"))
             if "/start-live" in url:
-                return httpx.Response(200, json={"code": 200, "data": {"task_id": f"tsse-run{upload_calls[0]}", "status": "RUNNING"}})
+                return httpx.Response(200, json={"code": 200, "data": {"task_id": f"tsse-run{upload_calls[0]}", "status": "AI_RUNNING"}})
             if "/events" in url:
                 return httpx.Response(200, content=_build_sse_frame("TASK_DONE", f"tsse-run{upload_calls[0]}", "COMPLETED").encode(),
                                       headers={"content-type": "text/event-stream"})
@@ -823,7 +823,7 @@ class TestTimeout:
             if "/upload" in url:
                 return httpx.Response(200, json=_async_upload_response("tsse-p", "UPLOADED"))
             if "/start-live" in url:
-                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-p", "status": "RUNNING"}})
+                return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-p", "status": "AI_RUNNING"}})
             if "/events" in url:
                 return httpx.Response(
                     200,
@@ -1074,7 +1074,7 @@ class TestSSETaskIdCorrelation:
             if "/start-live" in url:
                 return httpx.Response(
                     200,
-                    json={"code": 200, "data": {"task_id": "tsse-real", "status": "RUNNING"}},
+                    json={"code": 200, "data": {"task_id": "tsse-real", "status": "AI_RUNNING"}},
                 )
             if "/events" in url:
                 return httpx.Response(
@@ -1123,7 +1123,7 @@ class TestSSETaskIdCorrelation:
             if "/start-live" in url:
                 return httpx.Response(
                     200,
-                    json={"code": 200, "data": {"task_id": "tsse-final", "status": "RUNNING"}},
+                    json={"code": 200, "data": {"task_id": "tsse-final", "status": "AI_RUNNING"}},
                 )
             if "/events" in url:
                 return httpx.Response(
@@ -1172,7 +1172,7 @@ class TestSSETaskIdCorrelation:
             if "/start-live" in url:
                 return httpx.Response(
                     200,
-                    json={"code": 200, "data": {"task_id": "tsse-nc", "status": "RUNNING"}},
+                    json={"code": 200, "data": {"task_id": "tsse-nc", "status": "AI_RUNNING"}},
                 )
             if "/events" in url:
                 return httpx.Response(

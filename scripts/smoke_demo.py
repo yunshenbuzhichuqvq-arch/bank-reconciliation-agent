@@ -83,11 +83,15 @@ _REDACT_DSN_PATTERN = re.compile(
     r"((?:mysql\+pymysql|redis)://)([^:@]+):[^@\s]+(@[^\s]+)"
 )
 _REDACT_FULL_DSN = re.compile(r"(mysql\+pymysql|redis)://\S+")
+_REDACT_AUTH_HEADER = re.compile(r"Authorization: Bearer \S+", re.IGNORECASE)
+_REDACT_BEARER_VALUE = re.compile(r"Bearer \S+")
 
 
 def _redact_text(text: str) -> str:
     text = _REDACT_DSN_PATTERN.sub(r"\1[REDACTED]:[REDACTED]\3", text)
     text = _REDACT_FULL_DSN.sub(r"\1://[REDACTED]", text)
+    text = _REDACT_AUTH_HEADER.sub("[REDACTED_AUTH]", text)
+    text = _REDACT_BEARER_VALUE.sub("[REDACTED_TOKEN]", text)
     for pattern in _SENSITIVE_PATTERNS:
         text = text.replace(pattern, "[REDACTED]")
     password = os.environ.get("DEMO_USER_PASSWORD", DEFAULT_DEMO_PASSWORD)
@@ -165,11 +169,16 @@ def _poll_until_terminal(
     request_timeout: int, task_timeout: int,
 ) -> str:
     start = time.monotonic()
-    while time.monotonic() - start < task_timeout:
+    while True:
+        elapsed = time.monotonic() - start
+        remaining = task_timeout - elapsed
+        if remaining <= 0:
+            raise RuntimeError(f"queue_completion: timeout after {task_timeout}s")
+        this_timeout = min(request_timeout, max(1, remaining))
         resp = client.get(
             f"{base_url}/api/v1/reconcile/{task_id}/status",
             headers={"Authorization": f"Bearer {token}"},
-            timeout=request_timeout,
+            timeout=this_timeout,
         )
         if resp.status_code != 200:
             raise RuntimeError(f"queue_completion: HTTP {resp.status_code}")
@@ -187,8 +196,8 @@ def _poll_until_terminal(
             raise RuntimeError("queue_completion: task FAILED")
         if status not in ("QUEUED", "RUNNING"):
             raise RuntimeError(f"queue_completion: unknown status {status}")
-        time.sleep(POLL_INTERVAL_SECONDS)
-    raise RuntimeError(f"queue_completion: timeout after {task_timeout}s")
+        remaining = task_timeout - (time.monotonic() - start)
+        time.sleep(min(POLL_INTERVAL_SECONDS, max(0, remaining)))
 
 
 def _check_exceptions(
@@ -319,17 +328,23 @@ def _sse_terminal(
             f"sse_terminal: start-live task_id mismatch "
             f"(expected {task_id}, got {sl_task_id})"
         )
+    sl_status = start_data.get("status", "")
+    if sl_status != "AI_RUNNING":
+        raise RuntimeError(
+            f"sse_terminal: start-live status expected AI_RUNNING, got {sl_status!r}"
+        )
 
     events_url = f"{base_url}/api/v1/reconcile/{task_id}/events"
     sse_start = time.monotonic()
     got_task_done = False
     final_status = None
+    stream_timeout = min(request_timeout, max(1, task_timeout))
 
     with client.stream(
         "GET",
         events_url,
         headers={"Authorization": f"Bearer {token}"},
-        timeout=request_timeout,
+        timeout=stream_timeout,
     ) as response:
         if response.status_code != 200:
             raise RuntimeError(f"sse_terminal: events HTTP {response.status_code}")
@@ -343,6 +358,8 @@ def _sse_terminal(
                 continue
             data_part = line[len("data:"):].strip()
             if not data_part:
+                if dt > task_timeout * 1.5:
+                    raise RuntimeError("sse_terminal: idle timeout (no data)")
                 continue
             try:
                 frame = json.loads(data_part)
