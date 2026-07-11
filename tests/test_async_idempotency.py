@@ -102,9 +102,12 @@ def test_running_task_rejects_force_upload(
     asyncio.run(run())
 
 
-def test_worker_skips_task_that_is_already_terminal(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("terminal_status", ["UPLOADED", "COMPLETED"])
+def test_worker_skips_task_that_is_already_terminal(
+    tmp_path: Path, monkeypatch, terminal_status: str
+) -> None:
     bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
-    task_id = "TASK_TERMINAL_SKIP"
+    task_id = f"TASK_TERMINAL_SKIP_{terminal_status}"
     task_service.replace_task(
         user_id="demo_user",
         task_id=task_id,
@@ -115,7 +118,10 @@ def test_worker_skips_task_that_is_already_terminal(tmp_path: Path, monkeypatch)
         pending_ai_rows=0,
         pending_human_rows=0,
     )
-    task_service.update_status(user_id="demo_user", task_id=task_id, status="COMPLETED")
+    if terminal_status == "COMPLETED":
+        task_service.update_status(
+            user_id="demo_user", task_id=task_id, status="COMPLETED"
+        )
     called = False
 
     def fail_if_called(**kwargs) -> None:
@@ -135,4 +141,4 @@ def test_worker_skips_task_that_is_already_terminal(tmp_path: Path, monkeypatch)
     assert called is False
     task = task_service.get(user_id="demo_user", task_id=task_id)
     assert task is not None
-    assert task.status == "COMPLETED"
+    assert task.status == terminal_status

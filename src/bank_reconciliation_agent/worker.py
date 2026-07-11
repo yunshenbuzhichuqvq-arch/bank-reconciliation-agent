@@ -41,7 +41,20 @@ async def run_reconciliation_job(
     if attempt > max_attempts:
         raise RuntimeError(f"attempt {attempt} exceeds max_attempts {max_attempts}")
 
-    task_service.mark_attempt_started(user_id=user_id, task_id=task_id, attempt=attempt)
+    started = task_service.mark_attempt_started(
+        user_id=user_id, task_id=task_id, attempt=attempt
+    )
+    if not started:
+        log.warning(
+            "terminal_noop",
+            user_id=user_id,
+            task_id=task_id,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            outcome="terminal_noop",
+        )
+        return
+
     log.info(
         "attempt_started",
         user_id=user_id,
@@ -60,7 +73,8 @@ async def run_reconciliation_job(
             clear_path=clear_path,
         )
     except (RedisConnectionError, OperationalError) as exc:
-        error_type = type(exc).__name__
+        error_type = _failure_type_for(exc)
+        failure_summary = _failure_summary_for(exc)
         if attempt < max_attempts:
             log.warning(
                 "retry_scheduled",
@@ -72,7 +86,6 @@ async def run_reconciliation_job(
                 outcome="retry_scheduled",
             )
             raise Retry()
-        failure_summary = _failure_summary_for(exc)
         if task_service.mark_failed_if_active(
             user_id=user_id,
             task_id=task_id,
@@ -101,17 +114,26 @@ async def run_reconciliation_job(
             )
         raise
 
-    task_service.mark_attempt_succeeded(user_id=user_id, task_id=task_id, attempt=attempt)
-    if attempt > 1:
-        log.info(
-            "retry_recovered",
-            user_id=user_id,
-            task_id=task_id,
-            attempt=attempt,
-            max_attempts=max_attempts,
-            outcome="retry_recovered",
-        )
-    log.info("reconciliation_job_completed", task_id=task_id, user_id=user_id)
+    success_recorded = task_service.mark_attempt_succeeded(
+        user_id=user_id, task_id=task_id, attempt=attempt
+    )
+    if success_recorded:
+        if attempt > 1:
+            log.info(
+                "retry_recovered",
+                user_id=user_id,
+                task_id=task_id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                outcome="retry_recovered",
+            )
+        log.info("reconciliation_job_completed", task_id=task_id, user_id=user_id)
+
+
+def _failure_type_for(exc: Exception) -> str:
+    if isinstance(exc, RedisConnectionError):
+        return "RedisConnectionError"
+    return "OperationalError"
 
 
 def _failure_summary_for(exc: Exception) -> str:

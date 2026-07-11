@@ -29,6 +29,8 @@ def test_run_reconciliation_job_delegates_to_service(monkeypatch) -> None:
         run_job,
         raising=False,
     )
+    monkeypatch.setattr(worker.task_service, "mark_attempt_started", lambda **_: True)
+    monkeypatch.setattr(worker.task_service, "mark_attempt_succeeded", lambda **_: True)
 
     asyncio.run(
         worker.run_reconciliation_job(
@@ -110,3 +112,34 @@ def test_run_reconciliation_job_rejects_job_try_over_max(monkeypatch) -> None:
         )
 
     assert called is False
+
+
+def test_run_reconciliation_job_skips_when_mark_attempt_started_not_hit(monkeypatch) -> None:
+    service_called = False
+
+    def run_job(**kwargs: str) -> None:
+        nonlocal service_called
+        service_called = True
+
+    monkeypatch.setattr(
+        worker.reconciliation_service, "run_reconciliation_job", run_job, raising=False,
+    )
+    monkeypatch.setattr(
+        worker.task_service, "mark_attempt_started", lambda **_: False
+    )
+    monkeypatch.setattr(
+        worker.task_service, "mark_attempt_succeeded", lambda **_: False
+    )
+
+    asyncio.run(
+        worker.run_reconciliation_job(
+            {"job_try": 1},
+            user_id="user-1",
+            task_id="task-1",
+            scenario_type="BANK_ENTERPRISE",
+            bank_path="/tmp/bank.xlsx",
+            clear_path="/tmp/clear.xlsx",
+        )
+    )
+
+    assert service_called is False
