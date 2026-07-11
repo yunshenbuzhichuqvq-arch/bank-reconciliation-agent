@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import case, func, select
 from sqlalchemy.engine import Engine
 
+from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
 from bank_reconciliation_agent.core.llm.cost import compute_cost
@@ -217,6 +219,79 @@ class MetricsService:
             offline=self._read_offline_snapshot(),
             rag_sources=self._collect_rag_sources(ledger_sources, rag_source_rows),
         )
+
+    def get_arq_recovery_snapshot(
+        self, *, user_id: str
+    ) -> dict[str, str | int | float]:
+        self._ensure_initialized()
+        with self._engine.connect() as connection:
+            retry_count_row = connection.execute(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (reconciliation_task_table.c.job_attempt > 1,
+                                 reconciliation_task_table.c.job_attempt - 1),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    )
+                ).where(reconciliation_task_table.c.user_id == user_id)
+            ).scalar_one()
+
+            recovered_row = connection.execute(
+                select(func.count()).where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.retry_recovered.is_(True),
+                )
+            ).scalar_one()
+
+            multi_attempt_row = connection.execute(
+                select(func.count()).where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.job_attempt > 1,
+                )
+            ).scalar_one()
+
+            exhausted_row = connection.execute(
+                select(func.count()).where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.retry_exhausted.is_(True),
+                )
+            ).scalar_one()
+
+            now_utc = datetime.now(timezone.utc)
+            cutoff = now_utc - timedelta(seconds=settings.arq_job_timeout_seconds)
+            stuck_row = connection.execute(
+                select(func.count()).where(
+                    reconciliation_task_table.c.user_id == user_id,
+                    reconciliation_task_table.c.status == "RUNNING",
+                    reconciliation_task_table.c.updated_at <= cutoff,
+                )
+            ).scalar_one()
+
+            force_sum_row = connection.execute(
+                select(
+                    func.coalesce(
+                        func.sum(reconciliation_task_table.c.force_requeue_count), 0
+                    )
+                ).where(reconciliation_task_table.c.user_id == user_id)
+            ).scalar_one()
+
+        recovered = int(recovered_row)
+        multi_attempt = int(multi_attempt_row)
+        rate = round(recovered / multi_attempt, 4) if multi_attempt else 0.0
+
+        return {
+            "source": "database_current_task_state",
+            "retry_count": int(retry_count_row),
+            "retry_recovered_count": recovered,
+            "retry_recovery_rate": rate,
+            "retry_exhausted_count": int(exhausted_row),
+            "stuck_running_count": int(stuck_row),
+            "force_requeue_count": int(force_sum_row),
+        }
 
     def _ensure_initialized(self) -> None:
         if self._initialized:

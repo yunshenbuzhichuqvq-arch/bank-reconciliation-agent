@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert
 
+from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.core.llm.cache import CachingLLMProvider
 from bank_reconciliation_agent.core.llm.cost import compute_cost
@@ -366,3 +368,146 @@ def _insert_review(*, user_id: str, task_id: str, queue_id: int) -> None:
                 handler_username="reviewer",
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# TASK-25.3 ARQ recovery snapshot
+# ---------------------------------------------------------------------------
+
+
+def _insert_task_with_recovery(
+    *,
+    user_id: str,
+    task_id: str,
+    status: str,
+    job_attempt: int = 0,
+    retry_recovered: bool = False,
+    retry_exhausted: bool = False,
+    failure_type: str | None = None,
+    failure_summary: str | None = None,
+    failed_at: datetime | None = None,
+    force_requeue_count: int = 0,
+    updated_at: datetime | None = None,
+    **kwargs,
+) -> None:
+    with get_engine().begin() as connection:
+        connection.execute(
+            insert(reconciliation_task_table).values(
+                user_id=user_id,
+                task_id=task_id,
+                scenario_type="BANK_ENTERPRISE",
+                task_name=f"{task_id} reconciliation",
+                status=status,
+                total_bank_rows=0,
+                total_clear_rows=0,
+                auto_fixed_rows=0,
+                pending_ai_rows=0,
+                pending_human_rows=0,
+                unresolved_rows=0,
+                ai_processed_rows=0,
+                fallback_l2_rows=0,
+                fallback_l3_rows=0,
+                total_llm_tokens=0,
+                total_llm_cost=Decimal("0"),
+                job_attempt=job_attempt,
+                retry_recovered=retry_recovered,
+                retry_exhausted=retry_exhausted,
+                failure_type=failure_type,
+                failure_summary=failure_summary,
+                failed_at=failed_at,
+                force_requeue_count=force_requeue_count,
+                updated_at=updated_at,
+                **kwargs,
+            )
+        )
+
+
+def test_arq_recovery_snapshot_empty_data() -> None:
+    _reset_metrics_tables()
+    ms = MetricsService()
+
+    snap = ms.get_arq_recovery_snapshot(user_id="demo_user")
+    assert snap == {
+        "source": "database_current_task_state",
+        "retry_count": 0,
+        "retry_recovered_count": 0,
+        "retry_recovery_rate": 0.0,
+        "retry_exhausted_count": 0,
+        "stuck_running_count": 0,
+        "force_requeue_count": 0,
+    }
+
+
+def test_arq_recovery_snapshot_with_mixed_recovery_data() -> None:
+    _reset_metrics_tables()
+
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_S1", status="COMPLETED", job_attempt=1)
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_S2", status="COMPLETED", job_attempt=2, retry_recovered=True)
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_S3", status="COMPLETED", job_attempt=3, retry_recovered=True)
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_F1", status="FAILED", job_attempt=3, retry_exhausted=True, failure_type="OperationalError")
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_F2", status="FAILED", job_attempt=3, retry_exhausted=True, failure_type="ConnectionError")
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_FQ1", status="QUEUED", force_requeue_count=2)
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_FQ2", status="COMPLETED", force_requeue_count=1)
+
+    ms = MetricsService()
+    snap = ms.get_arq_recovery_snapshot(user_id="demo_user")
+
+    assert snap["source"] == "database_current_task_state"
+    # retry_count = sum(max(job_attempt - 1, 0)) = (1-1=0)+(2-1=1)+(3-1=2)+(3-1=2)+(3-1=2)+0+0 = 7
+    assert snap["retry_count"] == 7
+    # retry_recovered_count = count(retry_recovered==true) = 2 (T_S2, T_S3)
+    assert snap["retry_recovered_count"] == 2
+    # retry_recovery_rate = 2 / count(job_attempt>1) = 2 / 5 (T_S2, T_S3, T_F1, T_F2, no T_S1, no T_FQ1, no T_FQ2)
+    # wait: T_F1 and T_F2 have job_attempt=3 > 1, so denominator is 2 + 2 = 4. So rate = 2/4 = 0.5
+    assert snap["retry_recovery_rate"] == 0.5
+    # retry_exhausted_count = count(retry_exhausted==true) = 2 (T_F1, T_F2)
+    assert snap["retry_exhausted_count"] == 2
+    # stuck_running_count = 0 (no RUNNING tasks)
+    assert snap["stuck_running_count"] == 0
+    # force_requeue_count = sum = 2 + 1 = 3
+    assert snap["force_requeue_count"] == 3
+
+
+def test_arq_recovery_snapshot_stuck_running_boundary() -> None:
+    _reset_metrics_tables()
+
+    now = datetime.now(timezone.utc)
+    stuck = now - timedelta(seconds=settings.arq_job_timeout_seconds + 10)
+    recent = now - timedelta(seconds=10)
+
+    _insert_task_with_recovery(
+        user_id="demo_user", task_id="T_STUCK", status="RUNNING",
+        updated_at=stuck,
+    )
+    _insert_task_with_recovery(
+        user_id="demo_user", task_id="T_OK", status="RUNNING",
+        updated_at=recent,
+    )
+
+    ms = MetricsService()
+    snap = ms.get_arq_recovery_snapshot(user_id="demo_user")
+    assert snap["stuck_running_count"] == 1
+
+
+def test_arq_recovery_snapshot_filters_other_users() -> None:
+    _reset_metrics_tables()
+
+    _insert_task_with_recovery(user_id="other_user", task_id="T_O1", status="FAILED", job_attempt=3, retry_exhausted=True, force_requeue_count=5)
+    _insert_task_with_recovery(user_id="other_user", task_id="T_O2", status="COMPLETED", job_attempt=2, retry_recovered=True)
+
+    ms = MetricsService()
+    snap = ms.get_arq_recovery_snapshot(user_id="demo_user")
+    assert snap["retry_count"] == 0
+    assert snap["retry_recovered_count"] == 0
+    assert snap["retry_exhausted_count"] == 0
+    assert snap["force_requeue_count"] == 0
+
+
+def test_dashboard_hung_count_unchanged_by_stage_25() -> None:
+    _reset_metrics_tables()
+    # hung_count only counts AI_RUNNING, not RUNNING
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_HUNG", status="AI_RUNNING", job_attempt=0)
+    _insert_task_with_recovery(user_id="demo_user", task_id="T_RUNNING", status="RUNNING", job_attempt=1)
+
+    result = metrics_service.get_dashboard(user_id="demo_user")
+    assert result.online.hung_count == 1
