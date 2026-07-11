@@ -115,6 +115,7 @@ def test_worker_skips_task_that_is_already_terminal(tmp_path: Path, monkeypatch)
         pending_ai_rows=0,
         pending_human_rows=0,
     )
+    task_service.update_status(user_id="demo_user", task_id=task_id, status="COMPLETED")
     called = False
 
     def fail_if_called(**kwargs) -> None:
@@ -134,4 +135,4 @@ def test_worker_skips_task_that_is_already_terminal(tmp_path: Path, monkeypatch)
     assert called is False
     task = task_service.get(user_id="demo_user", task_id=task_id)
     assert task is not None
-    assert task.status == "UPLOADED"
+    assert task.status == "COMPLETED"

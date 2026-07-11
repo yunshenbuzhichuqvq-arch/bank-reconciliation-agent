@@ -220,7 +220,7 @@ class ReconciliationService:
     ) -> None:
         log.info("reconciliation_job_started", task_id=task_id, user_id=user_id)
         existing_task = task_service.get(user_id=user_id, task_id=task_id)
-        if existing_task is not None and existing_task.status in {"UPLOADED", "COMPLETED"}:
+        if existing_task is not None and existing_task.status == "COMPLETED":
             log.info("reconciliation_job_skipped", task_id=task_id, user_id=user_id)
             return
         task_service.update_status(user_id=user_id, task_id=task_id, status="RUNNING")

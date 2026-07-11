@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -411,3 +412,331 @@ class TestMarkAttemptSucceeded:
         t2 = ts.get(user_id="u2", task_id="t_shared")
         assert t2 is not None
         assert t2.retry_recovered is False
+
+
+# ---------------------------------------------------------------------------
+# TASK-25.2 Direct function boundary tests
+# ---------------------------------------------------------------------------
+
+
+def test_worker_function_throws_retry_on_attempt_1(monkeypatch) -> None:
+    from arq import Retry
+    from bank_reconciliation_agent.worker import run_reconciliation_job as wfn
+
+    task_service.replace_task(
+        user_id="u_retry", task_id="t_retry_1",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+
+    def mock_service(**kwargs: object) -> None:
+        raise RedisConnectionError("redis gone")
+
+    monkeypatch.setattr(
+        reconciliation_service, "run_reconciliation_job", mock_service
+    )
+
+    with pytest.raises(Retry):
+        asyncio.run(wfn({"job_try": 1}, user_id="u_retry", task_id="t_retry_1",
+                        scenario_type="BANK_ENTERPRISE", bank_path="b", clear_path="c"))
+
+
+def test_worker_function_throws_retry_on_attempt_2(monkeypatch) -> None:
+    from arq import Retry
+    from bank_reconciliation_agent.worker import run_reconciliation_job as wfn
+
+    task_service.replace_task(
+        user_id="u_retry", task_id="t_retry_2",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+
+    def mock_service(**kwargs: object) -> None:
+        raise RedisConnectionError("redis gone")
+
+    monkeypatch.setattr(
+        reconciliation_service, "run_reconciliation_job", mock_service
+    )
+    # On attempt 1, max_tries=3: 1 < 3 → Retry
+    with pytest.raises(Retry):
+        asyncio.run(wfn({"job_try": 2}, user_id="u_retry", task_id="t_retry_2",
+                        scenario_type="BANK_ENTERPRISE", bank_path="b", clear_path="c"))
+
+
+def test_worker_function_reraises_on_attempt_3(monkeypatch) -> None:
+    from bank_reconciliation_agent.worker import run_reconciliation_job as wfn
+
+    task_service.replace_task(
+        user_id="u_retry", task_id="t_retry_3",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+
+    def mock_service(**kwargs: object) -> None:
+        raise OperationalError("db gone", {}, Exception("inner"))
+
+    monkeypatch.setattr(
+        reconciliation_service, "run_reconciliation_job", mock_service
+    )
+    with pytest.raises(OperationalError):
+        asyncio.run(wfn({"job_try": 3}, user_id="u_retry", task_id="t_retry_3",
+                        scenario_type="BANK_ENTERPRISE", bank_path="b", clear_path="c"))
+
+    task = task_service.get(user_id="u_retry", task_id="t_retry_3")
+    assert task is not None
+    assert task.status == "FAILED"
+    assert task.job_attempt == 3
+    assert task.retry_exhausted is True
+    assert task.failure_type == "OperationalError"
+
+
+def test_worker_function_terminal_cas_noop_still_reraises(monkeypatch) -> None:
+    from bank_reconciliation_agent.worker import run_reconciliation_job as wfn
+
+    task_service.replace_task(
+        user_id="u_retry", task_id="t_noop",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+    # First, mark FAILED already (simulating prior CAS)
+    task_service.mark_failed_if_active(
+        user_id="u_retry", task_id="t_noop",
+        attempt=3, failure_type="OperationalError",
+        failure_summary="database operation unavailable",
+    )
+
+    def mock_service(**kwargs: object) -> None:
+        raise OperationalError("db gone", {}, Exception("inner"))
+
+    monkeypatch.setattr(
+        reconciliation_service, "run_reconciliation_job", mock_service
+    )
+    with pytest.raises(OperationalError):
+        asyncio.run(wfn({"job_try": 3}, user_id="u_retry", task_id="t_noop",
+                        scenario_type="BANK_ENTERPRISE", bank_path="b", clear_path="c"))
+
+
+def test_worker_function_business_error_not_converted_to_retry(monkeypatch) -> None:
+    from bank_reconciliation_agent.worker import run_reconciliation_job as wfn
+
+    task_service.replace_task(
+        user_id="u_biz", task_id="t_biz",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+
+    def mock_service(**kwargs: object) -> None:
+        raise ValueError("business logic error")
+
+    monkeypatch.setattr(
+        reconciliation_service, "run_reconciliation_job", mock_service
+    )
+    with pytest.raises(ValueError):
+        asyncio.run(wfn({"job_try": 1}, user_id="u_biz", task_id="t_biz",
+                        scenario_type="BANK_ENTERPRISE", bank_path="b", clear_path="c"))
+
+
+# ---------------------------------------------------------------------------
+# TASK-25.2 Real Worker + fakeredis tests
+# ---------------------------------------------------------------------------
+
+
+def _make_fakeredis_pool():
+    from arq.connections import ArqRedis
+    from fakeredis.aioredis import FakeRedis
+
+    fake = FakeRedis(decode_responses=False, version=(7,))
+    return ArqRedis(connection_pool=fake.connection_pool)
+
+
+def _run_worker_and_get_task(
+    fake_pool,
+    user_id: str,
+    task_id: str,
+    *,
+    fail_on: set[int],
+    error_cls: type[Exception],
+    max_tries: int = 3,
+) -> tuple[int, object]:
+    from unittest.mock import patch
+
+    from arq.worker import Worker
+    from bank_reconciliation_agent.worker import run_reconciliation_job as real_worker_fn
+    from bank_reconciliation_agent.services.reconciliation import reconciliation_service
+
+    call_count = [0]
+    original = reconciliation_service.run_reconciliation_job
+
+    def mock_service(**kwargs: object) -> None:
+        call_count[0] += 1
+        if call_count[0] in fail_on:
+            if error_cls is OperationalError:
+                raise OperationalError("stmt", {}, Exception("mock db error"))
+            raise error_cls(f"mock {error_cls.__name__} on attempt {call_count[0]}")
+        task_service.update_status(
+            user_id=kwargs["user_id"], task_id=kwargs["task_id"], status="UPLOADED"
+        )
+
+    reconciliation_service.run_reconciliation_job = mock_service
+
+    async def _run() -> None:
+        await fake_pool.enqueue_job(
+            "run_reconciliation_job",
+            user_id=user_id,
+            task_id=task_id,
+            scenario_type="BANK_ENTERPRISE",
+            bank_path="/fake/bank.xlsx",
+            clear_path="/fake/clear.xlsx",
+        )
+        with patch("arq.worker.log_redis_info"):
+            worker = Worker(
+                functions=[real_worker_fn],
+                redis_pool=fake_pool,
+                poll_delay=0.01,
+                max_tries=max_tries,
+                job_timeout=10,
+                burst=True,
+            )
+            try:
+                await worker.run_check(max_burst_jobs=5)
+            except Exception:
+                pass
+            await worker.close()
+
+    try:
+        asyncio.run(_run())
+    finally:
+        reconciliation_service.run_reconciliation_job = original
+
+    final_task = task_service.get(user_id=user_id, task_id=task_id)
+    return call_count[0], final_task
+
+
+def test_real_worker_redis_error_recovers_on_attempt_2(monkeypatch) -> None:
+    task_service.replace_task(
+        user_id="u_rw", task_id="t_redis_rec",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+    fake_pool = _make_fakeredis_pool()
+    count, task = _run_worker_and_get_task(
+        fake_pool, "u_rw", "t_redis_rec",
+        fail_on={1}, error_cls=RedisConnectionError,
+    )
+    assert count == 2
+    assert task is not None
+    assert task.status == "UPLOADED"
+    assert task.job_attempt == 2
+    assert task.retry_recovered is True
+    assert task.retry_exhausted is False
+
+
+def test_real_worker_op_error_recovers_on_attempt_3(monkeypatch) -> None:
+    task_service.replace_task(
+        user_id="u_rw", task_id="t_db_rec",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+    fake_pool = _make_fakeredis_pool()
+    count, task = _run_worker_and_get_task(
+        fake_pool, "u_rw", "t_db_rec",
+        fail_on={1, 2}, error_cls=OperationalError,
+    )
+    assert count == 3
+    assert task is not None
+    assert task.status == "UPLOADED"
+    assert task.job_attempt == 3
+    assert task.retry_recovered is True
+    assert task.retry_exhausted is False
+
+
+def test_real_worker_exhaustion_on_3rd_attempt(monkeypatch) -> None:
+    task_service.replace_task(
+        user_id="u_rw", task_id="t_exhaust",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+    fake_pool = _make_fakeredis_pool()
+    count, task = _run_worker_and_get_task(
+        fake_pool, "u_rw", "t_exhaust",
+        fail_on={1, 2, 3}, error_cls=RedisConnectionError,
+    )
+    assert count == 3
+    assert task is not None
+    assert task.status == "FAILED"
+    assert task.job_attempt == 3
+    assert task.retry_exhausted is True
+    assert task.retry_recovered is False
+    assert task.failure_type == "ConnectionError"
+
+
+def test_real_worker_business_error_not_retried(monkeypatch) -> None:
+    from arq.worker import Worker
+    from bank_reconciliation_agent.worker import run_reconciliation_job as real_worker_fn
+    from bank_reconciliation_agent.services.reconciliation import reconciliation_service
+
+    task_service.replace_task(
+        user_id="u_rw", task_id="t_biz",
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0, total_clear_rows=0,
+        auto_fixed_rows=0, pending_ai_rows=0, pending_human_rows=0,
+        status="QUEUED",
+    )
+    fake_pool = _make_fakeredis_pool()
+    call_count = [0]
+    original = reconciliation_service.run_reconciliation_job
+
+    def mock_service(**kwargs: object) -> None:
+        call_count[0] += 1
+        task_service.update_status(
+            user_id=kwargs["user_id"], task_id=kwargs["task_id"], status="FAILED"
+        )
+
+    reconciliation_service.run_reconciliation_job = mock_service
+
+    async def _run() -> None:
+        await fake_pool.enqueue_job(
+            "run_reconciliation_job",
+            user_id="u_rw", task_id="t_biz",
+            scenario_type="BANK_ENTERPRISE",
+            bank_path="/fake/bank.xlsx", clear_path="/fake/clear.xlsx",
+        )
+        from unittest.mock import patch
+
+        with patch("arq.worker.log_redis_info"):
+            worker = Worker(
+                functions=[real_worker_fn], redis_pool=fake_pool,
+                poll_delay=0.01, max_tries=3, job_timeout=10,
+                burst=True,
+            )
+            try:
+                await worker.run_check(max_burst_jobs=5)
+            except Exception:
+                pass
+            await worker.close()
+
+    try:
+        asyncio.run(_run())
+    finally:
+        reconciliation_service.run_reconciliation_job = original
+
+    assert call_count[0] == 1
+    task = task_service.get(user_id="u_rw", task_id="t_biz")
+    assert task is not None
+    assert task.status == "FAILED"

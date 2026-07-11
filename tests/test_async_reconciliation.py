@@ -56,6 +56,8 @@ def test_worker_completes_queued_reconciliation_with_sync_equivalent_results(
         task = task_service.get(user_id="demo_user", task_id=queued_result.task_id)
         assert task is not None
         assert task.status == "UPLOADED"
+        assert task.job_attempt == 1
+        assert task.retry_recovered is False
         assert task.total_bank_rows == sync_result.total_bank_rows
         assert task.total_clear_rows == sync_result.total_clear_rows
         assert task.auto_fixed_rows == sync_result.auto_fixed_rows
