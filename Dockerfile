@@ -6,11 +6,11 @@ RUN pip install --no-cache-dir uv==${UV_VERSION}
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
+COPY src/ ./src/
 
 RUN uv sync --frozen --no-dev --no-extra embedding
 
-COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY rules/ ./rules/
 COPY data/rag/ ./data/rag/

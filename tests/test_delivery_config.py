@@ -187,6 +187,30 @@ def test_dockerfile_uses_uv_frozen() -> None:
     assert "--frozen" in content, "Dockerfile must use uv sync --frozen"
 
 
+def test_dockerfile_copies_package_metadata_before_sync() -> None:
+    lines = DOCKERFILE_PATH.read_text(encoding="utf-8").splitlines()
+    sync_line = None
+    readme_line = None
+    src_line = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("RUN uv sync"):
+            sync_line = i
+        if stripped.startswith("COPY ") and "README.md" in stripped:
+            readme_line = i
+        if stripped == "COPY src/ ./src/":
+            if src_line is None:
+                src_line = i
+    assert readme_line is not None, "Dockerfile must COPY README.md"
+    assert src_line is not None, "Dockerfile must COPY src/ before uv sync"
+    assert readme_line < sync_line, (
+        f"README.md COPY (line {readme_line + 1}) must be before uv sync (line {sync_line + 1})"
+    )
+    assert src_line < sync_line, (
+        f"src/ COPY (line {src_line + 1}) must be before uv sync (line {sync_line + 1})"
+    )
+
+
 def test_dockerfile_no_embedding_install() -> None:
     content = DOCKERFILE_PATH.read_text(encoding="utf-8")
     assert "[embedding]" not in content, "Dockerfile must not install embedding extra"
