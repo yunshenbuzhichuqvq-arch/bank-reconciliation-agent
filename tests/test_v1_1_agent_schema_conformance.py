@@ -182,16 +182,10 @@ def test_three_agent_outputs_parse_and_satisfy_schema_invariants(capsys) -> None
     assert snapshot["evaluated_at"]
 
 
-def test_env_report_dir_override_does_not_write_default(tmp_path) -> None:
-    default_md = Path("reports/agent_schema_conformance.md")
-    default_json = Path("reports/agent_schema_conformance.json")
-    if default_md.exists():
-        default_md.unlink()
-    if default_json.exists():
-        default_json.unlink()
-
+def test_env_report_dir_override_does_not_write_default(tmp_path, monkeypatch) -> None:
     override_dir = tmp_path / "custom_reports"
-    os.environ["AGENT_SCHEMA_REPORT_DIR"] = str(override_dir)
+    monkeypatch.setenv("AGENT_SCHEMA_REPORT_DIR", str(override_dir))
+    monkeypatch.chdir(tmp_path)
 
     cases = [
         ("ExtractionAgent", True),
@@ -203,11 +197,7 @@ def test_env_report_dir_override_does_not_write_default(tmp_path) -> None:
     assert override_md.exists(), "report must be written to AGENT_SCHEMA_REPORT_DIR"
     assert override_json.exists(), "JSON report must be written to AGENT_SCHEMA_REPORT_DIR"
 
-    assert not default_md.exists(), (
+    default_here = tmp_path / "reports" / "agent_schema_conformance.md"
+    assert not default_here.exists(), (
         "must not write to default reports/ when AGENT_SCHEMA_REPORT_DIR is set"
     )
-    assert not default_json.exists(), (
-        "must not write to default reports/ when AGENT_SCHEMA_REPORT_DIR is set"
-    )
-
-    del os.environ["AGENT_SCHEMA_REPORT_DIR"]

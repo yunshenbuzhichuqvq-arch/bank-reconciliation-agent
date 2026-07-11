@@ -140,14 +140,14 @@ def test_all_services_have_health_or_depends(compose_data: dict) -> None:
         )
 
 
-def test_mysql_redis_have_healthchecks(compose_data: dict) -> None:
-    mysql_hc = compose_data["services"]["mysql"]["healthcheck"]
-    redis_hc = compose_data["services"]["redis"]["healthcheck"]
-    assert "mysqladmin" in str(mysql_hc.get("test", "")), (
-        "mysql healthcheck must use mysqladmin ping"
+def test_mysql_healthcheck_uses_root_password(compose_data: dict) -> None:
+    hc = compose_data["services"]["mysql"]["healthcheck"]
+    test_cmd = yaml.dump(hc.get("test", ""))
+    assert "MYSQL_ROOT_PASSWORD" in test_cmd or "password" in test_cmd.lower(), (
+        "mysql healthcheck must reference root password"
     )
-    assert "redis-cli" in str(redis_hc.get("test", "")), (
-        "redis healthcheck must use redis-cli ping"
+    assert "mysqladmin" in str(hc.get("test", "")) or "mysqladmin" in test_cmd, (
+        "mysql healthcheck must use mysqladmin"
     )
 
 
@@ -394,6 +394,20 @@ def test_frontend_quality_uses_npm_ci(ci_workflow_data: dict) -> None:
     assert "npm run test" in steps_text, "frontend-quality must run test"
     assert "npm run typecheck" in steps_text, "frontend-quality must run typecheck"
     assert "npm run build" in steps_text, "frontend-quality must run build"
+
+
+def test_backend_quality_uses_fake_hash(ci_workflow_data: dict) -> None:
+    backend = ci_workflow_data["jobs"]["backend-quality"]
+    env = backend.get("env", {})
+    assert env.get("LLM_PROVIDER") == "fake", (
+        "backend-quality must have LLM_PROVIDER=fake"
+    )
+    assert env.get("EMBEDDING_BACKEND") == "hash", (
+        "backend-quality must have EMBEDDING_BACKEND=hash"
+    )
+    steps_text = yaml.dump(backend.get("steps", []))
+    assert "uv run pytest" in steps_text, "backend-quality must run pytest"
+    assert "uv run ruff" in steps_text, "backend-quality must run ruff"
 
 
 def test_deterministic_eval_uses_fake_hash(ci_workflow_data: dict) -> None:

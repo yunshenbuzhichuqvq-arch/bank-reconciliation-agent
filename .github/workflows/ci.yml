@@ -14,6 +14,9 @@ concurrency:
 jobs:
   backend-quality:
     runs-on: ubuntu-24.04
+    env:
+      LLM_PROVIDER: fake
+      EMBEDDING_BACKEND: hash
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
