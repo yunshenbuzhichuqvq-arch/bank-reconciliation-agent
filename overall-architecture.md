@@ -53,9 +53,9 @@
             ┌────────────┴────────────┐
             ▼                         ▼
 ┌────────────────────────┐  ┌────────────────────────────────┐
-│ 确定性计算层             │  │ Multi-Agent 编排层  LangGraph    │
-│ Pandas 清洗 | 三阶段匹配 │  │ ExtractionAgent | AuditAgent    │
-│ YAML 规则 | Decimal 计算 │  │ 状态机 + 条件路由 + 三级 Fallback │
+│ 确定性计算层             │  │ Multi-Agent 编排层            │
+│ Pandas 清洗 | 三阶段匹配 │  │ Plain Python orchestration    │
+│ YAML 规则 | Decimal 计算 │  │ + LangGraph Checkpoint 子图    │
 │ 异常分支路由 | 事务写入   │  │ (审计时调用 RAG 子流程)          │
 └────────────────────────┘  └────────────────────────────────┘
             │                         │
@@ -187,7 +187,6 @@ rules:
 
 ### 2.4 Multi-Agent 编排层
 Multi-Agent 编排层使用 LangGraph 实现 HumanReview checkpoint 子图。Agent 不是多个聊天机器人,而是带状态、工具、边界和失败兜底的业务节点。主对账工作流为 plain Python service orchestration 串联;LangGraph 仅用于可选 HumanReviewNode 挂起/恢复（Checkpoint 持久化）。
-Multi-Agent 编排层使用 LangGraph 实现状态机和节点路由。Agent 不是多个聊天机器人,而是带状态、工具、边界和失败兜底的业务节点。**主链路只有 2 个 Agent**(ExtractionAgent + AuditAgent),TraceAgent 作为可选增强。
 
 - `PreCheckNode`:规则预处理节点,不依赖 LLM,完成基础对账和异常分类。
 - `ExtractionAgent`:提取 Agent,将不规范摘要 / 户名结构化为标准 JSON。
@@ -197,7 +196,7 @@ Multi-Agent 编排层使用 LangGraph 实现状态机和节点路由。Agent 不
 
 > 报告生成不设独立 Agent:统计走 SQL 聚合 + Markdown 模板,LLM 只做文字润色(可选)。
 
-#### 2.4.1 条件路由(显式建模非 happy-path)
+#### 2.4.1 条件路由（历史设计，当前为 plain Python orchestration）
 
 ```text
 START
@@ -214,9 +213,11 @@ START
   → 人工审批 → 恢复执行 → END
 ```
 
+以上路由图描述的是 LangGraph 目标设计；当前实现为 plain Python service orchestration，调用链等价但不由 LangGraph 状态机驱动。LangGraph 当前仅用于 HumanReviewNode 的 Checkpoint 挂起/恢复。
+
 价值在于显式建模了出错、低置信、工具失败、无依据等**非 happy-path 分支**,而不是只跑通"对上了"的乐观路径。
 
-ExtractionAgent(语义提取)和 RAG 检索(规则召回)在同一笔异常上原则上可以并行,通过 LangGraph 的 `Send` API 汇聚结果给 AuditAgent;是否并行依据真实 LLM 延迟数据决定,若 RAG 在本地显著快于 LLM 则保持串行,避免不必要的并行复杂度。
+ExtractionAgent(语义提取)和 RAG 检索(规则召回)当前在 plain Python 串行执行。未来若引入 LangGraph 主图，可通过 `Send` API 将两者并行后汇聚给 AuditAgent；是否并行依据真实 LLM 延迟数据决定。
 
 #### 2.4.2 多级 Fallback 策略
 
@@ -400,9 +401,9 @@ Agent 输出不直接落库,必须通过校验管线的 Schema 校验、硬约�
 
 ## 4. Multi-Agent 协作架构
 
-### 4.1 全局状态结构
+### 4.1 全局状态结构（LangGraph 目标设计参考）
 
-LangGraph 中各节点共享 `ReconciliationState`。相比原设计,去掉了多租户(`thread_id`)和三层记忆字段,新增 `historical_cases` 承载 Fallback few-shot:
+以下 `ReconciliationState` 为 LangGraph 目标设计中的共享状态定义；当前实现为 plain Python service orchestration，各服务通过函数参数传递上下文。HumanReviewNode 的 checkpoint 持久化仍使用 LangGraph 子图。
 
 ```python
 from typing import Any, Dict, List, Optional, TypedDict
@@ -439,7 +440,7 @@ class ReconciliationState(TypedDict):
 | `HumanReviewNode` | 状态节点 | 挂起流程,等待人工审批(支持 Checkpoint 恢复) | 一(基础)→ 二(Checkpoint) |
 | `TraceAgent` | LLM(**可选**) | 跨期入账、后续到账与原始凭证追溯,Fallback L3 增强 | 可选 |
 
-### 4.3 路由规则
+### 4.3 路由规则（LangGraph 目标设计）
 
 ```text
 START
@@ -459,6 +460,8 @@ START
   → Fallback 耗尽 → HumanReviewNode(Checkpoint 挂起)
   → 人工审批完成 → 恢复执行 → END
 ```
+
+以上路由为 LangGraph 目标设计参考；当前实现为等价 plain Python service orchestration，LangGraph 仅用于 HumanReviewNode Checkpoint。
 
 ### 4.4 失败处理
 
@@ -629,7 +632,7 @@ Reranker 默认使用轻量 token-overlap/scoring；需要更高中文精度时�
 ─────────────────────────────────────────────────────────────
  Context = System Prompt + RAG Context + Current Item + Tool Results
           (+ Fallback L2 时注入历史人工确认案例)
- LangGraph Checkpoint 保存状态
+ HumanReview 节点使用 LangGraph Checkpoint 持久化挂起状态
  输出结构化 JSON
 ─────────────────────────────────────────────────────────────
                     输出校验管线
@@ -702,7 +705,7 @@ Reranker 默认使用轻量 token-overlap/scoring；需要更高中文精度时�
 
 ### 阶段二 · Agent 工程做深  🔶 大部分完成
 
-- LangGraph 状态机 + 条件路由(显式建模非 happy-path 分支)。
+- LangGraph 状态机 + 条件路由(早期设计；当前为 plain Python orchestration，LangGraph 仅用于 HumanReview Checkpoint 子图)。
 - ExtractionAgent 接入;三级 Fallback(L1 标准 → L2 历史 few-shot → L3 可选追溯)。
 - 增强 RAG:Dense + BM25 + RRF + Reranker(token-overlap/scoring，可换 Cross-Encoder)+ Query Rewrite(可开关)。
 - Agent 输出校验管线 4 阶段 + 硬约束 C1–C6。

@@ -66,7 +66,7 @@
 
 - **ExtractionAgent 接入**:从正则匹配升级为 DeepSeek V4 Pro 调用,从模糊摘要 / 户名结构化提取线索。
 - **AuditAgent LLM 化**:从 if-else 升级为 DeepSeek V4 Pro 调用,基于 RAG 证据输出结构化审计决策。三个 LLM 调用点均通过 OpenAI 兼容接口(`openai` SDK + DeepSeek base_url)。
-- **LangGraph 条件路由**:PreCheckNode → ExceptionRouter → 条件分支 → AuditAgent → END;按 `exception_branch` 决定是否调用 ExtractionAgent、TraceAgent(可选)或 RAG 子流程。串行执行,是否并行依据真实 LLM 延迟数据再定。
+- **LangGraph 条件路由**:（早期设计）PreCheckNode → ExceptionRouter → 条件分支 → AuditAgent → END;按 `exception_branch` 决定是否调用 ExtractionAgent、TraceAgent(可选)或 RAG 子流程。后续演进为 plain Python orchestration，LangGraph 仅保留 HumanReviewNode Checkpoint 子图。
 - **增强 RAG**:Dense + BM25 双路召回 + RRF 融合 + Reranker(token-overlap/scoring 逻辑，可换 Cross-Encoder)+ Query Rewrite(DeepSeek 调用)。Reranker 与 Query Rewrite 可开关,关闭后主链路仍可运行。
 - **3 级 Fallback**:L1 标准 → L2 历史人工确认案例 few-shot(来自差错台账)→ L3 可选追溯 / 换角度。RAG 无命中直接转人工。
 - **输出校验管线**:Schema 校验(+有界重试)→ 硬约束 C1–C6 → 决策 / Fallback 路由 → 事务落库。
@@ -587,7 +587,7 @@ CREATE TABLE t_user (
 
 `ReconciliationState` 与节点定义见 `overall-architecture.md` §4。主链路 2 个 Agent(ExtractionAgent + AuditAgent),TraceAgent 可选;报告走 SQL 聚合 + 模板,LLM 润色可选。
 
-### 7.2 工作流路由
+### 7.2 工作流路由（早期 LangGraph 设计参考）
 
 ```text
 PreCheckNode(按 scenario_type 选规则库 + 异常分支路由)
@@ -596,6 +596,8 @@ PreCheckNode(按 scenario_type 选规则库 + 异常分支路由)
   → 输出校验管线(Schema → 硬约束 → 决策/Fallback → 事务)
   → confidence < 0.85 → 多级 Fallback → 仍低 → HumanReviewNode(Checkpoint 挂起/恢复)
 ```
+
+以上为早期 LangGraph 设计；当前实现为等价 plain Python service orchestration，LangGraph 仅用于 HumanReviewNode Checkpoint。
 
 ### 7.3 Agent 输出约束
 
@@ -850,7 +852,7 @@ ExceptionRouter 按优先级逐一匹配,第一个命中即返回。`RuleEngine.
 ### 14.2 阶段二
 
 - ExtractionAgent / AuditAgent 为真实 DeepSeek V4 Pro 调用(OpenAI 兼容接口)。
-- LangGraph 条件路由按 exception_branch 分发;ExceptionRouter 覆盖银企对账异常分支全集。
+- LangGraph 条件路由（早期设计，当前为 plain Python orchestration，LangGraph 仅用于 HumanReview Checkpoint 子图）；ExceptionRouter 覆盖银企对账异常分支全集。
 - 3 级 Fallback 可工作(L1 标准 → L2 历史 few-shot → L3 可选追溯);RAG 无命中直接转人工。
 - 增强 RAG(Dense+BM25+RRF+Reranker+Query Rewrite)可工作,Reranker / Rewrite 可开关。
 - 输出校验管线 4 阶段可工作;硬约束 C1–C6 生效。
