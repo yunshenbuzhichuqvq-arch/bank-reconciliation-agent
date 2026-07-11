@@ -44,3 +44,16 @@ def test_circuit_breaker_reopens_when_half_open_probe_fails() -> None:
     assert breaker.record_failure() == "OPEN"
     assert breaker.state == "OPEN"
     assert breaker.allow_request() is False
+
+
+def test_circuit_breaker_success_resets_intermittent_failures() -> None:
+    """LLM breaker relies on scattered failures not accumulating to OPEN."""
+    breaker = CircuitBreaker(fail_threshold=3, open_seconds=30, time_fn=lambda: 0.0)
+
+    assert breaker.record_failure() == "CLOSED"
+    assert breaker.record_failure() == "CLOSED"
+    assert breaker.record_success() == "CLOSED"
+
+    assert breaker.record_failure() == "CLOSED"
+    assert breaker.record_failure() == "CLOSED"
+    assert breaker.state == "CLOSED"

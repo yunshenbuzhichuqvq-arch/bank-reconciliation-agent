@@ -7,9 +7,11 @@ from redis.exceptions import RedisError
 import structlog
 
 from bank_reconciliation_agent.core.llm.provider import (
+    LLMCallError,
     LLMProvider,
     LLMResult,
     LLMUnavailable,
+    ResponseValidator,
 )
 
 
@@ -49,6 +51,7 @@ class RateLimitedLLMProvider:
         *,
         temperature: float = 0.0,
         response_format: Literal["text", "json_object"] = "json_object",
+        response_validator: ResponseValidator | None = None,
     ) -> LLMResult:
         acquired_concurrency = False
         try:
@@ -67,6 +70,7 @@ class RateLimitedLLMProvider:
                 messages,
                 temperature=temperature,
                 response_format=response_format,
+                response_validator=response_validator,
             )
 
         try:
@@ -74,6 +78,7 @@ class RateLimitedLLMProvider:
                 messages,
                 temperature=temperature,
                 response_format=response_format,
+                response_validator=response_validator,
             )
         finally:
             self._release_concurrency_degraded()
@@ -138,7 +143,11 @@ class RateLimitedLLMProvider:
             return
         if time.time() - started_at >= self.max_wait_seconds:
             self._record_wait(dimension, started_at, rejected=True)
-            raise LLMUnavailable("rate limit wait timeout")
+            raise LLMCallError(
+                failure_type="rate_limited",
+                retryable=True,
+                sanitized_reason="rate limit wait timeout",
+            )
         time.sleep(self._poll_seconds)
 
     def _record_wait(

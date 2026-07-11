@@ -1,16 +1,44 @@
 import json
 import re
-from typing import Any, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import redis
 from redis.exceptions import RedisError
 import structlog
 
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.services.circuit_breaker import BreakerState
 
 
 log = structlog.get_logger()
+
+
+LLMFailureType = Literal[
+    "timeout",
+    "rate_limited",
+    "provider_5xx",
+    "auth_config",
+    "invalid_json",
+    "schema_invalid",
+]
+ResponseValidator = Callable[[str], bool]
+
+
+class LLMUnavailable(RuntimeError):
+    """Raised when the configured LLM provider cannot return a usable response."""
+
+
+class LLMAttemptRecord(BaseModel):
+    physical_attempt: int
+    outcome: Literal["success", "failure", "breaker_open"]
+    failure_type: LLMFailureType | None = None
+    duration_ms: int
+    backoff_seconds: float = 0.0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    breaker_state_before: BreakerState | None = None
+    breaker_state_after: BreakerState | None = None
 
 
 class LLMResult(BaseModel):
@@ -19,10 +47,82 @@ class LLMResult(BaseModel):
     completion_tokens: int
     model: str
     cached: bool = False
+    attempts: list[LLMAttemptRecord] = Field(default_factory=list)
 
 
-class LLMUnavailable(RuntimeError):
-    """Raised when the configured LLM provider cannot return a usable response."""
+class LLMCallError(LLMUnavailable):
+    """Classified LLM failure carrying a stable machine-readable failure type."""
+
+    def __init__(
+        self,
+        *,
+        failure_type: LLMFailureType,
+        retryable: bool,
+        sanitized_reason: str,
+        attempts: list[LLMAttemptRecord] | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        super().__init__(sanitized_reason)
+        self.failure_type = failure_type
+        self.retryable = retryable
+        self.sanitized_reason = sanitized_reason
+        self.attempts = attempts if attempts is not None else []
+        self.fallback_reason = fallback_reason
+
+
+def _status_code(exc: BaseException) -> int | None:
+    for attr in ("status_code", "status", "http_status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    response = getattr(exc, "response", None)
+    if response is not None:
+        value = getattr(response, "status_code", None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def classify_llm_exception(exc: BaseException) -> LLMCallError:
+    """Map a transport-layer exception to a stable :class:`LLMCallError`.
+
+    Only stable machine types and sanitized reasons are exposed; concrete SDK
+    exception classes stay internal and are preserved via exception chaining.
+    """
+
+    name = type(exc).__name__.lower()
+    status = _status_code(exc)
+
+    if isinstance(exc, TimeoutError) or "timeout" in name:
+        failure_type: LLMFailureType = "timeout"
+        return LLMCallError(
+            failure_type=failure_type,
+            retryable=True,
+            sanitized_reason="LLM request timed out",
+        )
+    if status == 429 or "ratelimit" in name:
+        return LLMCallError(
+            failure_type="rate_limited",
+            retryable=True,
+            sanitized_reason="LLM upstream rate limited",
+        )
+    if status in (401, 403) or "authentication" in name or "permissiondenied" in name:
+        return LLMCallError(
+            failure_type="auth_config",
+            retryable=False,
+            sanitized_reason="LLM auth or configuration rejected",
+        )
+    if status is not None and 500 <= status < 600:
+        return LLMCallError(
+            failure_type="provider_5xx",
+            retryable=True,
+            sanitized_reason="LLM upstream server error",
+        )
+    return LLMCallError(
+        failure_type="provider_5xx",
+        retryable=True,
+        sanitized_reason="LLM upstream unavailable",
+    )
 
 
 class LLMProvider(Protocol):
@@ -32,6 +132,7 @@ class LLMProvider(Protocol):
         *,
         temperature: float = 0.0,
         response_format: Literal["text", "json_object"] = "json_object",
+        response_validator: ResponseValidator | None = None,
     ) -> LLMResult: ...
 
 
@@ -46,8 +147,9 @@ class FakeLLMProvider:
         *,
         temperature: float = 0.0,
         response_format: Literal["text", "json_object"] = "json_object",
+        response_validator: ResponseValidator | None = None,
     ) -> LLMResult:
-        del temperature, response_format
+        del temperature, response_format, response_validator
         content = "\n".join(
             message.get("content", "") for message in messages if message.get("role") == "user"
         ).lower()
@@ -207,10 +309,12 @@ class DeepSeekProvider:
         model: str,
         base_url: str = "https://api.deepseek.com",
         client: Any | None = None,
+        timeout: float = 30.0,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = base_url
+        self.timeout = timeout
         self._client = client
 
     def complete(
@@ -219,9 +323,15 @@ class DeepSeekProvider:
         *,
         temperature: float = 0.0,
         response_format: Literal["text", "json_object"] = "json_object",
+        response_validator: ResponseValidator | None = None,
     ) -> LLMResult:
+        del response_validator
         if not self.api_key:
-            raise LLMUnavailable("DeepSeek API key is not configured")
+            raise LLMCallError(
+                failure_type="auth_config",
+                retryable=False,
+                sanitized_reason="DeepSeek API key is not configured",
+            )
 
         try:
             request_kwargs: dict[str, object] = {
@@ -233,8 +343,10 @@ class DeepSeekProvider:
             if response_format == "json_object":
                 request_kwargs["response_format"] = {"type": "json_object"}
             response = self._client_or_create().chat.completions.create(**request_kwargs)
+        except LLMCallError:
+            raise
         except Exception as exc:
-            raise LLMUnavailable("DeepSeek request failed") from exc
+            raise classify_llm_exception(exc) from exc
 
         message = response.choices[0].message
         usage = getattr(response, "usage", None)
@@ -252,17 +364,22 @@ class DeepSeekProvider:
         try:
             from openai import OpenAI
         except Exception as exc:
-            raise LLMUnavailable("OpenAI SDK is not installed") from exc
+            raise LLMCallError(
+                failure_type="auth_config",
+                retryable=False,
+                sanitized_reason="OpenAI SDK is not installed",
+            ) from exc
 
         self._client = OpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
-            timeout=30.0,
+            timeout=self.timeout,
         )
         return self._client
 
 
 def get_llm_provider() -> LLMProvider:
+    is_deepseek = settings.llm_provider == "deepseek"
     if settings.llm_provider == "fake":
         base_provider: LLMProvider = FakeLLMProvider()
     elif settings.llm_provider == "deepseek":
@@ -270,11 +387,20 @@ def get_llm_provider() -> LLMProvider:
             api_key=settings.deepseek_api_key,
             model=settings.deepseek_model,
             base_url=settings.deepseek_base_url,
+            timeout=settings.llm_timeout_seconds,
         )
     else:
         raise LLMUnavailable(f"Unsupported LLM provider: {settings.llm_provider}")
 
     provider = base_provider
+    if is_deepseek:
+        from bank_reconciliation_agent.core.llm.reliability import (
+            CircuitBreakingLLMProvider,
+            get_llm_breaker,
+        )
+
+        provider = CircuitBreakingLLMProvider(provider, get_llm_breaker())
+
     if settings.enable_llm_rate_limit:
         try:
             rate_limit_redis = redis.Redis.from_url(settings.redis_dsn)
@@ -294,6 +420,16 @@ def get_llm_provider() -> LLMProvider:
                 max_wait_seconds=settings.llm_rate_limit_max_wait_seconds,
                 window_seconds=settings.llm_rate_limit_window_seconds,
             )
+
+    if is_deepseek:
+        from bank_reconciliation_agent.core.llm.reliability import RetryingLLMProvider
+
+        provider = RetryingLLMProvider(
+            provider,
+            max_attempts=settings.llm_max_attempts,
+            backoff_base_seconds=settings.llm_backoff_base_seconds,
+            backoff_max_seconds=settings.llm_backoff_max_seconds,
+        )
 
     if not settings.enable_llm_cache:
         return provider

@@ -21,8 +21,9 @@ class CountingProvider:
         *,
         temperature: float = 0.0,
         response_format: Literal["text", "json_object"] = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         self.calls += 1
         return LLMResult(
             text="limited response",

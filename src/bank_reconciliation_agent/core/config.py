@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-v4-pro"
     deepseek_base_url: str = "https://api.deepseek.com"
+    llm_timeout_seconds: float = Field(default=30.0, gt=0)
+    llm_max_attempts: int = Field(default=3, ge=1, le=3)
+    llm_backoff_base_seconds: float = Field(default=0.5, ge=0)
+    llm_backoff_max_seconds: float = Field(default=2.0, ge=0)
+    llm_breaker_fail_threshold: int = Field(default=3, ge=1)
+    llm_breaker_open_seconds: int = Field(default=30, ge=0)
     enable_rag_rewrite: bool = False
     enable_rag_hybrid: bool = False
     enable_rag_reranker: bool = False
@@ -60,6 +66,14 @@ class Settings(BaseSettings):
     arq_job_timeout_seconds: int = Field(default=300, ge=1)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    @model_validator(mode="after")
+    def _validate_backoff_bounds(self) -> "Settings":
+        if self.llm_backoff_max_seconds < self.llm_backoff_base_seconds:
+            raise ValueError(
+                "llm_backoff_max_seconds must be >= llm_backoff_base_seconds"
+            )
+        return self
 
     def rag_dense_min_score_for_backend(self, backend: str | None = None) -> float:
         selected_backend = backend or self.embedding_backend
