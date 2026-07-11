@@ -178,6 +178,130 @@ def test_audit_agent_invalid_llm_output_falls_back_without_raising() -> None:
         assert "金额不一致" in decision.reason
 
 
+def test_audit_agent_no_evidence_short_circuit_clears_previous_summary() -> None:
+    agent = AuditAgent(provider=FakeLLMProvider())
+    agent.decide_with_llm(
+        flow_id="F-FIRST",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+    assert agent.last_llm_summary is not None
+    assert agent.last_llm_result is not None
+
+    agent.decide_with_llm(
+        flow_id="F-SECOND",
+        error_type="SINGLE_SIDE_MISSING",
+        exception_branch="BE-R005",
+        bank_amount="120.00",
+        clear_amount=None,
+        amount_diff=None,
+        evidence=[],
+    )
+    assert agent.last_llm_result is None
+    assert agent.last_llm_summary is None
+
+
+def test_audit_agent_illegal_decision_token_gets_one_schema_correction() -> None:
+    illegal = (
+        '{"decision":"APPROVED_MATCH","risk_level":"LOW","reason":"模型建议自动平账",'
+        '"ai_suggestion":"APPROVED_MATCH","evidence":["rule"],"confidence":0.91}'
+    )
+    valid = (
+        '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"金额差异需人工复核",'
+        '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"],"confidence":0.8}'
+    )
+    provider = AuditSequenceProvider([illegal, valid])
+
+    decision = AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F-CORRECT",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    assert provider.calls == 2
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.fallback_applied is False
+
+
+def test_audit_agent_two_illegal_decision_tokens_fall_back_safely() -> None:
+    illegal = (
+        '{"decision":"APPROVED_MATCH","risk_level":"LOW","reason":"模型建议自动平账",'
+        '"ai_suggestion":"APPROVED_MATCH","evidence":["rule"],"confidence":0.91}'
+    )
+    provider = AuditSequenceProvider([illegal, illegal])
+
+    decision = AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F-BAD",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    assert provider.calls == 2
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.fallback_applied is True
+
+
+def test_audit_agent_recovers_after_one_schema_correction() -> None:
+    invalid = (
+        '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"缺字段",'
+        '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"]}'
+    )
+    valid = (
+        '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"金额差异需人工复核",'
+        '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"],"confidence":0.8}'
+    )
+    provider = AuditSequenceProvider([invalid, valid])
+
+    decision = AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F-CORRECTION",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=_evidence(),
+    )
+
+    assert decision.decision == "PENDING_HUMAN"
+    assert decision.fallback_applied is False
+    assert provider.calls == 2
+
+
+class AuditSequenceProvider:
+    def __init__(self, texts: list[str]) -> None:
+        self._texts = list(texts)
+        self.calls = 0
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+        response_validator=None,
+    ) -> LLMResult:
+        del messages, temperature, response_format, response_validator
+        self.calls += 1
+        return LLMResult(
+            text=self._texts.pop(0),
+            prompt_tokens=10,
+            completion_tokens=8,
+            model="audit-sequence",
+        )
+
+
 def test_audit_agent_invalid_decision_literal_from_llm_falls_back_without_raising() -> None:
     decision = AuditAgent(provider=InvalidDecisionLiteralProvider()).decide_with_llm(
         flow_id="F1010-BAD-LITERAL",
@@ -328,8 +452,9 @@ class UnavailableProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         raise LLMUnavailable("provider unavailable")
 
 
@@ -340,8 +465,9 @@ class InvalidJsonProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text="{not-json",
             prompt_tokens=10,
@@ -360,8 +486,9 @@ class InvalidSchemaProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text=self.text,
             prompt_tokens=10,
@@ -377,8 +504,9 @@ class InvalidDecisionLiteralProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text=(
                 '{"decision":"APPROVED_MATCH","risk_level":"LOW","reason":"模型建议自动平账",'
@@ -400,8 +528,9 @@ class RecordingProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del temperature, response_format
+        del temperature, response_format, response_validator
         self.messages = messages
         return LLMResult(
             text=(
@@ -422,14 +551,19 @@ class RecordingProvider:
 
 class UnsafeHighRiskProvider:
     """Provider that returns unsafe AUTO_FIXED/LOW for DUPLICATE_BOOKING."""
+    def __init__(self) -> None:
+        self.calls = 0
+
     def complete(
         self,
         messages: list[dict[str, str]],
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
+        self.calls += 1
         return LLMResult(
             text=(
                 '{"decision":"AUTO_FIXED","risk_level":"LOW","reason":"金额一致可自动平账",'
@@ -442,7 +576,8 @@ class UnsafeHighRiskProvider:
 
 
 def test_safety_policy_rewrites_duplicate_booking_auto_fixed_to_pending_human() -> None:
-    decision = AuditAgent(provider=UnsafeHighRiskProvider()).decide_with_llm(
+    provider = UnsafeHighRiskProvider()
+    decision = AuditAgent(provider=provider).decide_with_llm(
         flow_id="F-SAFETY-001",
         error_type="DUPLICATE_BOOKING",
         exception_branch="BE-R008",
@@ -467,6 +602,7 @@ def test_safety_policy_rewrites_duplicate_booking_auto_fixed_to_pending_human() 
     assert decision.evidence == _evidence()
     assert decision.confidence == 0.92
     assert decision.fallback_applied is False
+    assert provider.calls == 1
 
 
 def test_safety_policy_rewrites_duplicate_booking_by_error_type_only() -> None:
@@ -553,8 +689,9 @@ class CompliantHighRiskProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text=(
                 '{"decision":"PENDING_HUMAN","risk_level":"HIGH","reason":"疑似重复记账需人工复核",'

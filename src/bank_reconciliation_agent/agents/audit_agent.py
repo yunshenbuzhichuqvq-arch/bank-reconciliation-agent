@@ -3,7 +3,11 @@ from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from bank_reconciliation_agent.core.llm.provider import LLMProvider, LLMUnavailable, get_llm_provider
+from bank_reconciliation_agent.core.llm.provider import LLMProvider, get_llm_provider
+from bank_reconciliation_agent.core.llm.structured import (
+    StructuredLLMError,
+    complete_structured,
+)
 from bank_reconciliation_agent.core.logging import log
 from bank_reconciliation_agent.core.prompts import load_prompt
 from bank_reconciliation_agent.schemas.rag import RagSearchItem
@@ -68,7 +72,7 @@ class AuditDecision(BaseModel):
 
 
 class LLMAuditDecision(BaseModel):
-    decision: str
+    decision: Literal["AUTO_FIXED", "PENDING_HUMAN", "UNRESOLVED"]
     risk_level: str
     reason: str
     ai_suggestion: str
@@ -136,6 +140,7 @@ class AuditAgent:
         self.prompt_text = prompt_text or loaded_prompt_text
         self.prompt_version = prompt_version or loaded_prompt_version
         self.last_llm_result = None
+        self.last_llm_summary = None
 
     def decide(
         self,
@@ -199,6 +204,8 @@ class AuditAgent:
         match_candidate_context: dict[str, object] | None = None,
     ) -> AuditDecision:
         """LLM audit path; missing evidence still short-circuits to manual review."""
+        self.last_llm_result = None
+        self.last_llm_summary = None
         if not evidence:
             return self.decide(
                 flow_id=flow_id,
@@ -247,17 +254,41 @@ class AuditAgent:
             }
         )
 
-        log.info(
-            "agent_llm_call",
-            agent_name="AuditAgent",
-            step="decide_with_llm",
-            prompt_version=self.prompt_version,
-        )
+        task = user_payload.get("task", "audit")
         try:
-            result = self.provider.complete(messages, temperature=0.0, response_format="json_object")
-            self.last_llm_result = result
-            llm_decision = LLMAuditDecision.model_validate(json.loads(result.text))
-            task = user_payload.get("task", "audit")
+            completion = complete_structured(
+                self.provider,
+                messages,
+                schema=LLMAuditDecision,
+                agent_name="AuditAgent",
+                step="decide_with_llm",
+                prompt_version=self.prompt_version,
+            )
+        except StructuredLLMError as exc:
+            self.last_llm_result = exc.last_result
+            self.last_llm_summary = exc.summary
+            log.warning(
+                "agent_llm_invalid_output",
+                agent_name="AuditAgent",
+                step="decide_with_llm",
+                prompt_version=self.prompt_version,
+                failure_type=exc.summary.final_failure_type,
+                fallback_reason=exc.summary.fallback_reason,
+            )
+            return self._fallback_decision(
+                flow_id=flow_id,
+                error_type=error_type,
+                exception_branch=exception_branch,
+                bank_amount=bank_amount,
+                clear_amount=clear_amount,
+                amount_diff=amount_diff,
+                evidence=evidence,
+            )
+
+        self.last_llm_result = completion.last_result
+        self.last_llm_summary = completion.summary
+        llm_decision = completion.value
+        try:
             decision = AuditDecision(
                 flow_id=flow_id,
                 decision=llm_decision.decision,
@@ -270,29 +301,7 @@ class AuditAgent:
                 fallback_level=0,
                 next_action=llm_decision.decision,
             )
-            return apply_audit_safety_policy(
-                decision,
-                task=str(task),
-                error_type=error_type,
-                exception_branch=exception_branch,
-            )
-        except LLMUnavailable:
-            log.warning(
-                "agent_llm_unavailable",
-                agent_name="AuditAgent",
-                step="decide_with_llm",
-                prompt_version=self.prompt_version,
-            )
-            return self._fallback_decision(
-                flow_id=flow_id,
-                error_type=error_type,
-                exception_branch=exception_branch,
-                bank_amount=bank_amount,
-                clear_amount=clear_amount,
-                amount_diff=amount_diff,
-                evidence=evidence,
-            )
-        except (json.JSONDecodeError, ValidationError) as exc:
+        except ValidationError as exc:
             log.warning(
                 "agent_llm_invalid_output",
                 agent_name="AuditAgent",
@@ -309,6 +318,12 @@ class AuditAgent:
                 amount_diff=amount_diff,
                 evidence=evidence,
             )
+        return apply_audit_safety_policy(
+            decision,
+            task=str(task),
+            error_type=error_type,
+            exception_branch=exception_branch,
+        )
 
     def _fallback_decision(
         self,

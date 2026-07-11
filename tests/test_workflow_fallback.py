@@ -1,4 +1,5 @@
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision
+from bank_reconciliation_agent.agents.trace_agent import TraceAgentError
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.services.agent_log import AgentLogService, agent_execution_log_table
 from bank_reconciliation_agent.services.ledger import LedgerService, error_ledger_table
@@ -91,6 +92,55 @@ def test_low_confidence_decision_escalates_to_l2_then_l3_then_human() -> None:
     assert result["audit_decision"]["fallback_applied"] is True
     assert result["audit_decision"]["fallback_level"] == 3
     assert result["next_action"] == "PENDING_HUMAN"
+
+
+def test_l3_trace_final_failure_fails_closed_in_item() -> None:
+    audit_agent = SequenceAuditAgent([0.4, 0.5, 0.5])
+
+    result = run_item(
+        _state(),
+        extraction_agent=NoopExtractionAgent(),
+        trace_agent=FailingTraceAgent(),
+        audit_agent=audit_agent,
+        retriever=StaticRetriever([_evidence()]),
+        fallback_case_provider=StaticFallbackCaseProvider([]),
+    )
+
+    assert audit_agent.calls == [1, 2]
+    assert result["next_action"] == "PENDING_HUMAN"
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert result["fallback_path"] == "AI_ERROR->HUMAN"
+    trace_log = next(
+        row for row in result["agent_logs"] if row["agent_name"] == "TraceAgent"
+    )
+    assert trace_log["final_failure_type"] == "provider_5xx"
+    assert trace_log["fallback_reason"] is not None
+
+
+class FailingTraceAgent:
+    prompt_version = "v1"
+
+    def __init__(self) -> None:
+        from bank_reconciliation_agent.core.llm.structured import LLMCallSummary
+
+        self.calls: list[str] = []
+        self.last_llm_result = None
+        self.last_llm_summary = LLMCallSummary(
+            transport_attempts=1,
+            retry_recovered=False,
+            structured_repair_attempted=False,
+            structured_repair_succeeded=False,
+            prompt_tokens=0,
+            completion_tokens=0,
+            cached_calls=0,
+            final_failure_type="provider_5xx",
+            fallback_reason="transport_failure",
+        )
+
+    def trace(self, *, flow_id: str, **kwargs) -> object:
+        del kwargs
+        self.calls.append(flow_id)
+        raise TraceAgentError("invalid LLM JSON for TraceAgent")
 
 
 def test_rag_miss_short_circuits_to_human_without_fallback() -> None:

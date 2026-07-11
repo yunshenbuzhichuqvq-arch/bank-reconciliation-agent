@@ -5,8 +5,12 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision, audit_agent
-from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgent, extraction_agent
-from bank_reconciliation_agent.agents.trace_agent import TraceAgent, trace_agent
+from bank_reconciliation_agent.agents.extraction_agent import (
+    ExtractionAgent,
+    ExtractionAgentError,
+    extraction_agent,
+)
+from bank_reconciliation_agent.agents.trace_agent import TraceAgent, TraceAgentError, trace_agent
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.core.logging import bind_trace_context, log
 from bank_reconciliation_agent.rag.retriever import rule_retriever
@@ -100,11 +104,21 @@ def run_item(
     trace_payload: dict[str, Any] | None = None
 
     if exception_branch == "BE-R004" and _contains_reversal_hint(summary, remark):
-        extraction_result = extraction_agent.extract(
-            flow_id=flow_id,
-            summary=summary,
-            remark=remark,
-        )
+        try:
+            extraction_result = extraction_agent.extract(
+                flow_id=flow_id,
+                summary=summary,
+                remark=remark,
+            )
+        except ExtractionAgentError:
+            return _fail_closed_item(
+                state,
+                flow_id=flow_id,
+                agent=extraction_agent,
+                agent_name="ExtractionAgent",
+                step="extract",
+                emitter=emitter,
+            )
         state["extraction_result"] = _model_or_mapping_dump(extraction_result)
         _append_agent_log(state, {
             "agent_name": "ExtractionAgent",
@@ -124,7 +138,17 @@ def run_item(
         }
         if exception_branch == "BC-R003":
             trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
-        trace_result = trace_agent.trace(**trace_kwargs)
+        try:
+            trace_result = trace_agent.trace(**trace_kwargs)
+        except TraceAgentError:
+            return _fail_closed_item(
+                state,
+                flow_id=flow_id,
+                agent=trace_agent,
+                agent_name="TraceAgent",
+                step="trace",
+                emitter=emitter,
+            )
         trace_payload = _model_or_mapping_dump(trace_result)
         _append_agent_log(state, {
             "agent_name": "TraceAgent",
@@ -173,7 +197,7 @@ def run_item(
     if exception_branch == "BC-R003":
         audit_kwargs["trace_context"] = trace_payload
 
-    audit_decision = _audit_with_schema_retry(
+    audit_decision = _audit_decision_once(
         state=state,
         audit_agent=audit_agent,
         audit_kwargs=audit_kwargs,
@@ -201,7 +225,7 @@ def run_item(
             user_id=state["user_id"],
             exception_branch=exception_branch,
         )
-        audit_decision = _audit_with_schema_retry(
+        audit_decision = _audit_decision_once(
             state=state,
             audit_agent=audit_agent,
             audit_kwargs={
@@ -248,7 +272,17 @@ def run_item(
             }
             if exception_branch == "BC-R003":
                 trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
-            trace_result = trace_agent.trace(**trace_kwargs)
+            try:
+                trace_result = trace_agent.trace(**trace_kwargs)
+            except TraceAgentError:
+                return _fail_closed_item(
+                    state,
+                    flow_id=flow_id,
+                    agent=trace_agent,
+                    agent_name="TraceAgent",
+                    step="trace",
+                    emitter=emitter,
+                )
             trace_payload = _model_or_mapping_dump(trace_result)
             _append_agent_log(state, {
                 "agent_name": "TraceAgent",
@@ -259,7 +293,7 @@ def run_item(
                 "prompt_version": getattr(trace_agent, "prompt_version", None),
                 **_llm_usage(trace_agent),
             }, emitter)
-            audit_decision = _audit_with_schema_retry(
+            audit_decision = _audit_decision_once(
                 state=state,
                 audit_agent=audit_agent,
                 audit_kwargs={
@@ -342,7 +376,7 @@ def _run_fuzzy_candidate_confirmation(
         "evidence": rag_items,
         "match_candidate_context": candidate,
     }
-    decision = _audit_with_schema_retry(
+    decision = _audit_decision_once(
         state=state,
         audit_agent=audit_agent,
         audit_kwargs=audit_kwargs,
@@ -380,7 +414,7 @@ def _run_fuzzy_candidate_confirmation(
             "clear_amount": _optional_string(candidate_amount),
             "amount_diff": _optional_string(difference),
         }
-        decision = _audit_with_schema_retry(
+        decision = _audit_decision_once(
             state=state,
             audit_agent=audit_agent,
             audit_kwargs={
@@ -435,44 +469,94 @@ def _run_fuzzy_candidate_confirmation(
     return state
 
 
-def _audit_with_schema_retry(
+def _fail_closed_item(
+    state: ReconciliationState,
+    *,
+    flow_id: str,
+    agent: Any,
+    agent_name: str,
+    step: str,
+    emitter: StreamEmitter,
+) -> ReconciliationState:
+    """Close the current item to PENDING_HUMAN after a final LLM failure.
+
+    Only the current item is failed closed; no task terminal state is written,
+    no ARQ exception is raised, and Audit is not invoked so no auto-fix can slip
+    through. A sanitized failure summary is appended for observability.
+    """
+    usage = _llm_usage(agent)
+    decision = AuditDecision(
+        flow_id=flow_id,
+        decision="PENDING_HUMAN",
+        risk_level="HIGH",
+        reason="AI 处理异常，自动转人工。",
+        ai_suggestion="PENDING_HUMAN",
+        evidence=[],
+        confidence=0.0,
+        fallback_applied=True,
+        fallback_level=1,
+        next_action="PENDING_HUMAN",
+    )
+    state["audit_decision"] = decision.model_dump(mode="json")
+    state["confidence"] = 0.0
+    state["fallback_level"] = 1
+    state["fallback_path"] = "AI_ERROR->HUMAN"
+    state["next_action"] = "PENDING_HUMAN"
+    state["error_message"] = usage.get("fallback_reason") or "structured_output_invalid"
+    _append_agent_log(state, {
+        "agent_name": agent_name,
+        "step": step,
+        "flow_id": flow_id,
+        "fallback_level": 1,
+        **usage,
+    }, emitter)
+    _emit_stream_row(
+        state,
+        {
+            "agent_name": "Workflow",
+            "step": "item_done",
+            "flow_id": flow_id,
+            "status": state["next_action"],
+            "decision": state["audit_decision"]["decision"],
+            "confidence": state["audit_decision"]["confidence"],
+        },
+        emitter,
+        StreamEventType.ITEM_DONE,
+    )
+    return state
+
+
+def _audit_decision_once(
     *,
     state: ReconciliationState,
     audit_agent: AuditAgent,
     audit_kwargs: dict[str, Any],
     emitter: StreamEmitter,
 ) -> AuditDecision:
-    max_attempts = 3
     state["error_message"] = None
-    audit_kwargs = dict(audit_kwargs)
-    for attempt in range(1, max_attempts + 1):
-        try:
-            decision = schema_hook(audit_agent.decide_with_llm(**audit_kwargs))
-            state["retry_count"] = attempt - 1
-            return decision
-        except SchemaValidationError as exc:
-            del exc
-            log.warning(
-                "schema_hook_retry",
-                hook_name="SchemaHook",
-                retry_count=attempt,
-                flow_id=audit_kwargs.get("flow_id"),
-            )
-            _append_agent_log(state, {
-                "agent_name": "SchemaHook",
-                "step": "schema_validate",
-                "flow_id": audit_kwargs.get("flow_id"),
-                "retry_count": attempt,
-                "error_message": "schema validation failed",
-            }, emitter)
+    state["retry_count"] = 0
+    try:
+        return schema_hook(audit_agent.decide_with_llm(**audit_kwargs))
+    except SchemaValidationError:
+        log.warning(
+            "schema_hook_failed",
+            hook_name="SchemaHook",
+            flow_id=audit_kwargs.get("flow_id"),
+        )
+        _append_agent_log(state, {
+            "agent_name": "SchemaHook",
+            "step": "schema_validate",
+            "flow_id": audit_kwargs.get("flow_id"),
+            "retry_count": 0,
+            "error_message": "schema validation failed",
+        }, emitter)
 
-    state["retry_count"] = max_attempts
     state["error_message"] = "schema validation failed"
     return AuditDecision(
         flow_id=str(audit_kwargs.get("flow_id") or ""),
         decision="PENDING_HUMAN",
         risk_level="HIGH",
-        reason="SchemaHook 校验失败，重试 3 次后转人工。",
+        reason="SchemaHook 校验失败，转人工。",
         ai_suggestion="PENDING_HUMAN",
         evidence=[],
         confidence=0.0,
@@ -704,20 +788,51 @@ def _model_or_mapping_dump(value: Any) -> dict[str, Any]:
     return dict(value)
 
 
-def _llm_usage(agent: Any) -> dict[str, int | bool]:
+def _llm_usage(agent: Any) -> dict[str, Any]:
+    summary = getattr(agent, "last_llm_summary", None)
+    if summary is not None:
+        prompt_tokens = int(summary.prompt_tokens)
+        completion_tokens = int(summary.completion_tokens)
+        return {
+            "transport_attempts": int(summary.transport_attempts),
+            "retry_recovered": bool(summary.retry_recovered),
+            "structured_repair_attempted": bool(summary.structured_repair_attempted),
+            "structured_repair_succeeded": bool(summary.structured_repair_succeeded),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "llm_tokens": prompt_tokens + completion_tokens,
+            "cached_calls": int(summary.cached_calls),
+            "final_failure_type": summary.final_failure_type,
+            "fallback_reason": summary.fallback_reason,
+        }
+
     result = getattr(agent, "last_llm_result", None)
     if result is None:
         return {
+            "transport_attempts": 0,
+            "retry_recovered": False,
+            "structured_repair_attempted": False,
+            "structured_repair_succeeded": False,
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "llm_tokens": 0,
-            "cached": False,
+            "cached_calls": 0,
+            "final_failure_type": None,
+            "fallback_reason": None,
         }
-    prompt_tokens = int(getattr(result, "prompt_tokens", 0))
-    completion_tokens = int(getattr(result, "completion_tokens", 0))
+
+    cached = bool(getattr(result, "cached", False))
+    prompt_tokens = 0 if cached else int(getattr(result, "prompt_tokens", 0))
+    completion_tokens = 0 if cached else int(getattr(result, "completion_tokens", 0))
     return {
+        "transport_attempts": 1,
+        "retry_recovered": False,
+        "structured_repair_attempted": False,
+        "structured_repair_succeeded": False,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "llm_tokens": prompt_tokens + completion_tokens,
-        "cached": bool(getattr(result, "cached", False)),
+        "cached_calls": 1 if cached else 0,
+        "final_failure_type": None,
+        "fallback_reason": None,
     }

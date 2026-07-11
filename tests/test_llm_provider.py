@@ -13,11 +13,16 @@ from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.core.llm.provider import (
     DeepSeekProvider,
     FakeLLMProvider,
+    LLMCallError,
     LLMResult,
     LLMUnavailable,
     get_llm_provider,
 )
 from bank_reconciliation_agent.core.llm.rate_limit import RateLimitedLLMProvider
+from bank_reconciliation_agent.core.llm.reliability import (
+    CircuitBreakingLLMProvider,
+    RetryingLLMProvider,
+)
 
 
 def test_get_llm_provider_defaults_to_fake() -> None:
@@ -229,10 +234,14 @@ def test_get_llm_provider_returns_deepseek_when_configured(monkeypatch) -> None:
     monkeypatch.setattr(settings, "deepseek_api_key", "test-key")
     monkeypatch.setattr(settings, "deepseek_model", "deepseek-v4-pro")
     monkeypatch.setattr(settings, "deepseek_base_url", "https://api.deepseek.com")
+    monkeypatch.setattr(settings, "enable_llm_cache", False)
+    monkeypatch.setattr(settings, "enable_llm_rate_limit", False)
 
     provider = get_llm_provider()
 
-    assert isinstance(provider, DeepSeekProvider)
+    assert isinstance(provider, RetryingLLMProvider)
+    assert isinstance(provider.inner, CircuitBreakingLLMProvider)
+    assert isinstance(provider.inner.inner, DeepSeekProvider)
 
 
 def test_deepseek_provider_requires_api_key() -> None:
@@ -255,10 +264,11 @@ def test_deepseek_provider_wraps_client_failures() -> None:
 
     try:
         provider.complete([{"role": "user", "content": "返回 JSON"}])
-    except LLMUnavailable as exc:
-        assert "DeepSeek request failed" in str(exc)
+    except LLMCallError as exc:
+        assert exc.failure_type == "provider_5xx"
+        assert exc.retryable is True
     else:
-        raise AssertionError("expected LLMUnavailable")
+        raise AssertionError("expected LLMCallError")
 
 
 class FailingClient:

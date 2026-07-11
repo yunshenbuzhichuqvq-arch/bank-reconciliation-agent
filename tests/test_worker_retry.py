@@ -821,3 +821,84 @@ def test_worker_function_attempt_1_retryable_attempt_2_business_failure_no_recov
     assert task is not None
     assert task.status == "FAILED"
     assert task.retry_recovered is False
+
+
+# ---------------------------------------------------------------------------
+# TASK-26.3 LLM failure ARQ boundary
+# ---------------------------------------------------------------------------
+
+
+def test_llm_item_failure_stays_in_job_without_arq_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from scripts.generate_mock_excel import generate_mvp1_mock_excel
+
+    from bank_reconciliation_agent.core.llm.provider import LLMCallError, LLMResult
+    from bank_reconciliation_agent.services import workflow as workflow_module
+    from bank_reconciliation_agent.worker import run_reconciliation_job as wfn
+
+    class FailingProvider:
+        model = "failing"
+
+        def complete(
+            self,
+            messages,
+            *,
+            temperature: float = 0.0,
+            response_format: str = "json_object",
+            response_validator=None,
+        ) -> LLMResult:
+            del messages, temperature, response_format, response_validator
+            raise LLMCallError(
+                failure_type="provider_5xx",
+                retryable=False,
+                sanitized_reason="upstream down",
+            )
+
+    monkeypatch.setattr(workflow_module.extraction_agent, "provider", FailingProvider())
+    monkeypatch.setattr(workflow_module.trace_agent, "provider", FailingProvider())
+    monkeypatch.setattr(workflow_module.audit_agent, "provider", FailingProvider())
+
+    bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
+    task_id = "TASK-LLM-BOUNDARY"
+    task_service.replace_task(
+        user_id="demo_user",
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=0,
+        total_clear_rows=0,
+        auto_fixed_rows=0,
+        pending_ai_rows=0,
+        pending_human_rows=0,
+        status="QUEUED",
+    )
+
+    asyncio.run(
+        wfn(
+            {"job_try": 1},
+            user_id="demo_user",
+            task_id=task_id,
+            scenario_type="BANK_ENTERPRISE",
+            bank_path=str(bank_path),
+            clear_path=str(clear_path),
+        )
+    )
+
+    from bank_reconciliation_agent.schemas.ledger import LedgerQuery
+    from bank_reconciliation_agent.services.ledger import LedgerService
+
+    task = task_service.get(user_id="demo_user", task_id=task_id)
+    assert task is not None
+    # LLM failures are absorbed as business results; the job is not an ARQ retry.
+    assert task.status != "FAILED"
+    assert task.job_attempt == 1
+    assert task.retry_exhausted is False
+    assert task.retry_recovered is False
+
+    page = LedgerService().list(
+        user_id="demo_user",
+        query=LedgerQuery(task_id=task_id, page=1, page_size=10_000),
+    )
+    assert page.items
+    assert all(row.handle_status == "PENDING_HUMAN" for row in page.items)

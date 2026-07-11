@@ -1,11 +1,15 @@
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
+from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgent
+from bank_reconciliation_agent.agents.trace_agent import TraceAgent
 from bank_reconciliation_agent.core.llm.provider import LLMResult
+from bank_reconciliation_agent.core.llm.structured import LLMCallSummary
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
+from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
 from bank_reconciliation_agent.services.workflow import ReconciliationState, _llm_usage, run_item
 
 
-def test_llm_usage_carries_cached_flag() -> None:
+def test_llm_usage_cache_hit_adds_zero_new_tokens() -> None:
     class CachedAgent:
         last_llm_result = LLMResult(
             text="{}",
@@ -15,12 +19,35 @@ def test_llm_usage_carries_cached_flag() -> None:
             cached=True,
         )
 
-    assert _llm_usage(CachedAgent()) == {
-        "prompt_tokens": 100,
-        "completion_tokens": 20,
-        "llm_tokens": 120,
-        "cached": True,
-    }
+    usage = _llm_usage(CachedAgent())
+    assert usage["prompt_tokens"] == 0
+    assert usage["completion_tokens"] == 0
+    assert usage["llm_tokens"] == 0
+    assert usage["cached_calls"] == 1
+
+
+def test_llm_usage_prefers_summary_for_initial_plus_correction_tokens() -> None:
+    class SummaryAgent:
+        last_llm_result = LLMResult(
+            text="{}", prompt_tokens=8, completion_tokens=4, model="fake"
+        )
+        last_llm_summary = LLMCallSummary(
+            transport_attempts=2,
+            retry_recovered=False,
+            structured_repair_attempted=True,
+            structured_repair_succeeded=True,
+            prompt_tokens=18,
+            completion_tokens=9,
+            cached_calls=0,
+            final_failure_type=None,
+            fallback_reason=None,
+        )
+
+    usage = _llm_usage(SummaryAgent())
+    assert usage["prompt_tokens"] == 18
+    assert usage["completion_tokens"] == 9
+    assert usage["llm_tokens"] == 27
+    assert usage["structured_repair_attempted"] is True
 
 
 def _evidence() -> RagSearchItem:
@@ -154,7 +181,7 @@ def test_run_item_binds_trace_context(monkeypatch) -> None:
     ]
 
 
-def test_run_item_retries_schema_drift_then_falls_back_to_human() -> None:
+def test_run_item_schema_drift_falls_back_to_human_after_one_attempt() -> None:
     audit_agent = InvalidSchemaAuditAgent()
 
     result = run_item(
@@ -165,12 +192,12 @@ def test_run_item_retries_schema_drift_then_falls_back_to_human() -> None:
         retriever=StaticRetriever(),
     )
 
-    assert audit_agent.calls == 3
-    assert result["retry_count"] == 3
+    assert audit_agent.calls == 1
+    assert result["retry_count"] == 0
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
     assert "SchemaHook 校验失败" in result["audit_decision"]["reason"]
     schema_logs = [row for row in result["agent_logs"] if row["agent_name"] == "SchemaHook"]
-    assert [row["retry_count"] for row in schema_logs] == [1, 2, 3]
+    assert len(schema_logs) == 1
 
 
 def test_run_item_rag_failure_opens_breaker_and_short_circuits_to_human(monkeypatch) -> None:
@@ -512,8 +539,9 @@ class UnsafeHighRiskProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text=(
                 '{"decision":"AUTO_FIXED","risk_level":"LOW","reason":"金额一致可自动平账",'
@@ -548,8 +576,9 @@ class InvalidDecisionLiteralProvider:
         *,
         temperature: float = 0.0,
         response_format: str = "json_object",
+        response_validator=None,
     ) -> LLMResult:
-        del messages, temperature, response_format
+        del messages, temperature, response_format, response_validator
         return LLMResult(
             text=(
                 '{"decision":"APPROVED_MATCH","risk_level":"LOW","reason":"模型建议自动平账",'
@@ -559,3 +588,245 @@ class InvalidDecisionLiteralProvider:
             completion_tokens=8,
             model="invalid-literal",
         )
+
+
+_VALID_AUDIT = (
+    '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"金额差异需人工复核",'
+    '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"],"confidence":0.88}'
+)
+_INVALID_AUDIT = (
+    '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM","reason":"缺字段",'
+    '"ai_suggestion":"PENDING_HUMAN","evidence":["rule"]}'
+)
+
+
+class AuditSequenceProvider:
+    def __init__(self, results: list[LLMResult]) -> None:
+        self._results = list(results)
+        self.calls = 0
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+        response_validator=None,
+    ) -> LLMResult:
+        del messages, temperature, response_format, response_validator
+        self.calls += 1
+        return self._results.pop(0)
+
+
+class FailingProvider:
+    model = "failing"
+
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+        response_validator=None,
+    ) -> LLMResult:
+        del messages, temperature, response_format, response_validator
+        from bank_reconciliation_agent.core.llm.provider import LLMCallError
+
+        raise LLMCallError(
+            failure_type="provider_5xx",
+            retryable=False,
+            sanitized_reason="upstream unavailable",
+        )
+
+
+class RecordingAuditAgent:
+    prompt_version = "v3"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def decide_with_llm(self, flow_id: str, **kwargs) -> AuditDecision:
+        self.calls += 1
+        return AuditDecision(
+            flow_id=flow_id,
+            decision="PENDING_HUMAN",
+            risk_level="MEDIUM",
+            reason="spy audit",
+            ai_suggestion="PENDING_HUMAN",
+            evidence=kwargs["evidence"],
+            confidence=0.88,
+            fallback_applied=False,
+            fallback_level=0,
+            next_action="PENDING_HUMAN",
+        )
+
+
+def _audit_log(result):
+    return next(
+        row
+        for row in result["agent_logs"]
+        if row["agent_name"] == "AuditAgent" and row["step"] == "decide_with_llm"
+    )
+
+
+def test_workflow_uses_llm_summary_for_initial_plus_correction_tokens() -> None:
+    provider = AuditSequenceProvider([
+        LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
+        LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
+    ])
+
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=provider),
+        retriever=StaticRetriever(),
+    )
+
+    row = _audit_log(result)
+    assert row["prompt_tokens"] == 18
+    assert row["completion_tokens"] == 9
+    assert row["llm_tokens"] == 27
+    assert provider.calls == 2
+
+
+def test_workflow_cache_hit_adds_zero_llm_tokens() -> None:
+    provider = AuditSequenceProvider([
+        LLMResult(
+            text=_VALID_AUDIT,
+            prompt_tokens=99,
+            completion_tokens=99,
+            model="x",
+            cached=True,
+        ),
+    ])
+
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=provider),
+        retriever=StaticRetriever(),
+    )
+
+    row = _audit_log(result)
+    assert row["llm_tokens"] == 0
+    assert row["cached_calls"] == 1
+
+
+def test_workflow_agent_log_contains_retry_and_repair_summary() -> None:
+    provider = AuditSequenceProvider([
+        LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
+        LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
+    ])
+
+    result = run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=provider),
+        retriever=StaticRetriever(),
+    )
+
+    row = _audit_log(result)
+    assert row["structured_repair_attempted"] is True
+    assert row["structured_repair_succeeded"] is True
+    assert "transport_attempts" in row
+    assert row["final_failure_type"] is None
+
+
+def test_stream_payload_projects_safe_llm_governance_fields() -> None:
+    provider = AuditSequenceProvider([
+        LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
+        LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
+    ])
+    emitter = QueueEmitter()
+
+    run_item(
+        _state("BE-R002"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=provider),
+        retriever=StaticRetriever(),
+        emitter=emitter,
+    )
+
+    payloads = [event.payload for event in emitter.drain()]
+    audit_payloads = [
+        p for p in payloads if p.get("agent_name") == "AuditAgent" and "llm_tokens" in p
+    ]
+    assert audit_payloads
+    projected = audit_payloads[0]
+    assert projected["llm_tokens"] == 27
+    assert "structured_repair_attempted" in projected
+    assert "transport_attempts" in projected
+    assert _INVALID_AUDIT not in str(projected)
+
+
+def test_extraction_final_llm_failure_returns_pending_human() -> None:
+    audit_agent = RecordingAuditAgent()
+
+    result = run_item(
+        _state("BE-R004", summary="客户退款冲正"),
+        extraction_agent=ExtractionAgent(provider=FailingProvider()),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=audit_agent,
+        retriever=StaticRetriever(),
+    )
+
+    assert result["next_action"] == "PENDING_HUMAN"
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert audit_agent.calls == 0
+
+
+def test_trace_final_llm_failure_returns_pending_human() -> None:
+    audit_agent = RecordingAuditAgent()
+
+    result = run_item(
+        _state("BE-R005"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=TraceAgent(provider=FailingProvider()),
+        audit_agent=audit_agent,
+        retriever=StaticRetriever(),
+    )
+
+    assert result["next_action"] == "PENDING_HUMAN"
+    assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
+    assert audit_agent.calls == 0
+
+
+def test_final_llm_failure_records_stable_failure_and_fallback_reason() -> None:
+    result = run_item(
+        _state("BE-R005"),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=TraceAgent(provider=FailingProvider()),
+        audit_agent=RecordingAuditAgent(),
+        retriever=StaticRetriever(),
+    )
+
+    trace_log = next(
+        row for row in result["agent_logs"] if row["agent_name"] == "TraceAgent"
+    )
+    assert trace_log["final_failure_type"] == "provider_5xx"
+    assert trace_log["fallback_reason"] is not None
+    assert result["fallback_path"] == "AI_ERROR->HUMAN"
+
+
+def test_final_llm_failure_does_not_continue_to_auto_fix() -> None:
+    audit_agent = RecordingAuditAgent()
+
+    result = run_item(
+        _state("BE-R004", summary="客户退款冲正"),
+        extraction_agent=ExtractionAgent(provider=FailingProvider()),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=audit_agent,
+        retriever=StaticRetriever(),
+    )
+
+    assert audit_agent.calls == 0
+    audit_logs = [
+        row
+        for row in result["agent_logs"]
+        if row["agent_name"] == "AuditAgent" and row.get("step") == "decide_with_llm"
+    ]
+    assert audit_logs == []
