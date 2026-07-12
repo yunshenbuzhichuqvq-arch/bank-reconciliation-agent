@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from bank_reconciliation_agent.rag.retriever import RuleRetriever
+from bank_reconciliation_agent.rag.retriever import (
+    ChromaRuleStore,
+    RuleRetriever,
+)
 from bank_reconciliation_agent.services.workflow import run_item
 from tests.test_workflow_fallback import (
     EmptyFallbackCaseProvider,
@@ -13,9 +16,21 @@ from tests.test_workflow_fallback import (
 )
 
 
-def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path) -> None:
+def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.core.config.settings.rag_dense_min_score", 0.5
+    )
+
+    canonical_store = ChromaRuleStore(
+        embedding_backend="hash", chroma_path=tmp_path / "chroma_canonical",
+    )
+    retriever = RuleRetriever(store=canonical_store)
+    assert retriever.collection_count() > 0, (
+        "canonical BANK_ENTERPRISE corpus must be non-empty"
+    )
+    assert canonical_store.embedding_backend == "hash"
+
     state = _state()
-    # Fixed near-orthogonal query for the deterministic hash embedding.
     state["rag_query"] = "epnbvcyr szkkwltp szoccipw vcbxwjus"
     audit_agent = SequenceAuditAgent([0.4])
 
@@ -24,7 +39,7 @@ def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path) -> N
         extraction_agent=NoopExtractionAgent(),
         trace_agent=SpyTraceAgent(confidence=0.9),
         audit_agent=audit_agent,
-        retriever=RuleRetriever(chroma_path=tmp_path / "chroma"),
+        retriever=retriever,
         fallback_case_provider=EmptyFallbackCaseProvider(),
     )
 

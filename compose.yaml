@@ -1,0 +1,129 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-demo_root_pw}"
+      MYSQL_DATABASE: "AI_agent"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h localhost --password="$${MYSQL_ROOT_PASSWORD:-demo_root_pw}"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7.4-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  backend:
+    build: .
+    command:
+      - uv
+      - run
+      - "--frozen"
+      - uvicorn
+      - bank_reconciliation_agent.main:app
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+    environment:
+      APP_ENV: "local"
+      MYSQL_DSN: "mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-demo_root_pw}@mysql:3306/AI_agent"
+      REDIS_DSN: "redis://redis:6379/0"
+      UPLOAD_DIR: "/app/uploads"
+      LLM_PROVIDER: "fake"
+      EMBEDDING_BACKEND: "hash"
+      ASYNC_QUEUE_ENABLED: "true"
+      CHECKPOINT_ENABLED: "false"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-insecure-secret-change-me-please-set-env}"
+      DEMO_USER_PASSWORD: "${DEMO_USER_PASSWORD:-demo12345}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          uv run python -c "
+          import urllib.request, json, sys
+          r = urllib.request.urlopen('http://localhost:8000/health')
+          h = json.loads(r.read())
+          sys.exit(0 if h.get('status') == 'ok' and h.get('db') == 'ok' else 1)
+          "
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  worker:
+    build: .
+    command:
+      - uv
+      - run
+      - "--frozen"
+      - arq
+      - bank_reconciliation_agent.worker.WorkerSettings
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+    environment:
+      APP_ENV: "local"
+      MYSQL_DSN: "mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-demo_root_pw}@mysql:3306/AI_agent"
+      REDIS_DSN: "redis://redis:6379/0"
+      UPLOAD_DIR: "/app/uploads"
+      LLM_PROVIDER: "fake"
+      EMBEDDING_BACKEND: "hash"
+      ASYNC_QUEUE_ENABLED: "true"
+      CHECKPOINT_ENABLED: "false"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-insecure-secret-change-me-please-set-env}"
+      DEMO_USER_PASSWORD: "${DEMO_USER_PASSWORD:-demo12345}"
+    healthcheck:
+      test:
+        - CMD
+        - uv
+        - run
+        - "--frozen"
+        - arq
+        - bank_reconciliation_agent.worker.WorkerSettings
+        - "--check"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "4173:4173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_PROXY_TARGET: "http://backend:8000"
+
+volumes:
+  mysql_data:
+  redis_data:
+  uploads_data:

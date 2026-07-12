@@ -86,6 +86,64 @@ def test_worker_completes_queued_reconciliation_with_sync_equivalent_results(
     asyncio.run(run())
 
 
+def test_worker_publishes_uploaded_only_after_artifact_writes(
+    tmp_path: Path,
+    monkeypatch,
+    fake_arq_redis: ArqRedis,
+) -> None:
+    async def run() -> None:
+        from sqlalchemy import select
+
+        bank_path, clear_path = _make_unique_excel(tmp_path, "status_ordering")
+        monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "uploads"))
+
+        with bank_path.open("rb") as bf, clear_path.open("rb") as cf:
+            queued = await reconciliation_service.upload_async(
+                user_id="demo_user",
+                scenario_type="BANK_ENTERPRISE",
+                bank_file=UploadFile(filename="bank.xlsx", file=bf),
+                clear_file=UploadFile(filename="clear.xlsx", file=cf),
+            )
+        task_id = queued.task_id
+
+        captured: dict[str, str] = {}
+        original_replace_ledger = ledger_service.replace_task_rows
+
+        def spy_replace_ledger(*args, connection=None, **kwargs):
+            captured["status_during_ledger_write"] = connection.execute(
+                select(reconciliation_task_table.c.status).where(
+                    reconciliation_task_table.c.user_id == kwargs["user_id"],
+                    reconciliation_task_table.c.task_id == kwargs["task_id"],
+                )
+            ).scalar_one()
+            return original_replace_ledger(*args, connection=connection, **kwargs)
+
+        monkeypatch.setattr(ledger_service, "replace_task_rows", spy_replace_ledger)
+
+        upload_dir = Path(settings.upload_dir)
+        await run_reconciliation_job(
+            {},
+            user_id="demo_user",
+            task_id=task_id,
+            scenario_type="BANK_ENTERPRISE",
+            bank_path=str(upload_dir / f"{task_id}_bank.xlsx"),
+            clear_path=str(upload_dir / f"{task_id}_clear.xlsx"),
+        )
+
+        assert captured["status_during_ledger_write"] == "RUNNING"
+
+        task = task_service.get(user_id="demo_user", task_id=task_id)
+        assert task is not None
+        assert task.status == "UPLOADED"
+
+        assert queue_service.count_rows(user_id="demo_user", task_id=task_id) > 0
+        assert ledger_service.list(
+            user_id="demo_user", query=LedgerQuery(task_id=task_id)
+        ).total > 0
+
+    asyncio.run(run())
+
+
 def test_force_reattempt_failed_task_preserves_force_count_and_clears_recovery(
     tmp_path: Path,
     monkeypatch,

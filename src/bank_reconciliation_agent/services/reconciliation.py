@@ -292,6 +292,7 @@ class ReconciliationService:
             auto_fixed_rows=match_summary.auto_fixed_rows,
             pending_ai_rows=match_summary.pending_ai_rows,
             pending_human_rows=match_summary.pending_human_rows,
+            status="RUNNING",
         )
         transaction_service.replace_task_rows(
             user_id=user_id,
@@ -309,6 +310,8 @@ class ReconciliationService:
             queue_rows=queue_rows,
             emitter=emitter,
         )
+
+        task_service.update_status(user_id=user_id, task_id=task_id, status="UPLOADED")
 
         return ReconciliationUploadResponse(
             task_id=task_id,

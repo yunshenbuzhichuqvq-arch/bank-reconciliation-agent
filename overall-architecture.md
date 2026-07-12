@@ -53,9 +53,9 @@
             ┌────────────┴────────────┐
             ▼                         ▼
 ┌────────────────────────┐  ┌────────────────────────────────┐
-│ 确定性计算层             │  │ Multi-Agent 编排层  LangGraph    │
-│ Pandas 清洗 | 三阶段匹配 │  │ ExtractionAgent | AuditAgent    │
-│ YAML 规则 | Decimal 计算 │  │ 状态机 + 条件路由 + 三级 Fallback │
+│ 确定性计算层             │  │ Multi-Agent 编排层            │
+│ Pandas 清洗 | 三阶段匹配 │  │ Plain Python orchestration    │
+│ YAML 规则 | Decimal 计算 │  │ + LangGraph Checkpoint 子图    │
 │ 异常分支路由 | 事务写入   │  │ (审计时调用 RAG 子流程)          │
 └────────────────────────┘  └────────────────────────────────┘
             │                         │
@@ -98,7 +98,7 @@
 关键能力:
 
 - Pydantic 请求和响应校验。
-- 鉴权为**普通中间件**:阶段一 / 二用 `X-User-ID: demo_user` 模拟身份,阶段三可选 JWT 登录。若启用 JWT,所有业务查询按其带出的 `user_id` 做行级过滤。
+- 鉴权已从 `X-User-ID: demo_user` 演进为 JWT Bearer Token。业务 API 使用 `Authorization: Bearer <token>`，登录接口返回 `{access_token, token_type, username}`。
 - SSE 流式推送 Agent 执行过程。
 - 统一异常处理和审计日志。
 - 环境变量管理数据库、模型 Key、向量库路径等配置。
@@ -186,8 +186,7 @@ rules:
 **设计决策**:规则与代码分离,业务人员可直接维护 YAML 文件;规则支持优先级排序,高优先级先匹配;同一笔异常只会命中一条规则,避免冲突。这体现的是 AI 应用开发中的边界意识——不是让 AI 替代所有逻辑,而是让 AI 补足传统规则难处理的语义理解和归因解释。
 
 ### 2.4 Multi-Agent 编排层
-
-Multi-Agent 编排层使用 LangGraph 实现状态机和节点路由。Agent 不是多个聊天机器人,而是带状态、工具、边界和失败兜底的业务节点。**主链路只有 2 个 Agent**(ExtractionAgent + AuditAgent),TraceAgent 作为可选增强。
+Multi-Agent 编排层使用 LangGraph 实现 HumanReview checkpoint 子图。Agent 不是多个聊天机器人,而是带状态、工具、边界和失败兜底的业务节点。主对账工作流为 plain Python service orchestration 串联;LangGraph 仅用于可选 HumanReviewNode 挂起/恢复（Checkpoint 持久化）。
 
 - `PreCheckNode`:规则预处理节点,不依赖 LLM,完成基础对账和异常分类。
 - `ExtractionAgent`:提取 Agent,将不规范摘要 / 户名结构化为标准 JSON。
@@ -197,7 +196,7 @@ Multi-Agent 编排层使用 LangGraph 实现状态机和节点路由。Agent 不
 
 > 报告生成不设独立 Agent:统计走 SQL 聚合 + Markdown 模板,LLM 只做文字润色(可选)。
 
-#### 2.4.1 条件路由(显式建模非 happy-path)
+#### 2.4.1 条件路由（历史设计，当前为 plain Python orchestration）
 
 ```text
 START
@@ -214,9 +213,11 @@ START
   → 人工审批 → 恢复执行 → END
 ```
 
+以上路由图描述的是 LangGraph 目标设计；当前实现为 plain Python service orchestration，调用链等价但不由 LangGraph 状态机驱动。LangGraph 当前仅用于 HumanReviewNode 的 Checkpoint 挂起/恢复。
+
 价值在于显式建模了出错、低置信、工具失败、无依据等**非 happy-path 分支**,而不是只跑通"对上了"的乐观路径。
 
-ExtractionAgent(语义提取)和 RAG 检索(规则召回)在同一笔异常上原则上可以并行,通过 LangGraph 的 `Send` API 汇聚结果给 AuditAgent;是否并行依据真实 LLM 延迟数据决定,若 RAG 在本地显著快于 LLM 则保持串行,避免不必要的并行复杂度。
+ExtractionAgent(语义提取)和 RAG 检索(规则召回)当前在 plain Python 串行执行。未来若引入 LangGraph 主图，可通过 `Send` API 将两者并行后汇聚给 AuditAgent；是否并行依据真实 LLM 延迟数据决定。
 
 #### 2.4.2 多级 Fallback 策略
 
@@ -354,7 +355,7 @@ requested provider/backend、effective provider/backend、fallback、`real_provi
 ### 2.8 工程化与部署
 
 - 本地:FastAPI(`uvicorn --reload`)+ Vue(Vite)+ 本地 MySQL / ChromaDB。
-- 阶段三:ARQ 异步任务队列(上传即返回 task_id,Agent 后台异步执行)、Redis(缓存 / 限流 / 幂等)、SSE 实时推送、量化指标面板、**Docker Compose 一键启动**(Docker 直接暴露端口,无 Nginx)。
+- 阶段三:ARQ 异步任务队列(上传即返回 task_id,Agent 后台异步执行)、Redis(缓存 / 限流 / 幂等)、SSE 实时推送、量化指标面板。**Docker Compose 五服务一键启动**(backend、worker、frontend、mysql、redis，Docker 直接暴露端口，无 Nginx)。
 - (可选加分项)云服务器部署。
 
 ## 3. 核心设计原则
@@ -400,9 +401,9 @@ Agent 输出不直接落库,必须通过校验管线的 Schema 校验、硬约�
 
 ## 4. Multi-Agent 协作架构
 
-### 4.1 全局状态结构
+### 4.1 全局状态结构（LangGraph 目标设计参考）
 
-LangGraph 中各节点共享 `ReconciliationState`。相比原设计,去掉了多租户(`thread_id`)和三层记忆字段,新增 `historical_cases` 承载 Fallback few-shot:
+以下 `ReconciliationState` 为 LangGraph 目标设计中的共享状态定义；当前实现为 plain Python service orchestration，各服务通过函数参数传递上下文。HumanReviewNode 的 checkpoint 持久化仍使用 LangGraph 子图。
 
 ```python
 from typing import Any, Dict, List, Optional, TypedDict
@@ -439,7 +440,7 @@ class ReconciliationState(TypedDict):
 | `HumanReviewNode` | 状态节点 | 挂起流程,等待人工审批(支持 Checkpoint 恢复) | 一(基础)→ 二(Checkpoint) |
 | `TraceAgent` | LLM(**可选**) | 跨期入账、后续到账与原始凭证追溯,Fallback L3 增强 | 可选 |
 
-### 4.3 路由规则
+### 4.3 路由规则（LangGraph 目标设计）
 
 ```text
 START
@@ -459,6 +460,8 @@ START
   → Fallback 耗尽 → HumanReviewNode(Checkpoint 挂起)
   → 人工审批完成 → 恢复执行 → END
 ```
+
+以上路由为 LangGraph 目标设计参考；当前实现为等价 plain Python service orchestration，LangGraph 仅用于 HumanReviewNode Checkpoint。
 
 ### 4.4 失败处理
 
@@ -561,7 +564,7 @@ rag_knowledge/
   → Query Rewrite(LLM 把自然语言映射为规则术语,可开关)
   → 双路召回:Dense Top-20 + BM25 Top-20
   → RRF(Reciprocal Rank Fusion)融合排序,取 Top-10
-  → Cross-Encoder Reranker(默认轻量模型,可换 BGE-Reranker-v2-m3)精排,取 Top-5
+  → Reranker(token-overlap/scoring 逻辑,精排取 Top-5)
   → Dense / Reranker 双阈值过滤
   → 返回 rag_context 给 AuditAgent
   → 保存 rag_source、检索分数、Reranker 分数和最终使用的 chunk
@@ -578,11 +581,11 @@ Output: "单边账 银行未到账 流水匹配失败 处理规则"
 
 **设计决策**:查询改写是否有效用同一评测集对比"纯 Dense 检索"和"Query Rewrite + Hybrid + Reranker",用 Recall@5/MRR/NDCG 量化;评测脚本跑通前,不把提升幅度写成实测结论。
 
-### 6.6 为什么选择 Cross-Encoder Reranker
+### 6.6 Reranker 策略
 
-Bi-Encoder(Embedding 模型)速度快、可预计算,但 query 和 document 独立编码、丢失交互信息;Cross-Encoder 把 query 和 document 拼接后一起过模型、做全文交互打分,精度显著更高但速度慢。系统采用"粗排 + 精排":先用 Bi-Encoder 双路召回 20 条候选,再用 Cross-Encoder Reranker 对 Top-10 精排取 Top-5。
+系统当前使用仓库内 token-overlap/scoring 逻辑做候选精排，而非加载本地 Cross-Encoder 模型。该策略对 query 和文档做分词后的 token 级别匹配和评分，速度快、无需 GPU 或本地模型文件。
 
-Reranker 默认使用**本地轻量模型**(无 API 调用成本、离线可用);需要更高中文精度时可切换到 BGE-Reranker-v2-m3。
+Reranker 默认使用轻量 token-overlap/scoring；需要更高中文精度时可切换到 BGE-Reranker-v2-m3 Cross-Encoder。
 
 ### 6.7 无命中策略
 
@@ -609,7 +612,7 @@ Reranker 默认使用**本地轻量模型**(无 API 调用成本、离线可用)
 ─────────────────────────────────────────────────────────────
                     输入与鉴权(普通中间件)
 ─────────────────────────────────────────────────────────────
- 鉴权中间件:X-User-ID(阶段三可选 JWT)→ user_id 行过滤
+ 鉴权中间件:JWT Bearer Token → user_id 行过滤
  LLM 客户端封装:限流 + 结果缓存(Redis)
 ─────────────────────────────────────────────────────────────
                     异常路由 EXCEPTION ROUTING
@@ -629,7 +632,7 @@ Reranker 默认使用**本地轻量模型**(无 API 调用成本、离线可用)
 ─────────────────────────────────────────────────────────────
  Context = System Prompt + RAG Context + Current Item + Tool Results
           (+ Fallback L2 时注入历史人工确认案例)
- LangGraph Checkpoint 保存状态
+ HumanReview 节点使用 LangGraph Checkpoint 持久化挂起状态
  输出结构化 JSON
 ─────────────────────────────────────────────────────────────
                     输出校验管线
@@ -702,20 +705,20 @@ Reranker 默认使用**本地轻量模型**(无 API 调用成本、离线可用)
 
 ### 阶段二 · Agent 工程做深  🔶 大部分完成
 
-- LangGraph 状态机 + 条件路由(显式建模非 happy-path 分支)。
+- LangGraph 状态机 + 条件路由(早期设计；当前为 plain Python orchestration，LangGraph 仅用于 HumanReview Checkpoint 子图)。
 - ExtractionAgent 接入;三级 Fallback(L1 标准 → L2 历史 few-shot → L3 可选追溯)。
-- 增强 RAG:Dense + BM25 + RRF + Cross-Encoder Reranker(默认轻量,可换 BGE)+ Query Rewrite(可开关)。
+- 增强 RAG:Dense + BM25 + RRF + Reranker(token-overlap/scoring，可换 Cross-Encoder)+ Query Rewrite(可开关)。
 - Agent 输出校验管线 4 阶段 + 硬约束 C1–C6。
 - Prompt 独立文件 + 版本管理;structlog 覆盖所有 LLM 调用点。
 - 工具调用权限边界(L0 只读 / L1 结构化输出 / L2 禁止直写库)。
 - 三层离线 Evaluation Harness:System / RAG / Agent evaluator、baseline/after/comparison、真实 provider/embedding opt-in diagnostic 和 CI/manual/release 分层 gate。
 
-### 阶段三 · 作品化  🚧 进行中
+### 阶段三 · 作品化  ✅ 基本完成
 
 - Vue 工作台 + SSE 展示 Agent 执行;ARQ 异步队列;Redis(缓存 / 限流 / 幂等)。
-- 量化指标小面板;Docker Compose 一键启动(无 Nginx)。
+- 量化指标小面板；Docker Compose 五服务一键启动(无 Nginx)。
 - (可选)JWT 登录;(可选加分项)云服务器部署。
-- **当前状态**:工作台 / 指标盘已通;`start-live → events` 实时链路返回 404,**主链路最后一步未通**;ARQ / Redis / JWT / Compose 未做。
+- **当前状态**:工作台 / 指标盘已通；JWT 登录、ARQ/Redis 异步队列、五服务 Docker Compose 与外部黑盒 smoke 均已落地；`start-live → events` 使用进程内 emitter，当前支持单 backend 实例下的实时事件推送。默认使用 Fake LLM provider + hash embedding。
 
 ## 11. 边界与可扩展方向
 
