@@ -2,6 +2,7 @@ from bank_reconciliation_agent.agents.audit_agent import AuditDecision
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest, RagSearchResponse
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 from scripts import eval_rag
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 
 
 def _state() -> ReconciliationState:
@@ -78,19 +79,20 @@ def test_workflow_uses_dense_floor_for_configured_embedding_backend(monkeypatch)
     retriever = RecordingRetriever()
     retriever.store = type("Store", (), {"embedding_backend": "bge_m3"})()
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.workflow.settings.embedding_backend",
+        "bank_reconciliation_agent.core.config.settings.embedding_backend",
         "bge_m3",
     )
+    executor = RetrieverBackedToolExecutor(retriever=retriever)
 
     result = run_item(
         _state(),
         extraction_agent=NoopAgent(),
         trace_agent=NoopAgent(),
         audit_agent=RecordingAuditAgent(),
-        retriever=retriever,
+        tool_executor=executor,
     )
 
-    assert retriever.requests[0].min_score == 0.510
+    assert executor.requests[0].min_score == 0.510
     assert result["next_action"] == "PENDING_HUMAN"
     assert result["fallback_level"] == 0
 
@@ -98,16 +100,17 @@ def test_workflow_uses_dense_floor_for_configured_embedding_backend(monkeypatch)
 def test_workflow_uses_dense_floor_for_effective_store_backend() -> None:
     retriever = RecordingRetriever()
     retriever.store = type("Store", (), {"embedding_backend": "hash"})()
+    executor = RetrieverBackedToolExecutor(retriever=retriever)
 
     run_item(
         _state(),
         extraction_agent=NoopAgent(),
         trace_agent=NoopAgent(),
         audit_agent=RecordingAuditAgent(),
-        retriever=retriever,
+        tool_executor=executor,
     )
 
-    assert retriever.requests[0].min_score == 0.341
+    assert executor.requests[0].min_score == 0.341
 
 
 def test_eval_rag_uses_zero_min_score_for_ranking_quality() -> None:

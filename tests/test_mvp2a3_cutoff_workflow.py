@@ -7,6 +7,7 @@ from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRespon
 from bank_reconciliation_agent.services.exception_router import BranchResult
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor, t1_succeeded
 
 
 def _evidence() -> RagSearchItem:
@@ -71,7 +72,10 @@ def test_run_item_routes_bc_r003_to_trace_with_t1_candidate_context() -> None:
         extraction_agent=NoopExtractionAgent(),
         trace_agent=trace_agent,
         audit_agent=StaticAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever(),
+            t1_result=t1_succeeded("FLOW-CORE-T1", "2026-06-10"),
+        ),
     )
 
     assert trace_agent.calls == [
@@ -83,7 +87,8 @@ def test_run_item_routes_bc_r003_to_trace_with_t1_candidate_context() -> None:
             },
         }
     ]
-    assert result["agent_logs"][0]["agent_name"] == "TraceAgent"
+    assert result["agent_logs"][0]["agent_name"] == "ToolExecutor"
+    assert any(row["agent_name"] == "TraceAgent" for row in result["agent_logs"])
 
 
 def test_reconciliation_service_propagates_t1_candidate_into_workflow_state(monkeypatch) -> None:
@@ -144,7 +149,10 @@ def test_bc_r003_trace_context_drives_t1_audit_semantics() -> None:
             )
         ),
         audit_agent=AuditAgent(provider=FakeLLMProvider()),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever(),
+            t1_result=t1_succeeded("FLOW-CORE-T1", "2026-06-10"),
+        ),
     )
 
     assert "T+1 已配对" in result["audit_decision"]["reason"]
@@ -164,7 +172,7 @@ def test_bc_r003_without_candidate_marks_wait_for_t1_follow_up() -> None:
             )
         ),
         audit_agent=AuditAgent(provider=FakeLLMProvider()),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert "待 T+1 补齐" in result["audit_decision"]["reason"]

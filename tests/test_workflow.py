@@ -4,9 +4,39 @@ from bank_reconciliation_agent.agents.trace_agent import TraceAgent
 from bank_reconciliation_agent.core.llm.provider import LLMResult
 from bank_reconciliation_agent.core.llm.structured import LLMCallSummary
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
-from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
 from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
 from bank_reconciliation_agent.services.workflow import ReconciliationState, _llm_usage, run_item
+from tests.tool_workflow_helpers import (
+    RetrieverBackedToolExecutor,
+    failed as _failed,
+)
+
+
+class _ToolExecutor:
+    def __init__(self, responses: dict[str, list]) -> None:
+        self._responses = {name: list(items) for name, items in responses.items()}
+
+    def execute(self, name: str, args, context):
+        del args, context
+        queue = self._responses.get(name)
+        if not queue:
+            raise AssertionError(f"unexpected tool call: {name}")
+        return queue.pop(0)
+
+
+class _StaticFallbackCaseProvider:
+    def confirmed_cases(self, *, user_id: str, exception_branch: str | None, limit: int = 3):
+        del user_id, exception_branch, limit
+        return [
+            {
+                "flow_id": "FLOW-OLD-001",
+                "error_type": "AMOUNT_MISMATCH",
+                "exception_branch": "BE-R002",
+                "ai_audit_opinion": "历史确认",
+                "ai_confidence": "0.90",
+                "handle_status": "FIXED",
+            }
+        ]
 
 
 def test_llm_usage_cache_hit_adds_zero_new_tokens() -> None:
@@ -115,7 +145,7 @@ def test_run_item_returns_audit_decision_for_five_bank_enterprise_branches() -> 
             extraction_agent=SpyExtractionAgent(),
             trace_agent=SpyTraceAgent(),
             audit_agent=SpyAuditAgent(),
-            retriever=StaticRetriever(),
+            tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
         )
 
         assert result["audit_decision"]["flow_id"] == f"FLOW-{branch}"
@@ -132,14 +162,14 @@ def test_run_item_routes_extraction_for_reversal_narrative_only() -> None:
         extraction_agent=extraction_agent,
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
     run_item(
         _state("BE-R002", summary="客户退款冲正"),
         extraction_agent=extraction_agent,
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert extraction_agent.calls == ["FLOW-BE-R004"]
@@ -154,7 +184,7 @@ def test_run_item_routes_trace_for_single_side_branches() -> None:
             extraction_agent=SpyExtractionAgent(),
             trace_agent=trace_agent,
             audit_agent=SpyAuditAgent(),
-            retriever=StaticRetriever(),
+            tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
         )
 
     assert trace_agent.calls == ["FLOW-BE-R005", "FLOW-BE-R006"]
@@ -173,7 +203,7 @@ def test_run_item_binds_trace_context(monkeypatch) -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert bound_contexts == [
@@ -189,7 +219,7 @@ def test_run_item_schema_drift_falls_back_to_human_after_one_attempt() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=audit_agent,
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert audit_agent.calls == 1
@@ -200,80 +230,44 @@ def test_run_item_schema_drift_falls_back_to_human_after_one_attempt() -> None:
     assert len(schema_logs) == 1
 
 
-def test_run_item_rag_failure_opens_breaker_and_short_circuits_to_human(monkeypatch) -> None:
-    now = 0.0
-
-    def fake_time() -> float:
-        return now
-
-    monkeypatch.setattr(
-        "bank_reconciliation_agent.services.workflow.rag_circuit_breaker",
-        CircuitBreaker(fail_threshold=1, open_seconds=30, time_fn=fake_time),
-    )
-
+def test_run_item_rag_circuit_open_short_circuits_to_human() -> None:
     result = run_item(
         _state("BE-R002"),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        retriever=FailingRetriever(),
+        tool_executor=_ToolExecutor({"search_rules": [_failed("search_rules", "CIRCUIT_OPEN", "RAG_CIRCUIT_OPEN")]}),
     )
 
     assert result["rag_context"] == []
     assert result["fallback_path"] == "HUMAN"
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
-    assert any(
-        row["agent_name"] == "RAGCircuitBreaker" and row["breaker_state"] == "OPEN"
-        for row in result["agent_logs"]
+    tool_log = next(
+        row for row in result["agent_logs"] if row["agent_name"] == "ToolExecutor"
     )
+    assert tool_log["status"] == "FAILED"
+    assert tool_log["error_type"] == "CIRCUIT_OPEN"
 
-    skipped_result = run_item(
+
+def test_run_item_rag_recovered_success_continues_after_prior_failure() -> None:
+    failed_result = run_item(
         _state("BE-R002"),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=_ToolExecutor({"search_rules": [_failed("search_rules", "CIRCUIT_OPEN", "RAG_CIRCUIT_OPEN")]}),
     )
+    assert failed_result["next_action"] == "PENDING_HUMAN"
 
-    assert skipped_result["rag_context"] == []
-    assert any(
-        row["agent_name"] == "RAGCircuitBreaker" and row["reason"] == "breaker open, skip rag retrieval"
-        for row in skipped_result["agent_logs"]
-    )
-
-
-def test_run_item_rag_half_open_success_closes_breaker(monkeypatch) -> None:
-    now = 0.0
-
-    def fake_time() -> float:
-        return now
-
-    breaker = CircuitBreaker(fail_threshold=1, open_seconds=10, time_fn=fake_time)
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.rag_circuit_breaker", breaker)
-
-    run_item(
-        _state("BE-R002"),
-        extraction_agent=SpyExtractionAgent(),
-        trace_agent=SpyTraceAgent(),
-        audit_agent=SpyAuditAgent(),
-        retriever=FailingRetriever(),
-    )
-
-    now = 11.0
     result = run_item(
         _state("BE-R002"),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
-    assert breaker.state == "CLOSED"
     assert result["rag_context"][0]["chunk_id"] == "rule-001"
-    assert any(
-        row["agent_name"] == "RAGCircuitBreaker" and row["reason"] == "half-open probe succeeded"
-        for row in result["agent_logs"]
-    )
 
 
 def test_run_item_constraint_c3_turns_low_risk_large_diff_to_human() -> None:
@@ -285,7 +279,7 @@ def test_run_item_constraint_c3_turns_low_risk_large_diff_to_human() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.90),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
@@ -299,7 +293,7 @@ def test_run_item_constraint_c4_rejects_placeholder_reason() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=PlaceholderReasonAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
@@ -312,7 +306,10 @@ def test_run_item_constraint_c5_rejects_low_confidence_auto_fix() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.84),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever(),
+            fallback_case_provider=_StaticFallbackCaseProvider(),
+        ),
     )
 
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
@@ -325,7 +322,7 @@ def test_run_item_constraint_c6_rejects_auto_fix_on_low_rag_score() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.90),
-        retriever=LowScoreRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=LowScoreRetriever()),
     )
 
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
@@ -340,7 +337,7 @@ def test_run_item_decision_hook_keeps_compliant_auto_fix_without_extra_calls() -
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=audit_agent,
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert audit_agent.calls == 1
@@ -354,7 +351,7 @@ def test_run_item_invalid_llm_decision_literal_uses_agent_fallback_instead_of_ou
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=InvalidDecisionLiteralProvider()),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
@@ -375,12 +372,6 @@ class LowScoreRetriever:
     def search(self, request):
         del request
         return RagSearchResponse(items=[_low_score_evidence()])
-
-
-class FailingRetriever:
-    def search(self, request):
-        del request
-        raise RuntimeError("chroma unavailable")
 
 
 class SpyExtractionAgent:
@@ -559,7 +550,7 @@ def test_run_item_safety_policy_prevents_auto_fix_on_be_r008() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=UnsafeHighRiskProvider()),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["next_action"] == "PENDING_HUMAN"
@@ -680,7 +671,7 @@ def test_workflow_uses_llm_summary_for_initial_plus_correction_tokens() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     row = _audit_log(result)
@@ -706,7 +697,7 @@ def test_workflow_cache_hit_adds_zero_llm_tokens() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     row = _audit_log(result)
@@ -725,7 +716,7 @@ def test_workflow_agent_log_contains_retry_and_repair_summary() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     row = _audit_log(result)
@@ -747,7 +738,7 @@ def test_stream_payload_projects_safe_llm_governance_fields() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
         emitter=emitter,
     )
 
@@ -771,7 +762,7 @@ def test_extraction_final_llm_failure_returns_pending_human() -> None:
         extraction_agent=ExtractionAgent(provider=FailingProvider()),
         trace_agent=SpyTraceAgent(),
         audit_agent=audit_agent,
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["next_action"] == "PENDING_HUMAN"
@@ -787,7 +778,7 @@ def test_trace_final_llm_failure_returns_pending_human() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=TraceAgent(provider=FailingProvider()),
         audit_agent=audit_agent,
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["next_action"] == "PENDING_HUMAN"
@@ -801,7 +792,7 @@ def test_final_llm_failure_records_stable_failure_and_fallback_reason() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=TraceAgent(provider=FailingProvider()),
         audit_agent=RecordingAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     trace_log = next(
@@ -820,7 +811,7 @@ def test_final_llm_failure_does_not_continue_to_auto_fix() -> None:
         extraction_agent=ExtractionAgent(provider=FailingProvider()),
         trace_agent=SpyTraceAgent(),
         audit_agent=audit_agent,
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert audit_agent.calls == 0

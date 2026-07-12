@@ -6,6 +6,7 @@ from bank_reconciliation_agent.services.reconciliation import (
     ReconciliationService,
 )
 from decimal import Decimal
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 
 
 def _evidence() -> RagSearchItem:
@@ -102,7 +103,9 @@ def _run(state: ReconciliationState, agent: CandidateAuditAgent, *, with_evidenc
         extraction_agent=NoopAgent(),
         trace_agent=NoopAgent(),
         audit_agent=agent,
-        retriever=StaticRetriever(with_evidence=with_evidence),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever(with_evidence=with_evidence)
+        ),
     )
 
 
@@ -148,7 +151,7 @@ def test_low_confidence_or_missing_evidence_defers_without_fallback() -> None:
     assert len(low_agent.calls) == 1
     assert low_result["next_action"] == "PENDING_HUMAN"
     assert low_result["fallback_path"] == "HUMAN"
-    assert len(no_evidence_agent.calls) == 1
+    assert len(no_evidence_agent.calls) == 0
     assert no_evidence_result["next_action"] == "PENDING_HUMAN"
     assert no_evidence_result["fallback_level"] == 0
 

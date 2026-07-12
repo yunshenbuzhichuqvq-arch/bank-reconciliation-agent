@@ -1,6 +1,7 @@
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest, RagSearchResponse
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 
 
 def test_rule_retriever_search_returns_bank_clearing_chunks() -> None:
@@ -26,7 +27,7 @@ def test_workflow_falls_back_to_human_when_bank_clearing_rag_has_no_hits() -> No
         extraction_agent=NoopExtractionAgent(),
         trace_agent=NoopTraceAgent(),
         audit_agent=StaticAuditAgent(),
-        retriever=EmptyRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=EmptyRetriever()),
     )
 
     assert result["scenario_type"] == "BANK_CLEARING"
@@ -44,7 +45,7 @@ def test_workflow_keeps_bank_clearing_state_intact() -> None:
         extraction_agent=NoopExtractionAgent(),
         trace_agent=NoopTraceAgent(),
         audit_agent=StaticAuditAgent(),
-        retriever=EmptyRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=EmptyRetriever()),
     )
 
     assert result["scenario_type"] == "BANK_CLEARING"

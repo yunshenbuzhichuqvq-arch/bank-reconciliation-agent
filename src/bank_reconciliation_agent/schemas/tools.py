@@ -34,13 +34,18 @@ class ToolContext(_StrictModel):
     exception_branch: str
     fallback_level: Literal[0, 1, 2, 3] = 0
 
-    @field_validator("user_id", "task_id", "flow_id", "exception_branch")
+    @field_validator("user_id", "task_id", "flow_id")
     @classmethod
     def _non_blank(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
             raise ValueError("must be a non-empty string")
         return stripped
+
+    @field_validator("exception_branch")
+    @classmethod
+    def _strip_branch(cls, value: str) -> str:
+        return value.strip()
 
 
 class SearchRulesArgs(_StrictModel):
