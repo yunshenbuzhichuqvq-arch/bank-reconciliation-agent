@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pandas as pd
 
-from bank_reconciliation_agent.services.exception_router import ExceptionRouter
+from bank_reconciliation_agent.services.exception_router import ExceptionRouter, find_t1_candidate
 
 
 def _core_row(
@@ -139,3 +139,40 @@ def test_bank_clearing_bc_r003_keeps_candidate_empty_when_match_conditions_fail(
     assert results["CLEAR_BAD_AMOUNT"].t1_candidate is None
     assert results["CLEAR_BAD_DATE"].exception_branch == "BC-R003"
     assert results["CLEAR_BAD_DATE"].t1_candidate is None
+
+
+def test_find_t1_candidate_pure_function_uses_mapping_and_sequence_inputs() -> None:
+    clear_row = _clearing_row("CLEAR_CUTOFF", "100.00", reference_no="REF-100")
+    bank_rows = [
+        _core_row("CORE_T1", "100.00", accounting_date=date(2026, 6, 10), reference_no="REF-100")
+    ]
+
+    assert find_t1_candidate(clear_row, bank_rows) == {
+        "flow_id": "CORE_T1",
+        "accounting_date": "2026-06-10",
+    }
+
+
+def test_find_t1_candidate_matches_classify_result_for_same_fixture() -> None:
+    bank_df = pd.DataFrame(
+        [
+            _core_row(
+                "CORE_T1",
+                "100.00",
+                accounting_date=date(2026, 6, 10),
+                reference_no="REF-100",
+            )
+        ]
+    )
+    clear_df = pd.DataFrame([_clearing_row("CLEAR_CUTOFF", "100.00", reference_no="REF-100")])
+
+    classify_candidate = {
+        result.flow_id: result
+        for result in ExceptionRouter().classify(bank_df, clear_df, scenario_type="BANK_CLEARING")
+    }["CLEAR_CUTOFF"].t1_candidate
+    pure_candidate = find_t1_candidate(
+        clear_df.to_dict("records")[0],
+        bank_df.to_dict("records"),
+    )
+
+    assert classify_candidate == pure_candidate
