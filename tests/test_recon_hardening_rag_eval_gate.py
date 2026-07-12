@@ -5,11 +5,13 @@ from bank_reconciliation_agent.rag.retriever import (
     RuleRetriever,
 )
 from bank_reconciliation_agent.services.workflow import run_item
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 from tests.test_workflow_fallback import (
     EmptyFallbackCaseProvider,
     NoopExtractionAgent,
     SequenceAuditAgent,
     SpyTraceAgent,
+    StaticFallbackCaseProvider,
     StaticRetriever,
     _evidence,
     _state,
@@ -39,8 +41,10 @@ def test_unrelated_query_reaches_workflow_no_evidence_floor(tmp_path: Path, monk
         extraction_agent=NoopExtractionAgent(),
         trace_agent=SpyTraceAgent(confidence=0.9),
         audit_agent=audit_agent,
-        retriever=retriever,
-        fallback_case_provider=EmptyFallbackCaseProvider(),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=retriever,
+            fallback_case_provider=EmptyFallbackCaseProvider(),
+        ),
     )
 
     assert result["rag_context"] == []
@@ -57,8 +61,21 @@ def test_low_confidence_with_evidence_still_reaches_l2() -> None:
         extraction_agent=NoopExtractionAgent(),
         trace_agent=SpyTraceAgent(confidence=0.9),
         audit_agent=audit_agent,
-        retriever=StaticRetriever([_evidence(score=0.9)]),
-        fallback_case_provider=EmptyFallbackCaseProvider(),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever([_evidence(score=0.9)]),
+            fallback_case_provider=StaticFallbackCaseProvider(
+                [
+                    {
+                        "flow_id": "FLOW-OLD-EG",
+                        "error_type": "AMOUNT_MISMATCH",
+                        "exception_branch": "BE-R002",
+                        "ai_audit_opinion": "历史确认",
+                        "ai_confidence": "0.80",
+                        "handle_status": "FIXED",
+                    }
+                ]
+            ),
+        ),
     )
 
     assert audit_agent.calls == [1, 2]

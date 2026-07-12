@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
@@ -11,17 +10,22 @@ from bank_reconciliation_agent.agents.extraction_agent import (
     extraction_agent,
 )
 from bank_reconciliation_agent.agents.trace_agent import TraceAgent, TraceAgentError, trace_agent
-from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.core.logging import bind_trace_context, log
-from bank_reconciliation_agent.rag.retriever import rule_retriever
-from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest, RagSearchResponse
+from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.schemas.stream import StreamEventType
-from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
+from bank_reconciliation_agent.schemas.tools import (
+    ConfirmedCasesOutput,
+    LoadConfirmedCasesArgs,
+    LookupT1ContextArgs,
+    SearchRulesArgs,
+    SearchRulesOutput,
+    T1ContextOutput,
+    ToolCallResult,
+    ToolContext,
+)
 from bank_reconciliation_agent.services.fallback import (
-    FallbackCaseProvider,
     confidence_is_low,
     l1_requires_l2,
-    ledger_fallback_case_provider,
     mark_fallback,
 )
 from bank_reconciliation_agent.services.hooks import (
@@ -31,14 +35,12 @@ from bank_reconciliation_agent.services.hooks import (
     schema_hook,
 )
 from bank_reconciliation_agent.services.stream_emitter import NullEmitter, StreamEmitter, to_stream_event
+from bank_reconciliation_agent.services.tool_adapters import default_tool_executor
+from bank_reconciliation_agent.services.tool_executor import safe_tool_projection
 
 
 REVERSAL_HINTS = ("冲正", "红冲", "退款", "抹账", "撤销")
 TRACE_BRANCHES = {"BE-R005", "BE-R006", "BC-R003"}
-rag_circuit_breaker = CircuitBreaker(
-    fail_threshold=settings.rag_breaker_fail_threshold,
-    open_seconds=settings.rag_breaker_open_seconds,
-)
 
 
 class ReconciliationState(TypedDict):
@@ -70,8 +72,13 @@ class ReconciliationState(TypedDict):
     fuzzy_candidate: NotRequired[dict[str, str] | None]
 
 
-class Retriever(Protocol):
-    def search(self, request: RagSearchRequest) -> RagSearchResponse: ...
+class ToolExecutorProtocol(Protocol):
+    def execute(
+        self,
+        name: str,
+        args: Any,
+        context: ToolContext,
+    ) -> ToolCallResult: ...
 
 
 def run_item(
@@ -80,8 +87,7 @@ def run_item(
     extraction_agent: ExtractionAgent = extraction_agent,
     trace_agent: TraceAgent = trace_agent,
     audit_agent: AuditAgent = audit_agent,
-    retriever: Retriever = rule_retriever,
-    fallback_case_provider: FallbackCaseProvider = ledger_fallback_case_provider,
+    tool_executor: ToolExecutorProtocol = default_tool_executor,
     emitter: StreamEmitter | None = None,
 ) -> ReconciliationState:
     emitter = emitter or NullEmitter()
@@ -128,6 +134,28 @@ def run_item(
             **_llm_usage(extraction_agent),
         }, emitter)
 
+    cutoff_t1_context: dict[str, str] | None = None
+    if exception_branch == "BC-R003":
+        t1_result = _execute_tool(
+            tool_executor,
+            "lookup_t1_context",
+            LookupT1ContextArgs(),
+            state,
+            emitter,
+        )
+        if t1_result.status == "FAILED":
+            return _tool_fail_closed_item(
+                state,
+                flow_id=flow_id,
+                tool_result=t1_result,
+                emitter=emitter,
+            )
+        if t1_result.status == "SUCCEEDED" and isinstance(t1_result.result, T1ContextOutput):
+            cutoff_t1_context = {
+                "flow_id": t1_result.result.flow_id,
+                "accounting_date": t1_result.result.accounting_date.isoformat(),
+            }
+
     if exception_branch in TRACE_BRANCHES:
         trace_kwargs = {
             "flow_id": flow_id,
@@ -137,7 +165,7 @@ def run_item(
             "remark": remark,
         }
         if exception_branch == "BC-R003":
-            trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
+            trace_kwargs["cutoff_t1_context"] = cutoff_t1_context
         try:
             trace_result = trace_agent.trace(**trace_kwargs)
         except TraceAgentError:
@@ -159,8 +187,24 @@ def run_item(
             **_llm_usage(trace_agent),
         }, emitter)
 
-    rag_response = _retrieve_rag_response(state, retriever, emitter)
-    rag_items = rag_response.items
+    search_result = _execute_tool(
+        tool_executor,
+        "search_rules",
+        SearchRulesArgs(query=state.get("rag_query") or _build_rag_query(state)),
+        state,
+        emitter,
+    )
+    if search_result.status != "SUCCEEDED":
+        return _tool_fail_closed_item(
+            state,
+            flow_id=flow_id,
+            tool_result=search_result,
+            emitter=emitter,
+        )
+
+    rag_output: SearchRulesOutput = search_result.result
+    rag_items = list(rag_output.items)
+    rag_response = RagSearchResponse(items=rag_items, rewritten_query=rag_output.rewritten_query)
     state["rag_context"] = [item.model_dump(mode="json") for item in rag_items]
     state["rag_response"] = rag_response.model_dump(mode="json")
     _emit_stream_row(
@@ -169,7 +213,6 @@ def run_item(
             "agent_name": "RuleRetriever",
             "step": "retrieve",
             "flow_id": flow_id,
-            "query": state.get("rag_query") or _build_rag_query(state),
             "chunk_ids": [item.chunk_id for item in rag_items],
             "best_score": max((item.score for item in rag_items), default=None),
         },
@@ -216,15 +259,46 @@ def run_item(
     fallback_path = "L1"
     if state.get("error_message") == "schema validation failed":
         fallback_path = "HUMAN"
-    elif not rag_items:
-        audit_decision = mark_fallback(audit_decision, fallback_level=0, next_action="PENDING_HUMAN")
-        fallback_path = "HUMAN"
     elif l1_requires_l2(audit_decision):
         fallback_path = "L1->L2"
-        state["fallback_cases"] = fallback_case_provider.confirmed_cases(
-            user_id=state["user_id"],
-            exception_branch=exception_branch,
+        cases_result = _execute_tool(
+            tool_executor,
+            "load_confirmed_cases",
+            LoadConfirmedCasesArgs(),
+            state,
+            emitter,
+            fallback_level=2,
         )
+        if cases_result.status != "SUCCEEDED":
+            audit_decision = mark_fallback(
+                audit_decision,
+                fallback_level=2,
+                next_action="PENDING_HUMAN",
+            )
+            audit_decision.decision = "PENDING_HUMAN"
+            audit_decision.ai_suggestion = "PENDING_HUMAN"
+            fallback_path = "L1->L2->HUMAN"
+            state["audit_decision"] = audit_decision.model_dump(mode="json")
+            state["confidence"] = audit_decision.confidence
+            state["fallback_level"] = audit_decision.fallback_level
+            state["fallback_path"] = fallback_path
+            state["next_action"] = audit_decision.next_action
+            _emit_stream_row(
+                state,
+                {
+                    "agent_name": "Workflow",
+                    "step": "item_done",
+                    "flow_id": flow_id,
+                    "status": state["next_action"],
+                    "decision": state["audit_decision"]["decision"],
+                    "confidence": state["audit_decision"]["confidence"],
+                },
+                emitter,
+                StreamEventType.ITEM_DONE,
+            )
+            return state
+        cases_output: ConfirmedCasesOutput = cases_result.result
+        state["fallback_cases"] = [case.model_dump(mode="json") for case in cases_output.items]
         audit_decision = _audit_decision_once(
             state=state,
             audit_agent=audit_agent,
@@ -271,7 +345,7 @@ def run_item(
                 "remark": remark,
             }
             if exception_branch == "BC-R003":
-                trace_kwargs["cutoff_t1_context"] = state.get("t1_candidate")
+                trace_kwargs["cutoff_t1_context"] = cutoff_t1_context
             try:
                 trace_result = trace_agent.trace(**trace_kwargs)
             except TraceAgentError:
@@ -354,6 +428,7 @@ def run_item(
         StreamEventType.ITEM_DONE,
     )
     return state
+
 
 
 def _run_fuzzy_candidate_confirmation(
@@ -566,99 +641,87 @@ def _audit_decision_once(
     )
 
 
-def _retrieve_rag_response(
-    state: ReconciliationState,
-    retriever: Retriever,
-    emitter: StreamEmitter,
-) -> RagSearchResponse:
-    query = state.get("rag_query") or _build_rag_query(state)
-    previous_state = rag_circuit_breaker.state
-    if not rag_circuit_breaker.allow_request():
-        _append_rag_breaker_log(
-            state,
-            breaker_state=rag_circuit_breaker.state,
-            reason="breaker open, skip rag retrieval",
-            query=query,
-            emitter=emitter,
-        )
-        log.warning(
-            "rag_circuit_breaker_open",
-            breaker_state=rag_circuit_breaker.state,
-            scenario_type=state["scenario_type"],
-            query=query,
-        )
-        return RagSearchResponse(items=[], rewritten_query=None)
-
-    request = RagSearchRequest(
-        query=query,
-        top_k=settings.rag_rerank_top_k,
-        min_score=settings.rag_dense_min_score_for_backend(_effective_embedding_backend(retriever)),
-        scenario_type=state["scenario_type"],
-        enable_rewrite=settings.enable_rag_rewrite,
-        enable_hybrid=settings.enable_rag_hybrid,
-        enable_reranker=settings.enable_rag_reranker,
-    )
-    try:
-        response = retriever.search(request)
-    except Exception as exc:
-        breaker_state = rag_circuit_breaker.record_failure()
-        _append_rag_breaker_log(
-            state,
-            breaker_state=breaker_state,
-            reason=str(exc),
-            query=query,
-            emitter=emitter,
-        )
-        log.warning(
-            "rag_circuit_breaker_failure",
-            breaker_state=breaker_state,
-            scenario_type=state["scenario_type"],
-            query=query,
-            error=str(exc),
-        )
-        return RagSearchResponse(items=[], rewritten_query=None)
-
-    breaker_state = rag_circuit_breaker.record_success()
-    if previous_state == "HALF_OPEN":
-        _append_rag_breaker_log(
-            state,
-            breaker_state=breaker_state,
-            reason="half-open probe succeeded",
-            query=query,
-            emitter=emitter,
-        )
-        log.warning(
-            "rag_circuit_breaker_recovered",
-            breaker_state=breaker_state,
-            scenario_type=state["scenario_type"],
-            query=query,
-        )
-    return response
-
-
-def _effective_embedding_backend(retriever: Retriever) -> str | None:
-    store = getattr(retriever, "store", None)
-    backend = getattr(store, "embedding_backend", None)
-    return backend if isinstance(backend, str) else "hash"
-
-
-def _append_rag_breaker_log(
+def _build_tool_context(
     state: ReconciliationState,
     *,
-    breaker_state: str,
-    reason: str,
-    query: str,
+    fallback_level: int = 0,
+) -> ToolContext:
+    return ToolContext(
+        user_id=state["user_id"],
+        task_id=state["task_id"],
+        flow_id=_flow_id(state),
+        scenario_type=state["scenario_type"],
+        exception_branch=state.get("exception_branch") or "",
+        fallback_level=fallback_level,
+    )
+
+
+def _execute_tool(
+    tool_executor: ToolExecutorProtocol,
+    name: str,
+    args: Any,
+    state: ReconciliationState,
     emitter: StreamEmitter,
-) -> None:
+    *,
+    fallback_level: int = 0,
+) -> ToolCallResult:
+    context = _build_tool_context(state, fallback_level=fallback_level)
+    result = tool_executor.execute(name, args, context)
+    projection = safe_tool_projection(result)
     _append_agent_log(state, {
-        "agent_name": "RAGCircuitBreaker",
-        "step": "retrieve",
-        "hook_name": "RAGCircuitBreaker",
-        "breaker_state": breaker_state,
-        "reason": reason,
-        "query": query,
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "agent_name": "ToolExecutor",
+        "step": "tool_call",
+        "flow_id": _flow_id(state),
+        **projection,
     }, emitter)
+    return result
+
+
+def _tool_fail_closed_item(
+    state: ReconciliationState,
+    *,
+    flow_id: str,
+    tool_result: ToolCallResult,
+    emitter: StreamEmitter,
+) -> ReconciliationState:
+    """Close the current item to PENDING_HUMAN after a Tool EMPTY/FAILED outcome.
+
+    Only the current item is failed closed; downstream Tools and LLM agents are
+    not invoked. A stable fallback_reason is recorded, never an exception string.
+    """
+    decision = AuditDecision(
+        flow_id=flow_id,
+        decision="PENDING_HUMAN",
+        risk_level="HIGH",
+        reason="关键证据缺失，自动转人工。",
+        ai_suggestion="PENDING_HUMAN",
+        evidence=[],
+        confidence=0.0,
+        fallback_applied=True,
+        fallback_level=0,
+        next_action="PENDING_HUMAN",
+    )
+    state["audit_decision"] = decision.model_dump(mode="json")
+    state["confidence"] = 0.0
+    state["fallback_level"] = 0
+    state["fallback_path"] = "HUMAN"
+    state["next_action"] = "PENDING_HUMAN"
+    if tool_result.status == "FAILED":
+        state["error_message"] = tool_result.fallback_reason
+    _emit_stream_row(
+        state,
+        {
+            "agent_name": "Workflow",
+            "step": "item_done",
+            "flow_id": flow_id,
+            "status": state["next_action"],
+            "decision": state["audit_decision"]["decision"],
+            "confidence": state["audit_decision"]["confidence"],
+        },
+        emitter,
+        StreamEventType.ITEM_DONE,
+    )
+    return state
 
 
 def _apply_post_hooks(

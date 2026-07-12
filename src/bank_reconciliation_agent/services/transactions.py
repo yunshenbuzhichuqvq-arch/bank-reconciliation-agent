@@ -67,6 +67,9 @@ bank_transaction_table = Table(
     Column("transaction_code", String(32), nullable=True),
     Column("source_system", String(64), nullable=True),
     Column("remark", String(255), nullable=True),
+    Column("voucher_no", String(64), nullable=True),
+    Column("reference_no", String(64), nullable=True),
+    Column("merchant_order_no", String(64), nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     UniqueConstraint("user_id", "task_id", "flow_id", name="uk_bank_user_task_flow"),
     Index("idx_bank_task_flow", "task_id", "flow_id"),
@@ -194,6 +197,40 @@ class TransactionService:
         metadata.create_all(self._engine, tables=[bank_transaction_table, clear_transaction_table])
         self._initialized = True
 
+    def flow_belongs_to_task(self, *, user_id: str, task_id: str, flow_id: str) -> bool:
+        self._ensure_initialized()
+        for table in (bank_transaction_table, clear_transaction_table):
+            statement = (
+                select(func.count())
+                .select_from(table)
+                .where(
+                    table.c.user_id == user_id,
+                    table.c.task_id == task_id,
+                    table.c.flow_id == flow_id,
+                )
+            )
+            with self._engine.connect() as connection:
+                if connection.execute(statement).scalar_one() > 0:
+                    return True
+        return False
+
+    def list_bank_rows(self, *, user_id: str, task_id: str) -> list[dict[str, object]]:
+        self._ensure_initialized()
+        statement = (
+            select(bank_transaction_table)
+            .where(
+                bank_transaction_table.c.user_id == user_id,
+                bank_transaction_table.c.task_id == task_id,
+            )
+            .order_by(bank_transaction_table.c.id)
+        )
+        with self._engine.connect() as connection:
+            rows = connection.execute(statement).mappings().all()
+        return [
+            {key: self._normalize_value(value) for key, value in row.items()}
+            for row in rows
+        ]
+
     def _count_rows(self, table: Table, user_id: str, task_id: str) -> int:
         self._ensure_initialized()
         statement = select(func.count()).select_from(table).where(
@@ -268,6 +305,9 @@ class TransactionService:
             "transaction_code": self._to_optional_string(row.get("transaction_code")),
             "source_system": self._to_optional_string(row.get("source_system")),
             "remark": self._to_optional_string(row.get("remark")),
+            "voucher_no": self._to_optional_string(row.get("voucher_no")),
+            "reference_no": self._to_optional_string(row.get("reference_no")),
+            "merchant_order_no": self._to_optional_string(row.get("merchant_order_no")),
         }
 
     def _to_clear_insert_values(

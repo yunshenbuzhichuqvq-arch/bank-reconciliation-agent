@@ -7,6 +7,7 @@ from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
 from bank_reconciliation_agent.services.workflow import run_item
 
 from tests.test_workflow import SpyAuditAgent, SpyExtractionAgent, SpyTraceAgent, StaticRetriever, _state
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 
 
 def test_run_item_emits_ordered_agent_stream_events() -> None:
@@ -17,7 +18,7 @@ def test_run_item_emits_ordered_agent_stream_events() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        retriever=StaticRetriever(),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
         emitter=emitter,
     )
 

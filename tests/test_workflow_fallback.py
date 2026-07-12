@@ -1,12 +1,18 @@
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision
 from bank_reconciliation_agent.agents.trace_agent import TraceAgentError
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
+from bank_reconciliation_agent.schemas.tools import ConfirmedCase
 from bank_reconciliation_agent.services.agent_log import AgentLogService, agent_execution_log_table
 from bank_reconciliation_agent.services.ledger import LedgerService, error_ledger_table
 from bank_reconciliation_agent.services.task import TaskService, reconciliation_task_table
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 from decimal import Decimal
 from sqlalchemy import create_engine, select
+
+
+def _normalized_cases(cases: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [ConfirmedCase.model_validate(case).model_dump(mode="json") for case in cases]
 
 
 def _evidence(*, score: float = 0.9) -> RagSearchItem:
@@ -58,8 +64,10 @@ def test_low_confidence_decision_escalates_to_l2_then_l3_then_human() -> None:
     fallback_cases = [
         {
             "flow_id": "FLOW-OLD-001",
+            "error_type": "AMOUNT_MISMATCH",
             "exception_branch": "BE-R002",
             "ai_audit_opinion": "历史人工确认金额差异需复核",
+            "ai_confidence": "0.80",
             "handle_status": "HELD",
         }
     ]
@@ -69,16 +77,19 @@ def test_low_confidence_decision_escalates_to_l2_then_l3_then_human() -> None:
         extraction_agent=NoopExtractionAgent(),
         trace_agent=trace_agent,
         audit_agent=audit_agent,
-        retriever=StaticRetriever([_evidence()]),
-        fallback_case_provider=StaticFallbackCaseProvider(fallback_cases),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever([_evidence()]),
+            fallback_case_provider=StaticFallbackCaseProvider(fallback_cases),
+        ),
     )
 
+    normalized = _normalized_cases(fallback_cases)
     assert audit_agent.calls == [1, 2, 3]
     assert audit_agent.call_args[0]["few_shot_cases"] is None
     assert audit_agent.call_args[0]["trace_context"] is None
-    assert audit_agent.call_args[1]["few_shot_cases"] == fallback_cases
+    assert audit_agent.call_args[1]["few_shot_cases"] == normalized
     assert audit_agent.call_args[1]["trace_context"] is None
-    assert audit_agent.call_args[2]["few_shot_cases"] == fallback_cases
+    assert audit_agent.call_args[2]["few_shot_cases"] == normalized
     assert audit_agent.call_args[2]["trace_context"] == {
         "trace_found": False,
         "related_flow_ids": [],
@@ -96,14 +107,26 @@ def test_low_confidence_decision_escalates_to_l2_then_l3_then_human() -> None:
 
 def test_l3_trace_final_failure_fails_closed_in_item() -> None:
     audit_agent = SequenceAuditAgent([0.4, 0.5, 0.5])
+    fallback_cases = [
+        {
+            "flow_id": "FLOW-OLD-003",
+            "error_type": "AMOUNT_MISMATCH",
+            "exception_branch": "BE-R002",
+            "ai_audit_opinion": "历史确认",
+            "ai_confidence": "0.80",
+            "handle_status": "FIXED",
+        }
+    ]
 
     result = run_item(
         _state(),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=FailingTraceAgent(),
         audit_agent=audit_agent,
-        retriever=StaticRetriever([_evidence()]),
-        fallback_case_provider=StaticFallbackCaseProvider([]),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever([_evidence()]),
+            fallback_case_provider=StaticFallbackCaseProvider(fallback_cases),
+        ),
     )
 
     assert audit_agent.calls == [1, 2]
@@ -152,11 +175,13 @@ def test_rag_miss_short_circuits_to_human_without_fallback() -> None:
         extraction_agent=NoopExtractionAgent(),
         trace_agent=trace_agent,
         audit_agent=audit_agent,
-        retriever=StaticRetriever([]),
-        fallback_case_provider=EmptyFallbackCaseProvider(),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever([]),
+            fallback_case_provider=EmptyFallbackCaseProvider(),
+        ),
     )
 
-    assert audit_agent.calls == [1]
+    assert audit_agent.calls == []
     assert trace_agent.calls == []
     assert result["fallback_level"] == 0
     assert result["fallback_path"] == "HUMAN"
@@ -169,8 +194,10 @@ def test_low_rag_score_does_not_trigger_l2_when_l1_confidence_is_high() -> None:
     fallback_cases = [
         {
             "flow_id": "FLOW-OLD-002",
+            "error_type": "AMOUNT_MISMATCH",
             "exception_branch": "BE-R002",
             "ai_audit_opinion": "历史人工确认可参考",
+            "ai_confidence": "0.80",
             "handle_status": "FIXED",
         }
     ]
@@ -180,8 +207,10 @@ def test_low_rag_score_does_not_trigger_l2_when_l1_confidence_is_high() -> None:
         extraction_agent=NoopExtractionAgent(),
         trace_agent=SpyTraceAgent(confidence=0.9),
         audit_agent=audit_agent,
-        retriever=StaticRetriever([_evidence(score=0.2)]),
-        fallback_case_provider=StaticFallbackCaseProvider(fallback_cases),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever([_evidence(score=0.2)]),
+            fallback_case_provider=StaticFallbackCaseProvider(fallback_cases),
+        ),
     )
 
     assert audit_agent.calls == [1]
@@ -190,7 +219,7 @@ def test_low_rag_score_does_not_trigger_l2_when_l1_confidence_is_high() -> None:
     assert result["audit_decision"]["fallback_applied"] is False
 
 
-def test_l2_handles_empty_fallback_cases_without_error() -> None:
+def test_l2_empty_confirmed_cases_short_circuits_to_human_without_second_audit() -> None:
     audit_agent = SequenceAuditAgent([0.4, 0.9])
 
     result = run_item(
@@ -198,14 +227,16 @@ def test_l2_handles_empty_fallback_cases_without_error() -> None:
         extraction_agent=NoopExtractionAgent(),
         trace_agent=SpyTraceAgent(confidence=0.9),
         audit_agent=audit_agent,
-        retriever=StaticRetriever([_evidence()]),
-        fallback_case_provider=EmptyFallbackCaseProvider(),
+        tool_executor=RetrieverBackedToolExecutor(
+            retriever=StaticRetriever([_evidence()]),
+            fallback_case_provider=EmptyFallbackCaseProvider(),
+        ),
     )
 
-    assert audit_agent.calls == [1, 2]
-    assert audit_agent.call_args[1]["few_shot_cases"] == []
+    assert audit_agent.calls == [1]
     assert result["fallback_level"] == 2
-    assert result["fallback_path"] == "L1->L2"
+    assert result["fallback_path"] == "L1->L2->HUMAN"
+    assert result["next_action"] == "PENDING_HUMAN"
 
 
 def test_persistence_services_store_fallback_fields_and_task_stats_with_replace_semantics() -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import NamedTuple
+from typing import Mapping, NamedTuple, Sequence
 
 import pandas as pd
 
@@ -11,6 +11,81 @@ from bank_reconciliation_agent.services.rule_engine import rule_engine_for
 
 
 REVERSAL_KEYWORDS = {"冲正", "红冲", "退款", "抹账", "撤销"}
+
+_T1_REFERENCE_KEYS = ("reference_no", "merchant_order_no", "voucher_no")
+
+
+def _t1_to_decimal(value: object) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal("0.01"))
+
+
+def _t1_optional_string(value: object) -> str | None:
+    if value is None or bool(pd.isna(value)):
+        return None
+    return str(value)
+
+
+def _t1_amount(row: Mapping[str, object]) -> Decimal | None:
+    value = row.get("amount")
+    if value is None or bool(pd.isna(value)):
+        return None
+    return _t1_to_decimal(value)
+
+
+def _t1_parse_date(value: object) -> date | None:
+    if value is None or bool(pd.isna(value)):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value).strip())
+    except ValueError:
+        return None
+
+
+def _t1_reference_values(row: Mapping[str, object]) -> set[str]:
+    return {
+        value
+        for key in _T1_REFERENCE_KEYS
+        if (value := _t1_optional_string(row.get(key)))
+    }
+
+
+def find_t1_candidate(
+    clear_row: Mapping[str, object],
+    bank_rows: Sequence[Mapping[str, object]],
+) -> dict[str, str] | None:
+    """Return the first stable T+1 bank candidate for a clearing cutoff row.
+
+    Matching rule (unchanged): equal amount, bank ``accounting_date`` equals the
+    clearing ``trade_date`` plus one day, and at least one intersecting reference
+    value across ``reference_no`` / ``merchant_order_no`` / ``voucher_no``.
+    """
+    clear_amount = _t1_amount(clear_row)
+    trade_date = _t1_parse_date(clear_row.get("trade_date"))
+    if clear_amount is None or trade_date is None:
+        return None
+
+    target_accounting_date = trade_date + timedelta(days=1)
+    clear_references = _t1_reference_values(clear_row)
+    if not clear_references:
+        return None
+
+    for bank_row in bank_rows:
+        if _t1_amount(bank_row) != clear_amount:
+            continue
+        if _t1_parse_date(bank_row.get("accounting_date")) != target_accounting_date:
+            continue
+        if not clear_references & _t1_reference_values(bank_row):
+            continue
+        return {
+            "flow_id": str(bank_row["flow_id"]),
+            "accounting_date": target_accounting_date.isoformat(),
+        }
+
+    return None
 
 
 class BranchResult(NamedTuple):
@@ -319,29 +394,7 @@ class ExceptionRouter:
         clear_row: dict[str, object],
         bank_df: pd.DataFrame,
     ) -> dict[str, str] | None:
-        clear_amount = self._amount_from_row(clear_row)
-        trade_date = self._parse_date(clear_row.get("trade_date"))
-        if clear_amount is None or trade_date is None:
-            return None
-
-        target_accounting_date = trade_date + timedelta(days=1)
-        clear_references = self._reference_values(clear_row)
-        if not clear_references:
-            return None
-
-        for bank_row in bank_df.to_dict("records"):
-            if self._amount_from_row(bank_row) != clear_amount:
-                continue
-            if self._parse_date(bank_row.get("accounting_date")) != target_accounting_date:
-                continue
-            if not clear_references & self._reference_values(bank_row):
-                continue
-            return {
-                "flow_id": str(bank_row["flow_id"]),
-                "accounting_date": target_accounting_date.isoformat(),
-            }
-
-        return None
+        return find_t1_candidate(clear_row, bank_df.to_dict("records"))
 
     def _to_decimal(self, value: object) -> Decimal:
         return Decimal(str(value)).quantize(Decimal("0.01"))
@@ -362,25 +415,6 @@ class ExceptionRouter:
             return self._parse_clock_time(str(value).strip())
         except ValueError:
             return None
-
-    def _parse_date(self, value: object) -> date | None:
-        if self._is_empty(value):
-            return None
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        try:
-            return date.fromisoformat(str(value).strip())
-        except ValueError:
-            return None
-
-    def _reference_values(self, row: dict[str, object]) -> set[str]:
-        return {
-            value
-            for key in ("reference_no", "merchant_order_no", "voucher_no")
-            if (value := self._to_optional_string(row.get(key)))
-        }
 
     def _parse_clock_time(self, value: str) -> time:
         if value == "24:00":

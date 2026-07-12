@@ -7,6 +7,7 @@ from bank_reconciliation_agent.rag.retriever import _passes_threshold
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest, RagSearchResponse
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 from tests.auth_helpers import demo_bearer_headers
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 
 
 def _state() -> ReconciliationState:
@@ -77,17 +78,18 @@ class NoopAgent:
 def test_workflow_uses_dense_floor_and_rag_miss_defers_without_fallback() -> None:
     retriever = FloorAwareRetriever()
     audit_agent = RecordingAuditAgent()
+    executor = RetrieverBackedToolExecutor(retriever=retriever)
 
     result = run_item(
         _state(),
         extraction_agent=NoopAgent(),
         trace_agent=NoopAgent(),
         audit_agent=audit_agent,
-        retriever=retriever,
+        tool_executor=executor,
     )
 
-    assert retriever.requests[0].min_score == 0.341
-    assert audit_agent.calls == 1
+    assert executor.requests[0].min_score == 0.341
+    assert audit_agent.calls == 0
     assert result["rag_context"] == []
     assert result["next_action"] == "PENDING_HUMAN"
     assert result["fallback_level"] == 0

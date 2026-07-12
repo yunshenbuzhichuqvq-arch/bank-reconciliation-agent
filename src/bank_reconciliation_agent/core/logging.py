@@ -33,3 +33,14 @@ def bind_trace_context(*, trace_id: str, user_id: str, thread_id: str) -> None:
 
 
 log: Any = structlog.get_logger()
+
+# Context-free structured logger for safe Tool attempt observations. It shares the
+# stdlib logging handler (same output stream) but deliberately excludes
+# ``merge_contextvars`` so request-scoped fields such as ``trace_id``/``user_id``/
+# ``thread_id`` never merge into Tool attempt records. It does not disable the
+# global processor chain or clear the bound context, so normal logs keep them.
+tool_observation_log: Any = structlog.wrap_logger(
+    logging.getLogger("bank_reconciliation_agent.tool_observation"),
+    processors=[structlog.processors.JSONRenderer()],
+    wrapper_class=structlog.stdlib.BoundLogger,
+)

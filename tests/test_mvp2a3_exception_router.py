@@ -3,7 +3,7 @@ from decimal import Decimal
 import pandas as pd
 
 from bank_reconciliation_agent.core.config import Settings
-from bank_reconciliation_agent.services.exception_router import ExceptionRouter
+from bank_reconciliation_agent.services.exception_router import ExceptionRouter, find_t1_candidate
 
 
 def _bank_row(flow_id: str, amount: str) -> dict[str, object]:
@@ -107,3 +107,26 @@ def test_settings_support_cutoff_window_override() -> None:
     settings = Settings(cutoff_window="21:00-23:00")
 
     assert settings.cutoff_window == "21:00-23:00"
+
+
+def test_find_t1_candidate_is_importable_and_pure() -> None:
+    clear_row = {
+        "flow_id": "CLEAR_CUTOFF",
+        "amount": Decimal("100.00"),
+        "trade_date": "2026-06-10",
+        "reference_no": "REF-100",
+    }
+    bank_rows = [
+        {
+            "flow_id": "CORE_T1",
+            "amount": Decimal("100.00"),
+            "accounting_date": "2026-06-11",
+            "reference_no": "REF-100",
+        }
+    ]
+
+    assert find_t1_candidate(clear_row, bank_rows) == {
+        "flow_id": "CORE_T1",
+        "accounting_date": "2026-06-11",
+    }
+    assert find_t1_candidate(clear_row, []) is None

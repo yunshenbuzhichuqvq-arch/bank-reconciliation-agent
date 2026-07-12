@@ -13,27 +13,29 @@ from bank_reconciliation_agent.services.reconciliation import (
 from bank_reconciliation_agent.services.task import task_service
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 from tests.auth_helpers import demo_bearer_headers
+from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
 
 
 client = TestClient(app)
 
 
 def test_run_item_passes_scenario_and_feature_flags_to_retriever(monkeypatch) -> None:
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.settings.enable_rag_rewrite", True)
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.settings.enable_rag_hybrid", True)
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.settings.enable_rag_reranker", True)
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.settings.rag_rerank_top_k", 5)
+    monkeypatch.setattr("bank_reconciliation_agent.core.config.settings.enable_rag_rewrite", True)
+    monkeypatch.setattr("bank_reconciliation_agent.core.config.settings.enable_rag_hybrid", True)
+    monkeypatch.setattr("bank_reconciliation_agent.core.config.settings.enable_rag_reranker", True)
+    monkeypatch.setattr("bank_reconciliation_agent.core.config.settings.rag_rerank_top_k", 5)
 
     retriever = CaptureRetriever()
+    executor = RetrieverBackedToolExecutor(retriever=retriever)
     result = run_item(
         _state(),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=NoopTraceAgent(),
         audit_agent=StaticAuditAgent(),
-        retriever=retriever,
+        tool_executor=executor,
     )
 
-    assert retriever.requests == [
+    assert executor.requests == [
         RagSearchRequest(
             query=_state()["rag_query"],
             top_k=5,

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import Numeric, create_engine, inspect
+from sqlalchemy import Numeric, String, create_engine, inspect
 
 from bank_reconciliation_agent.services.agent_log import agent_execution_log_table
 from bank_reconciliation_agent.services.ledger import error_ledger_table
@@ -224,10 +224,37 @@ def test_stage_25_recovery_columns_in_schema_sql() -> None:
         assert fragment in schema_sql, f"Missing in schema.sql: {fragment}"
 
 
+def test_stage_28_bank_t1_reference_columns_in_service_table() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    bank_transaction_table.metadata.create_all(engine, tables=[bank_transaction_table])
+    inspector = inspect(engine)
+
+    reference_columns = {"reference_no", "merchant_order_no", "voucher_no"}
+    assert_columns(inspector, "t_bank_transaction", reference_columns)
+
+    columns = {c["name"]: c for c in inspector.get_columns("t_bank_transaction")}
+    for column_name in reference_columns:
+        assert columns[column_name]["nullable"] is True
+        table_column = bank_transaction_table.c[column_name]
+        assert isinstance(table_column.type, String)
+        assert table_column.type.length == 64
+        assert table_column.nullable is True
+
+
+def test_stage_28_bank_t1_reference_columns_in_schema_sql() -> None:
+    schema_sql = read_schema_sql()
+
+    for fragment in (
+        "voucher_no VARCHAR(64)",
+        "reference_no VARCHAR(64)",
+        "merchant_order_no VARCHAR(64)",
+    ):
+        assert fragment in schema_sql, f"Missing in schema.sql: {fragment}"
+
+
 def assert_columns(inspector, table_name: str, expected_columns: set[str]) -> None:
     actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
     assert expected_columns <= actual_columns
-
 
 def index_names(inspector, table_name: str) -> set[str]:
     return {index["name"] for index in inspector.get_indexes(table_name)}
