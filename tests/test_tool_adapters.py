@@ -299,6 +299,56 @@ def test_search_rules_infra_error_reraised_after_local_retry() -> None:
     assert retriever.calls == 2
 
 
+def test_search_rules_operational_error_not_counted_by_breaker_at_threshold_one() -> None:
+    retriever = _StubRetriever(OperationalError("SELECT 1", {}, Exception("db down")))
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=30, time_fn=lambda: 0.0)
+    registry = build_default_registry(
+        retriever=retriever,
+        rag_breaker=breaker,
+    )
+    executor = _executor(registry, lambda ctx: True)
+
+    with pytest.raises(OperationalError):
+        executor.execute("search_rules", SearchRulesArgs(query="cutoff"), _ctx())
+
+    assert retriever.calls == 2
+    assert breaker.state == "CLOSED"
+    assert breaker._failure_count == 0
+
+
+def test_search_rules_redis_error_not_counted_by_breaker_at_threshold_one() -> None:
+    retriever = _StubRetriever(RedisConnectionError("redis gone"))
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=30, time_fn=lambda: 0.0)
+    registry = build_default_registry(
+        retriever=retriever,
+        rag_breaker=breaker,
+    )
+    executor = _executor(registry, lambda ctx: True)
+
+    with pytest.raises(RedisConnectionError):
+        executor.execute("search_rules", SearchRulesArgs(query="cutoff"), _ctx())
+
+    assert retriever.calls == 2
+    assert breaker.state == "CLOSED"
+    assert breaker._failure_count == 0
+
+
+def test_search_rules_ordinary_exception_still_counts_toward_breaker() -> None:
+    retriever = _StubRetriever(RuntimeError("chroma down"))
+    breaker = CircuitBreaker(fail_threshold=2, open_seconds=30, time_fn=lambda: 0.0)
+    registry = build_default_registry(
+        retriever=retriever,
+        rag_breaker=breaker,
+    )
+    executor = _executor(registry, lambda ctx: True)
+
+    result = executor.execute("search_rules", SearchRulesArgs(query="cutoff"), _ctx())
+
+    assert result.status == "FAILED"
+    assert result.error_type == "INTERNAL_ERROR"
+    assert breaker._failure_count == 1
+
+
 # --------------------------------------------------------------------------- #
 # load_confirmed_cases adapter + scenario allowlist
 # --------------------------------------------------------------------------- #

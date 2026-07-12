@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import platform
 import sys
 import tempfile
@@ -13,11 +14,17 @@ from pathlib import Path
 from threading import Event
 from typing import Any, Callable
 
-import pandas as pd
-from sqlalchemy import create_engine
+# Force a deterministic, offline, hash-embedding boundary before importing any
+# repo RAG/Tool module. Importing tool_adapters constructs a default retriever
+# that would otherwise read an external EMBEDDING_BACKEND and load models or
+# contact the Hugging Face Hub. This must run before the imports below.
+os.environ["EMBEDDING_BACKEND"] = "hash"
 
-from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever
-from bank_reconciliation_agent.schemas.tools import (
+import pandas as pd  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+
+from bank_reconciliation_agent.rag.retriever import ChromaRuleStore, RuleRetriever  # noqa: E402
+from bank_reconciliation_agent.schemas.tools import (  # noqa: E402
     LoadConfirmedCasesArgs,
     LookupT1ContextArgs,
     SearchRulesArgs,
@@ -25,17 +32,17 @@ from bank_reconciliation_agent.schemas.tools import (
     ToolCallResult,
     ToolContext,
 )
-from bank_reconciliation_agent.services.fallback import LedgerFallbackCaseProvider
-from bank_reconciliation_agent.services.ledger import LedgerService
-from bank_reconciliation_agent.schemas.ledger import LedgerRow
-from bank_reconciliation_agent.services.task import TaskService
-from bank_reconciliation_agent.services.tool_adapters import (
+from bank_reconciliation_agent.services.fallback import LedgerFallbackCaseProvider  # noqa: E402
+from bank_reconciliation_agent.services.ledger import LedgerService  # noqa: E402
+from bank_reconciliation_agent.schemas.ledger import LedgerRow  # noqa: E402
+from bank_reconciliation_agent.services.task import TaskService  # noqa: E402
+from bank_reconciliation_agent.services.tool_adapters import (  # noqa: E402
     build_default_registry,
     make_search_rules_adapter,
     make_tenant_authorizer,
 )
-from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
-from bank_reconciliation_agent.services.tool_executor import (
+from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker  # noqa: E402
+from bank_reconciliation_agent.services.tool_executor import (  # noqa: E402
     TOOL_POLICIES,
     ToolDefinition,
     ToolExecutor,
@@ -43,7 +50,7 @@ from bank_reconciliation_agent.services.tool_executor import (
     ToolTransientError,
     safe_tool_projection,
 )
-from bank_reconciliation_agent.services.transactions import TransactionService
+from bank_reconciliation_agent.services.transactions import TransactionService  # noqa: E402
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -560,7 +567,6 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"{case['attempt']} | {'yes' if case['retry_recovered'] else 'no'} | "
             f"{case['result_count']} | {evidence} |"
         )
-    lines.append("")
     return "\n".join(lines) + "\n"
 
 

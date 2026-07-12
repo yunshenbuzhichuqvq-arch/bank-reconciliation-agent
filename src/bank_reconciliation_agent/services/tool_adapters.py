@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+from sqlalchemy.exc import OperationalError
+
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest
@@ -74,6 +77,8 @@ def make_search_rules_adapter(
         )
         try:
             response = retriever.search(request)
+        except (OperationalError, RedisConnectionError):
+            raise
         except Exception:
             rag_breaker.record_failure()
             raise

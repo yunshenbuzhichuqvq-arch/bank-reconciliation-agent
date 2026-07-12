@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from scripts import eval_tools
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 _FORBIDDEN_KEYS = {
@@ -192,3 +198,55 @@ def test_full_summary_contains_no_sensitive_values(summary: dict) -> None:
 
 def cases_by_label(summary: dict, label: str) -> list[dict]:
     return [c for c in summary["cases"] if label in c["label"]]
+
+
+def test_eval_tools_forces_hash_offline_despite_external_bge_m3(tmp_path: Path) -> None:
+    fake_pkg_dir = tmp_path / "fake_site"
+    st_dir = fake_pkg_dir / "sentence_transformers"
+    st_dir.mkdir(parents=True)
+    sentinel = tmp_path / "sentence_transformers_imported.flag"
+    (st_dir / "__init__.py").write_text(
+        "import pathlib\n"
+        f"pathlib.Path({str(sentinel)!r}).write_text('imported')\n"
+        "raise AssertionError('sentence_transformers must not be imported in eval_tools')\n",
+        encoding="utf-8",
+    )
+
+    json_path = tmp_path / "evidence.json"
+    report_path = tmp_path / "evidence.md"
+
+    env = {**os.environ, "EMBEDDING_BACKEND": "bge_m3"}
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(fake_pkg_dir), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    env.pop("HF_TOKEN", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.eval_tools",
+            "--json-report",
+            str(json_path),
+            "--report",
+            str(report_path),
+        ],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not sentinel.exists(), "eval_tools imported sentence_transformers"
+    combined = f"{result.stdout}\n{result.stderr}".lower()
+    assert "loading weights" not in combined
+    assert "huggingface" not in combined
+    assert "hf_token" not in combined
+    assert "unauthenticated" not in combined
+
+    written = json.loads(json_path.read_text(encoding="utf-8"))
+    assert written["environment"]["embedding_backend"] == "hash"
+    assert written["claim_boundary"]["hash_embedding"] is True
+    assert written["claim_boundary"]["network_access"] is False

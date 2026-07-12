@@ -471,6 +471,39 @@ def test_infra_error_reraised_after_local_retry_exhausted() -> None:
     assert calls == [1, 1]
 
 
+def test_infra_error_attempts_emit_safe_structured_observations() -> None:
+    from structlog.testing import capture_logs
+
+    def adapter(args, ctx):
+        raise OperationalError("SELECT secret_table", {}, Exception("dsn=postgres://db"))
+
+    executor = _make_executor(adapter)
+    with capture_logs() as logs:
+        with pytest.raises(OperationalError):
+            executor.execute("search_rules", SearchRulesArgs(query=SECRET_QUERY), _ctx())
+
+    attempts = [row for row in logs if row.get("event") == "tool_attempt"]
+    assert len(attempts) == 2
+    assert [row["attempt"] for row in attempts] == [1, 2]
+    for row in attempts:
+        assert row["tool_name"] == "search_rules"
+        assert row["status"] == "FAILED"
+        assert row["error_type"] == "TRANSIENT_READ_ERROR"
+        assert row["retryable"] is True
+        assert isinstance(row["duration_ms"], float)
+        assert set(row) <= {
+            "event",
+            "log_level",
+            "tool_name",
+            "attempt",
+            "status",
+            "duration_ms",
+            "error_type",
+            "retryable",
+        }
+        _assert_no_sensitive(row)
+
+
 def test_redis_infra_error_recovers_and_records_transient() -> None:
     calls: list[int] = []
 

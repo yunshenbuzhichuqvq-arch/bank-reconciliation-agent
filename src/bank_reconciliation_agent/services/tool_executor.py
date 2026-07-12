@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.exc import OperationalError
 
+from bank_reconciliation_agent.core.logging import log
 from bank_reconciliation_agent.schemas.tools import (
     ConfirmedCasesOutput,
     SearchRulesOutput,
@@ -158,11 +159,11 @@ class ToolExecutor:
                 )
                 return self._final_failure(definition.name, "CIRCUIT_OPEN", records, overall_start)
             except (OperationalError, RedisConnectionError):
-                records.append(
-                    self._attempt_record(
-                        attempt, "FAILED", attempt_start, "TRANSIENT_READ_ERROR", True
-                    )
+                record = self._attempt_record(
+                    attempt, "FAILED", attempt_start, "TRANSIENT_READ_ERROR", True
                 )
+                records.append(record)
+                self._emit_attempt_observation(definition.name, record)
                 if attempt < policy.max_attempts:
                     self._sleeper(policy.backoff_s)
                     continue
@@ -249,6 +250,17 @@ class ToolExecutor:
             duration_ms=self._elapsed_ms(start),
             error_type=error_type,
             retryable=retryable,
+        )
+
+    def _emit_attempt_observation(self, tool_name: str, record: ToolAttemptRecord) -> None:
+        log.warning(
+            "tool_attempt",
+            tool_name=tool_name,
+            attempt=record.attempt,
+            status=record.status,
+            duration_ms=record.duration_ms,
+            error_type=record.error_type,
+            retryable=record.retryable,
         )
 
     def _pre_adapter_failure(

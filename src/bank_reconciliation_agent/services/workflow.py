@@ -213,7 +213,6 @@ def run_item(
             "agent_name": "RuleRetriever",
             "step": "retrieve",
             "flow_id": flow_id,
-            "query": state.get("rag_query") or _build_rag_query(state),
             "chunk_ids": [item.chunk_id for item in rag_items],
             "best_score": max((item.score for item in rag_items), default=None),
         },

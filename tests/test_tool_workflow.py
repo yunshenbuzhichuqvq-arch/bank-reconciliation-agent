@@ -533,3 +533,65 @@ def test_tool_executor_logs_only_safe_projection() -> None:
         assert "result" not in row
         assert "evidence_ids" in row
         _assert_no_sensitive(row)
+
+
+SECRET_AMOUNT_BANK = "MARKER_BANK_AMOUNT_9971"
+SECRET_AMOUNT_CLEAR = "MARKER_CLEAR_AMOUNT_9972"
+SECRET_AMOUNT_DIFF = "MARKER_DIFF_AMOUNT_9973"
+
+
+class RecordingEmitter:
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    def emit(self, event: Any) -> None:
+        self.events.append(event)
+
+
+def _sensitive_amount_state(exception_branch: str) -> ReconciliationState:
+    state = _state(exception_branch)
+    state["math_result"] = {
+        "bank_amount": SECRET_AMOUNT_BANK,
+        "clear_amount": SECRET_AMOUNT_CLEAR,
+        "amount_diff": SECRET_AMOUNT_DIFF,
+    }
+    return state
+
+
+def test_no_stream_event_leaks_full_query_or_amounts() -> None:
+    import json
+
+    executor = RecordingToolExecutor({"search_rules": [_search_succeeded()]})
+    emitter = RecordingEmitter()
+
+    run_item(
+        _sensitive_amount_state("BE-R002"),
+        extraction_agent=NoopExtractionAgent(),
+        trace_agent=ForbiddenTraceAgent(),
+        audit_agent=CountingAuditAgent([0.95]),
+        tool_executor=executor,
+        emitter=emitter,
+    )
+
+    assert emitter.events
+    rag_events = [e for e in emitter.events if e.event_type == "rag_retrieved"]
+    assert rag_events
+    for event in rag_events:
+        assert "query" not in event.payload
+
+    forbidden = {
+        SECRET_QUERY,
+        SECRET_AMOUNT_BANK,
+        SECRET_AMOUNT_CLEAR,
+        SECRET_AMOUNT_DIFF,
+        SECRET_RULE_BODY,
+    }
+    # Tool / RuleRetriever / Workflow events must not carry the full query, amounts
+    # or rule body; AuditAgent decision events legitimately carry business evidence.
+    scoped_agents = {"ToolExecutor", "RuleRetriever", "Workflow"}
+    for event in emitter.events:
+        if event.payload.get("agent_name") not in scoped_agents:
+            continue
+        serialized = json.dumps(event.payload, default=str, ensure_ascii=False)
+        for marker in forbidden:
+            assert marker not in serialized, f"leaked {marker!r} in {event.event_type}"

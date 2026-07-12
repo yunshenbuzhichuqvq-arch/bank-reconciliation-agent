@@ -1,7 +1,7 @@
 # Stage 28 只读 Tool Executor 离线证据
 
 - Stage: `stage-28-readonly-tool-executor`
-- Evaluated at: 2026-07-12T13:23:57.750779+00:00
+- Evaluated at: 2026-07-12T15:12:34.138816+00:00
 - Case count: 12
 
 ## 环境与 Claim Boundary
@@ -16,9 +16,9 @@
 
 | Tool | Outcomes | Errors | Retry recovered | P50 ms (obs) | P95 ms (obs) | Samples |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| `search_rules` | EMPTY=1, FAILED=3, SUCCEEDED=2 | CIRCUIT_OPEN=1, TIMEOUT=1, VALIDATION_ERROR=1 | 1 | 1.246 | 85.868 | 6 |
-| `load_confirmed_cases` | EMPTY=1, SUCCEEDED=1 | - | 0 | 0.451 | 0.997 | 2 |
-| `lookup_t1_context` | EMPTY=1, FAILED=2, SUCCEEDED=1 | PERMISSION_DENIED=2 | 0 | 0.074 | 1.102 | 4 |
+| `search_rules` | EMPTY=1, FAILED=3, SUCCEEDED=2 | CIRCUIT_OPEN=1, TIMEOUT=1, VALIDATION_ERROR=1 | 1 | 1.259 | 49.075 | 6 |
+| `load_confirmed_cases` | EMPTY=1, SUCCEEDED=1 | - | 0 | 0.475 | 0.987 | 2 |
+| `lookup_t1_context` | EMPTY=1, FAILED=2, SUCCEEDED=1 | PERMISSION_DENIED=2 | 0 | 0.074 | 1.133 | 4 |
 
 ## Case 安全投影
 
@@ -36,4 +36,3 @@
 | search_rules_timeout_exhausted | `search_rules` | fault_injection | FAILED | TIMEOUT | TOOL_TIMEOUT | 2 | no | 0 | - |
 | search_rules_retry_recovered | `search_rules` | fault_injection | SUCCEEDED | - | - | 2 | yes | 5 | clearing_cutoff_t1_guideline_002, clearing_t1_supplement_playbook_004, clearing_t1_supplement_playbook_001, clearing_single_side_playbook_001, clearing_reconciliation_scope_001 |
 | search_rules_circuit_open | `search_rules` | fault_injection | FAILED | CIRCUIT_OPEN | RAG_CIRCUIT_OPEN | 1 | no | 0 | - |
-
