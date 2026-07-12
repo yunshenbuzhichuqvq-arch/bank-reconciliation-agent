@@ -10,7 +10,7 @@ from pydantic import BaseModel, ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.exc import OperationalError
 
-from bank_reconciliation_agent.core.logging import log
+from bank_reconciliation_agent.core.logging import tool_observation_log
 from bank_reconciliation_agent.schemas.tools import (
     ConfirmedCasesOutput,
     SearchRulesOutput,
@@ -253,7 +253,7 @@ class ToolExecutor:
         )
 
     def _emit_attempt_observation(self, tool_name: str, record: ToolAttemptRecord) -> None:
-        log.warning(
+        tool_observation_log.warning(
             "tool_attempt",
             tool_name=tool_name,
             attempt=record.attempt,

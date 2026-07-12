@@ -471,18 +471,26 @@ def test_infra_error_reraised_after_local_retry_exhausted() -> None:
     assert calls == [1, 1]
 
 
-def test_infra_error_attempts_emit_safe_structured_observations() -> None:
-    from structlog.testing import capture_logs
+def test_infra_error_attempts_emit_safe_structured_observations(capsys) -> None:
+    import json
+
+    from bank_reconciliation_agent.core.logging import configure_logging
+
+    configure_logging()
 
     def adapter(args, ctx):
         raise OperationalError("SELECT secret_table", {}, Exception("dsn=postgres://db"))
 
     executor = _make_executor(adapter)
-    with capture_logs() as logs:
-        with pytest.raises(OperationalError):
-            executor.execute("search_rules", SearchRulesArgs(query=SECRET_QUERY), _ctx())
+    with pytest.raises(OperationalError):
+        executor.execute("search_rules", SearchRulesArgs(query=SECRET_QUERY), _ctx())
 
-    attempts = [row for row in logs if row.get("event") == "tool_attempt"]
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    attempts = [
+        payload
+        for payload in (json.loads(line) for line in lines)
+        if payload.get("event") == "tool_attempt"
+    ]
     assert len(attempts) == 2
     assert [row["attempt"] for row in attempts] == [1, 2]
     for row in attempts:
@@ -493,6 +501,7 @@ def test_infra_error_attempts_emit_safe_structured_observations() -> None:
         assert isinstance(row["duration_ms"], float)
         assert set(row) <= {
             "event",
+            "level",
             "log_level",
             "tool_name",
             "attempt",
@@ -502,6 +511,67 @@ def test_infra_error_attempts_emit_safe_structured_observations() -> None:
             "retryable",
         }
         _assert_no_sensitive(row)
+
+
+def test_infra_attempt_observations_do_not_leak_request_context(capsys) -> None:
+    import json
+
+    from bank_reconciliation_agent.core.logging import (
+        bind_trace_context,
+        configure_logging,
+        log,
+    )
+
+    configure_logging()
+    bind_trace_context(
+        trace_id="TRACE_SECRET",
+        user_id="USER_SECRET",
+        thread_id="THREAD_SECRET",
+    )
+
+    def adapter(args, ctx):
+        raise OperationalError("SELECT secret_table", {}, Exception("dsn=postgres://db"))
+
+    executor = _make_executor(adapter)
+    with pytest.raises(OperationalError):
+        executor.execute("search_rules", SearchRulesArgs(query=SECRET_QUERY), _ctx())
+
+    # A subsequent normal log must still inherit the bound trace context.
+    log.info("after_tool_attempt", agent_name="Workflow")
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    payloads = [json.loads(line) for line in lines]
+
+    attempts = [p for p in payloads if p.get("event") == "tool_attempt"]
+    assert len(attempts) == 2
+    assert [p["attempt"] for p in attempts] == [1, 2]
+
+    allowed = {
+        "event",
+        "level",
+        "log_level",
+        "tool_name",
+        "attempt",
+        "status",
+        "duration_ms",
+        "error_type",
+        "retryable",
+    }
+    forbidden_context = {"user_id", "trace_id", "thread_id"}
+    for attempt in attempts:
+        assert attempt["tool_name"] == "search_rules"
+        assert attempt["status"] == "FAILED"
+        assert attempt["error_type"] == "TRANSIENT_READ_ERROR"
+        assert attempt["retryable"] is True
+        assert set(attempt) & forbidden_context == set()
+        assert set(attempt) <= allowed
+        _assert_no_sensitive(attempt)
+
+    after = [p for p in payloads if p.get("event") == "after_tool_attempt"]
+    assert after, "expected a normal log after the tool_attempt observations"
+    assert after[0]["trace_id"] == "TRACE_SECRET"
+    assert after[0]["user_id"] == "USER_SECRET"
+    assert after[0]["thread_id"] == "THREAD_SECRET"
 
 
 def test_redis_infra_error_recovers_and_records_transient() -> None:
