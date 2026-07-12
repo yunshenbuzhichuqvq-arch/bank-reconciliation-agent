@@ -372,16 +372,16 @@ def _sse_terminal(
                     f"sse_terminal: SSE frame task_id mismatch "
                     f"(expected {task_id}, got {frame_task_id})"
                 )
-            if event_type == "TASK_DONE":
+            if event_type == "task_done":
                 payload = frame.get("payload", {})
                 final_status = payload.get("status", "")
                 if final_status != "COMPLETED":
-                    raise RuntimeError(f"sse_terminal: TASK_DONE status={final_status}")
+                    raise RuntimeError(f"sse_terminal: task_done status={final_status}")
                 got_task_done = True
                 break
 
     if not got_task_done:
-        raise RuntimeError("sse_terminal: stream ended without TASK_DONE")
+        raise RuntimeError("sse_terminal: stream ended without task_done")
 
     _verify_sse_status_and_report(
         base_url, client, token, task_id, request_timeout,

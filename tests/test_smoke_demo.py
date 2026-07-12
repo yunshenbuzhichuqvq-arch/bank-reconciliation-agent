@@ -150,6 +150,31 @@ def _build_bad_sse_frame() -> str:
     return "data: not-json\n\n"
 
 
+def _build_real_wire_sse_frame(
+    event_type_name: str, task_id: str, status: str = "COMPLETED"
+) -> str:
+    """Serialize a frame through the real AgentStreamEvent schema (v1.1 wire contract).
+
+    Guards against wire-value drift by using the actual StreamEventType enum instead of
+    a hand-typed string, so the fixture reflects what the server truly emits.
+    """
+    from datetime import datetime
+
+    from bank_reconciliation_agent.schemas.stream import (
+        AgentStreamEvent,
+        StreamEventType,
+    )
+
+    event = AgentStreamEvent(
+        event_type=StreamEventType[event_type_name],
+        seq=1,
+        task_id=task_id,
+        ts=datetime(2026, 1, 1),
+        payload={"status": status},
+    )
+    return f"data: {event.model_dump_json()}\n\n"
+
+
 # ---------------------------------------------------------------------------
 # Step order & success path tests
 # ---------------------------------------------------------------------------
@@ -238,7 +263,7 @@ def _mock_transport_handler(
                 'data: {"event_type": "task_progress", "seq": 0, "task_id": "'
                 + task_id_sse
                 + '", "payload": {}}\n\n'
-                + _build_sse_frame("TASK_DONE", task_id_sse, "COMPLETED")
+                + _build_sse_frame("task_done", task_id_sse, "COMPLETED")
             )
             return httpx.Response(
                 200,
@@ -355,7 +380,7 @@ class TestAuthAndHeaders:
             if "/start-live" in url:
                 return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-1", "status": "AI_RUNNING"}})
             if "/events" in url:
-                return httpx.Response(200, content=_build_sse_frame("TASK_DONE", "tsse-1", "COMPLETED").encode(),
+                return httpx.Response(200, content=_build_sse_frame("task_done", "tsse-1", "COMPLETED").encode(),
                                       headers={"content-type": "text/event-stream"})
             return httpx.Response(404)
 
@@ -411,7 +436,7 @@ class TestArqForceRequeue:
             if "/start-live" in url:
                 return httpx.Response(200, json={"code": 200, "data": {"task_id": "tsse-f", "status": "AI_RUNNING"}})
             if "/events" in url:
-                return httpx.Response(200, content=_build_sse_frame("TASK_DONE", "tsse-f", "COMPLETED").encode(),
+                return httpx.Response(200, content=_build_sse_frame("task_done", "tsse-f", "COMPLETED").encode(),
                                       headers={"content-type": "text/event-stream"})
             return httpx.Response(404)
 
@@ -564,6 +589,65 @@ class TestSSEPath:
         assert sse_step["name"] == "sse_terminal"
         assert sse_step["outcome"] == "passed"
 
+    def test_sse_success_on_real_wire_task_done(self, tmp_path: Path) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "/health" in url:
+                return httpx.Response(200, json=_health_ok())
+            if "/api/v1/auth/login" in url:
+                return httpx.Response(200, json=_signup_response())
+            if "upload-async" in url:
+                return httpx.Response(200, json=_async_upload_response("tid-a"))
+            if "/status" in url:
+                if "tsse-wire" in url:
+                    return httpx.Response(200, json=_status_response("tsse-wire", "COMPLETED"))
+                return httpx.Response(200, json=_status_response("tid-a", "UPLOADED"))
+            if "/exceptions" in url:
+                return httpx.Response(200, json=_exceptions_response("tid-a", 1))
+            if "/review/pending" in url:
+                return httpx.Response(200, json=_pending_response("tid-a", 1, 1))
+            if "/approve" in url:
+                return httpx.Response(200, json=_approve_response(1))
+            if "/report" in url:
+                if "tsse-wire" in url:
+                    return httpx.Response(200, json=_report_response("tsse-wire"))
+                return httpx.Response(200, json=_report_response("tid-a"))
+            if "/upload" in url:
+                return httpx.Response(200, json=_async_upload_response("tsse-wire", "UPLOADED"))
+            if "/start-live" in url:
+                return httpx.Response(
+                    200,
+                    json={"code": 200, "data": {"task_id": "tsse-wire", "status": "AI_RUNNING"}},
+                )
+            if "/events" in url:
+                sse_body = (
+                    _build_real_wire_sse_frame("TASK_PROGRESS", "tsse-wire", "RUNNING")
+                    + _build_real_wire_sse_frame("TASK_DONE", "tsse-wire", "COMPLETED")
+                )
+                return httpx.Response(
+                    200,
+                    content=sse_body.encode(),
+                    headers={"content-type": "text/event-stream"},
+                )
+            return httpx.Response(404)
+
+        from scripts.smoke_demo import run_smoke
+
+        summary_file = tmp_path / "summary.json"
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        exit_code, summary = run_smoke(
+            base_url="http://test:8000",
+            summary_json=str(summary_file),
+            request_timeout=30,
+            task_timeout=60,
+            client=client,
+        )
+        assert exit_code == 0
+        assert summary["success"] is True
+        sse_step = summary["steps"][8]
+        assert sse_step["name"] == "sse_terminal"
+        assert sse_step["outcome"] == "passed"
+
     def test_sse_bad_json_fails(self, tmp_path: Path) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             url = str(request.url)
@@ -634,7 +718,7 @@ class TestSSEPath:
             if "/events" in url:
                 return httpx.Response(
                     200,
-                    content=_build_sse_frame("TASK_DONE", "tsse-fail", "FAILED").encode(),
+                    content=_build_sse_frame("task_done", "tsse-fail", "FAILED").encode(),
                     headers={"content-type": "text/event-stream"},
                 )
             return httpx.Response(404)
@@ -774,7 +858,7 @@ class TestSecondRun:
             if "/start-live" in url:
                 return httpx.Response(200, json={"code": 200, "data": {"task_id": f"tsse-run{upload_calls[0]}", "status": "AI_RUNNING"}})
             if "/events" in url:
-                return httpx.Response(200, content=_build_sse_frame("TASK_DONE", f"tsse-run{upload_calls[0]}", "COMPLETED").encode(),
+                return httpx.Response(200, content=_build_sse_frame("task_done", f"tsse-run{upload_calls[0]}", "COMPLETED").encode(),
                                       headers={"content-type": "text/event-stream"})
             return httpx.Response(404)
 
@@ -1080,7 +1164,7 @@ class TestSSETaskIdCorrelation:
             if "/events" in url:
                 return httpx.Response(
                     200,
-                    content=_build_sse_frame("TASK_DONE", "tsse-wrong", "COMPLETED").encode(),
+                    content=_build_sse_frame("task_done", "tsse-wrong", "COMPLETED").encode(),
                     headers={"content-type": "text/event-stream"},
                 )
             return httpx.Response(404)
@@ -1129,7 +1213,7 @@ class TestSSETaskIdCorrelation:
             if "/events" in url:
                 return httpx.Response(
                     200,
-                    content=_build_sse_frame("TASK_DONE", "tsse-final", "COMPLETED").encode(),
+                    content=_build_sse_frame("task_done", "tsse-final", "COMPLETED").encode(),
                     headers={"content-type": "text/event-stream"},
                 )
             return httpx.Response(404)
@@ -1178,7 +1262,7 @@ class TestSSETaskIdCorrelation:
             if "/events" in url:
                 return httpx.Response(
                     200,
-                    content=_build_sse_frame("TASK_DONE", "tsse-nc", "COMPLETED").encode(),
+                    content=_build_sse_frame("task_done", "tsse-nc", "COMPLETED").encode(),
                     headers={"content-type": "text/event-stream"},
                 )
             return httpx.Response(404)
