@@ -42,13 +42,16 @@ def test_empty_duration_returns_zero():
 
 
 # ---------------------------------------------------------------------------
-# Scenario runner tests (each scenario produces valid results)
+# Scenario runner tests (each scenario meets its own expectation)
 # ---------------------------------------------------------------------------
 
 
 def test_scenario_success_generates_valid_trace():
     result = eval_trace_replay.scenario_success()
     assert result["scenario"] == "complete_success"
+    assert result["scenario_passed"] is True
+    assert result["eligible_execution"] is True
+    assert result["trace_persisted"] is True
     assert result["span_count"] > 0
     assert "WORKFLOW" in result["span_sequence"]
     assert result["terminal_type"] == "FINAL"
@@ -57,6 +60,7 @@ def test_scenario_success_generates_valid_trace():
 def test_scenario_tool_failed_generates_valid_trace():
     result = eval_trace_replay.scenario_tool_failed()
     assert result["scenario"] == "tool_failed_fallback"
+    assert result["scenario_passed"] is True
     assert result["terminal_type"] == "FALLBACK"
     seq = result["span_sequence"]
     assert "TOOL" in seq
@@ -68,29 +72,71 @@ def test_scenario_tool_failed_generates_valid_trace():
 def test_scenario_agent_repair_failure_generates_valid_trace():
     result = eval_trace_replay.scenario_agent_repair_failure()
     assert result["scenario"] == "agent_repair_failure_fallback"
+    assert result["scenario_passed"] is True
     assert result["terminal_type"] == "FALLBACK"
     assert "ROUTE" in result["span_sequence"]
+    facts = result["facts"]
+    assert facts["failed_agent_spans"] >= 1
+    assert facts["structured_repair_attempted"] is True
+    assert facts["non_cached_agent_tokens"] > 0
+    assert facts["error_type"] == "schema_invalid"
 
 
 def test_scenario_guard_blocked_generates_valid_trace():
     result = eval_trace_replay.scenario_guard_blocked()
     assert result["scenario"] == "guard_blocked_fallback"
+    assert result["scenario_passed"] is True
     assert "GUARD" in result["span_sequence"]
     assert result["terminal_type"] == "FALLBACK"
+    assert result["facts"]["guard_outcome"] == "BLOCKED"
 
 
-def test_cross_tenant_replay_rejection():
+def test_cross_tenant_replay_rejection_via_http():
     result = eval_trace_replay.scenario_cross_tenant_replay_rejection()
+    assert result["scenario"] == "cross_tenant_replay_rejection"
+    assert result["scenario_passed"] is True
     assert result["trace_persisted"] is True
-    assert result["user_a_can_read_own_trace"] is True
-    assert result["user_b_can_read_user_a_trace"] is False
+    facts = result["facts"]
+    assert facts["owner_http_status"] == 200
+    assert facts["owner_replay_status"] == "AVAILABLE"
+    assert facts["non_owner_http_status"] == 404
+    assert facts["non_owner_error_code"] == "TASK_NOT_FOUND"
+    assert facts["non_owner_payload_leaked"] is False
+    assert facts["storage_empty_read"] is True
 
 
 def test_trace_write_failure_isolation():
     result = eval_trace_replay.scenario_trace_write_failure_isolation()
-    assert result["persist_returned_false"] is True
-    assert result["failure_count_incremented"] is True
-    assert result["trace_structure_valid"] is True
+    assert result["scenario"] == "trace_write_failure_isolation"
+    assert result["scenario_passed"] is True
+    assert result["eligible_execution"] is True
+    assert result["trace_persisted"] is False
+    assert result["expected_persistence"] is False
+    facts = result["facts"]
+    assert facts["business_call_succeeded"] is True
+    assert facts["ledger_committed"] is True
+    assert facts["queue_committed"] is True
+    assert facts["task_stats_committed"] is True
+    assert facts["final_decision"] == "PENDING_HUMAN"
+    assert facts["trace_rows"] == 0
+    assert facts["failure_counter_incremented"] is True
+
+
+# ---------------------------------------------------------------------------
+# Completeness must be an honest 5/6 (not 4/4 = 100%)
+# ---------------------------------------------------------------------------
+
+
+def test_completeness_is_five_over_six(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(eval_trace_replay, "REPORTS_DIR", tmp_path)
+    assert eval_trace_replay.main() == 0
+    report = json.loads((tmp_path / "trace_replay_evidence.json").read_text("utf-8"))
+    assert report["metrics"]["denominator"] == 6
+    assert report["metrics"]["numerator"] == 5
+    assert abs(report["metrics"]["trace_completeness_rate"] - 5 / 6) < 1e-9
+    assert report["scenario_pass_count"] == 6
+    assert report["scenario_total"] == 6
+    assert all(s["scenario_passed"] for s in report["scenarios"])
 
 
 # ---------------------------------------------------------------------------
@@ -129,15 +175,24 @@ def test_runner_deterministic_across_consecutive_runs(monkeypatch, tmp_path: Pat
     assert json_1["provider"] == json_2["provider"]
     assert json_1["embedding"] == json_2["embedding"]
     assert json_1["claim"] == json_2["claim"]
-    assert json_1["metrics"]["denominator"] == json_2["metrics"]["denominator"]
-    assert json_1["metrics"]["numerator"] == json_2["metrics"]["numerator"]
+    assert json_1["scenario_pass_count"] == json_2["scenario_pass_count"] == 6
+    assert json_1["metrics"]["denominator"] == json_2["metrics"]["denominator"] == 6
+    assert json_1["metrics"]["numerator"] == json_2["metrics"]["numerator"] == 5
     assert (
         json_1["metrics"]["trace_completeness_rate"] == json_2["metrics"]["trace_completeness_rate"]
     )
 
-    # Scenario counts are stable.
+    # Distributions and token aggregates are stable (durations/counters excluded).
+    assert json_1["metrics"]["error_distribution"] == json_2["metrics"]["error_distribution"]
+    assert json_1["metrics"]["fallback_distribution"] == json_2["metrics"]["fallback_distribution"]
+    assert json_1["metrics"]["token_by_agent"] == json_2["metrics"]["token_by_agent"]
+
+    # Scenario set, order and per-scenario pass verdicts are stable.
     assert [s["scenario"] for s in json_1["scenarios"]] == [
         s["scenario"] for s in json_2["scenarios"]
+    ]
+    assert [s["scenario_passed"] for s in json_1["scenarios"]] == [
+        s["scenario_passed"] for s in json_2["scenarios"]
     ]
 
     # Markdown is generated from JSON, not hand-crafted.

@@ -369,6 +369,38 @@ class TestTraceSpanNegative:
                 )
             )
 
+    def test_fallback_rejects_auto_fixed_outcome(self) -> None:
+        """FALLBACK is a safe hand-off; AUTO_FIXED must never reach it."""
+        with pytest.raises(Exception, match="not allowed"):
+            TraceSpan(
+                **_base_span(
+                    span_type=SpanType.FALLBACK,
+                    name="fallback_human",
+                    outcome=WorkflowOutcome.AUTO_FIXED,
+                )
+            )
+
+    def test_fallback_rejects_unresolved_outcome(self) -> None:
+        """FALLBACK only carries PENDING_HUMAN; UNRESOLVED is rejected."""
+        with pytest.raises(Exception, match="not allowed"):
+            TraceSpan(
+                **_base_span(
+                    span_type=SpanType.FALLBACK,
+                    name="fallback_human",
+                    outcome=WorkflowOutcome.UNRESOLVED,
+                )
+            )
+
+    def test_fallback_accepts_pending_human_outcome(self) -> None:
+        span = TraceSpan(
+            **_base_span(
+                span_type=SpanType.FALLBACK,
+                name="fallback_human",
+                outcome=WorkflowOutcome.PENDING_HUMAN,
+            )
+        )
+        assert span.outcome == "PENDING_HUMAN"
+
     # -- token field restrictions ------------------------------------------
 
     def test_non_agent_with_prompt_tokens(self) -> None:

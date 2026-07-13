@@ -860,6 +860,94 @@ class TraceRecorder:
         builder.error_type = error_type
         builder.fallback_reason = fallback_reason
 
+    # -- call-lifecycle spans (allocate before the real call) --------------
+
+    def start_tool(self, name: str) -> _SpanBuilder | None:
+        """Allocate a pending TOOL span *before* the real ``execute()`` call.
+
+        The span id, ``sequence_no``, ``started_at`` and parent are assigned
+        immediately so the timeline reflects the real call entry. The returned
+        handle must be closed via :meth:`finish_tool`. Returns ``None`` when the
+        recorder is disabled so callers can no-op safely.
+        """
+        if self._disabled:
+            return None
+        return self._new_builder(SpanType.TOOL, name)
+
+    def finish_tool(
+        self,
+        builder: _SpanBuilder | None,
+        *,
+        status: SpanStatus,
+        outcome: str | None,
+        attempt: int,
+        retry_recovered: bool,
+        recovered_error_type: str | None,
+        result_count: int = 0,
+        evidence_ids: list[str] | None = None,
+        error_type: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        """Complete a TOOL span previously created by :meth:`start_tool`.
+
+        ``duration_ms`` is derived from the monotonic clock captured at
+        allocation time; the wall-clock ``started_at`` is never back-dated.
+        """
+        if builder is None or self._disabled:
+            return
+        builder.outcome = outcome
+        builder.attempt = attempt
+        builder.retry_recovered = retry_recovered
+        builder.recovered_error_type = recovered_error_type
+        builder.result_count = result_count
+        builder.evidence_ids = evidence_ids or []
+        builder.error_type = error_type
+        builder.fallback_reason = fallback_reason
+        builder.close(status=status)
+
+    def start_agent(self, name: str) -> _SpanBuilder | None:
+        """Allocate a pending AGENT span *before* the real Agent method call.
+
+        Mirrors :meth:`start_tool`; the returned handle must be closed via
+        :meth:`finish_agent`. Returns ``None`` when the recorder is disabled.
+        """
+        if self._disabled:
+            return None
+        return self._new_builder(SpanType.AGENT, name)
+
+    def finish_agent(
+        self,
+        builder: _SpanBuilder | None,
+        *,
+        status: SpanStatus,
+        model_name: str | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cached_calls: int = 0,
+        attempt: int = 1,
+        retry_recovered: bool = False,
+        recovered_error_type: str | None = None,
+        structured_repair_attempted: bool = False,
+        structured_repair_succeeded: bool = False,
+        error_type: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        """Complete an AGENT span previously created by :meth:`start_agent`."""
+        if builder is None or self._disabled:
+            return
+        builder.model_name = model_name
+        builder.prompt_tokens = prompt_tokens
+        builder.completion_tokens = completion_tokens
+        builder.cached_calls = cached_calls
+        builder.attempt = attempt
+        builder.retry_recovered = retry_recovered
+        builder.recovered_error_type = recovered_error_type
+        builder.structured_repair_attempted = structured_repair_attempted
+        builder.structured_repair_succeeded = structured_repair_succeeded
+        builder.error_type = error_type
+        builder.fallback_reason = fallback_reason
+        builder.close(status=status)
+
     # -- lifecycle ---------------------------------------------------------
 
     def close_root(
@@ -998,6 +1086,20 @@ class NoOpRecorder:
 
     def record_agent(self, **kwargs: object) -> None:
         pass
+
+    def start_tool(self, name: str) -> None:
+        del name
+        return None
+
+    def finish_tool(self, builder: object, **kwargs: object) -> None:
+        del builder, kwargs
+
+    def start_agent(self, name: str) -> None:
+        del name
+        return None
+
+    def finish_agent(self, builder: object, **kwargs: object) -> None:
+        del builder, kwargs
 
     def close_root(self, **kwargs: object) -> None:
         pass

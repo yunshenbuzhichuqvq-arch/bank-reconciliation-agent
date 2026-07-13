@@ -73,7 +73,10 @@ _ALLOWED_OUTCOMES: dict[SpanType, set[str] | None] = {
     SpanType.AGENT: None,
     SpanType.GUARD: {v.value for v in GuardOutcome},
     SpanType.FINAL: {v.value for v in WorkflowOutcome},
-    SpanType.FALLBACK: {v.value for v in WorkflowOutcome},
+    # FALLBACK is a safe hand-off to humans; it may only carry PENDING_HUMAN.
+    # AUTO_FIXED / UNRESOLVED on a FALLBACK is rejected at the schema/snapshot
+    # boundary so a wrong terminal never reaches the DB, Replay or SSE.
+    SpanType.FALLBACK: {WorkflowOutcome.PENDING_HUMAN.value},
 }
 
 

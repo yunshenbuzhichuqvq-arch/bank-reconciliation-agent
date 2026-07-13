@@ -44,7 +44,11 @@ from bank_reconciliation_agent.services.queue_client import enqueue_reconciliati
 from bank_reconciliation_agent.services.rag_log import rag_log_service
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
 from bank_reconciliation_agent.services.live_registry import mark_finished, register
-from bank_reconciliation_agent.services.stream_emitter import QueueEmitter, StreamEmitter
+from bank_reconciliation_agent.services.stream_emitter import (
+    QueueEmitter,
+    StreamEmitter,
+    to_trace_span_event,
+)
 from bank_reconciliation_agent.services.task import reconciliation_task_table, task_service
 from bank_reconciliation_agent.services.trace import (
     NoOpRecorder,
@@ -53,7 +57,20 @@ from bank_reconciliation_agent.services.trace import (
 )
 from bank_reconciliation_agent.services.transactions import transaction_service
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
-from bank_reconciliation_agent.schemas.trace import SpanStatus, SpanType, TraceSpan, WorkflowOutcome
+from bank_reconciliation_agent.schemas.trace import (
+    SpanStatus,
+    SpanType,
+    TraceSpan,
+    TraceSpanView,
+    WorkflowOutcome,
+)
+
+
+_WORKFLOW_OUTCOME_BY_DECISION: dict[str, WorkflowOutcome] = {
+    "AUTO_FIXED": WorkflowOutcome.AUTO_FIXED,
+    "PENDING_HUMAN": WorkflowOutcome.PENDING_HUMAN,
+    "UNRESOLVED": WorkflowOutcome.UNRESOLVED,
+}
 
 
 AGENT_PROCESSING_ERRORS = (
@@ -876,6 +893,10 @@ class ReconciliationService:
             trace_spans = self._finalize_recorder(recorder, audit_decision)
             if trace_spans:
                 trace_snapshots.append((result.flow_id, recorder.trace_id or "", trace_spans))
+                if emitter is not None:
+                    stream_seq = self._emit_terminal_and_root(
+                        trace_spans, emitter=emitter, stream_seq=stream_seq
+                    )
             rows.append(
                 LedgerRow(
                     id=0,
@@ -960,21 +981,22 @@ class ReconciliationService:
         A recorder self-fault only disables the current Trace; it never changes
         business results. Returns an empty list when there is nothing to persist.
 
-        Terminal type is FINAL for normal completions (AUTO_FIXED, PENDING_HUMAN
-        with no fallback, UNRESOLVED) and FALLBACK only when an actual safety
-        fallback was applied. FALLBACK.outcome is always PENDING_HUMAN.
+        Terminal outcome mirrors the real decision: ``AUTO_FIXED`` /
+        ``PENDING_HUMAN`` / ``UNRESOLVED`` each produce a ``FINAL`` with the same
+        outcome. Only an actual safety fallback (``fallback_applied=True`` on a
+        non-auto-fixed decision) produces a ``FALLBACK`` whose outcome is always
+        ``PENDING_HUMAN``.
         """
-        outcome = (
-            WorkflowOutcome.AUTO_FIXED
-            if audit_decision.decision == "AUTO_FIXED"
-            else WorkflowOutcome.PENDING_HUMAN
+        outcome = _WORKFLOW_OUTCOME_BY_DECISION.get(
+            audit_decision.decision, WorkflowOutcome.PENDING_HUMAN
         )
         fallback_applied = bool(audit_decision.fallback_applied)
-        terminal_type = (
-            SpanType.FALLBACK
-            if fallback_applied and audit_decision.decision != "AUTO_FIXED"
-            else SpanType.FINAL
-        )
+        if fallback_applied and audit_decision.decision != "AUTO_FIXED":
+            terminal_type = SpanType.FALLBACK
+            # FALLBACK is a safe hand-off to humans and only carries PENDING_HUMAN.
+            outcome = WorkflowOutcome.PENDING_HUMAN
+        else:
+            terminal_type = SpanType.FINAL
         try:
             recorder.close_root(
                 status=SpanStatus.SUCCEEDED,
@@ -990,6 +1012,44 @@ class ReconciliationService:
             )
             recorder.disable()
             return []
+
+    def _emit_terminal_and_root(
+        self,
+        spans: list[TraceSpan],
+        *,
+        emitter: StreamEmitter | None,
+        stream_seq: int,
+    ) -> int:
+        """Best-effort emit the terminal (decision-time) then root (flow-end) spans.
+
+        Reuses the persisted snapshot identity so real-time and Replay data join
+        on ``span_id``. Emission never mutates the snapshot or blocks persistence.
+        """
+        if emitter is None or not spans:
+            return stream_seq
+        root = spans[0]
+        terminal = next(
+            (s for s in spans if s.span_type in (SpanType.FINAL, SpanType.FALLBACK)),
+            None,
+        )
+        for span in (terminal, root):
+            if span is None:
+                continue
+            stream_seq += 1
+            self._emit_trace_span_safe(emitter, span, stream_seq)
+        return stream_seq
+
+    @staticmethod
+    def _emit_trace_span_safe(
+        emitter: StreamEmitter,
+        span: TraceSpan,
+        seq: int,
+    ) -> None:
+        try:
+            view = TraceSpanView.from_span(span)
+            emitter.emit(to_trace_span_event(view, seq=seq))
+        except Exception as exc:
+            log.warning("trace_span_emit_failed", error_type=type(exc).__name__)
 
     def _run_workflow_for_result(
         self,

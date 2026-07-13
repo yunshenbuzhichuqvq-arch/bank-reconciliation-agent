@@ -1,10 +1,16 @@
 from decimal import Decimal
 
+from sqlalchemy import create_engine
+
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
 from bank_reconciliation_agent.schemas.trace import TraceSpanView, SpanType, SpanStatus
 from bank_reconciliation_agent.services.exception_router import BranchResult
-from bank_reconciliation_agent.services.reconciliation import ReconciliationService
+from bank_reconciliation_agent.services.reconciliation import (
+    ReconciliationMatchResult,
+    ReconciliationService,
+)
 from bank_reconciliation_agent.services.stream_emitter import QueueEmitter, to_trace_span_event
+from bank_reconciliation_agent.services.trace import TraceService
 from bank_reconciliation_agent.services.workflow import run_item
 
 from tests.test_workflow import (
@@ -307,3 +313,159 @@ def test_trace_span_emit_failure_isolated() -> None:
 
     emitter.emit.assert_called_once()
     assert state["stream_seq"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Production-path: SSE trace_span set matches persisted DB rows exactly
+# ---------------------------------------------------------------------------
+
+
+def _prod_match_result(flow_id: str) -> ReconciliationMatchResult:
+    return ReconciliationMatchResult(
+        flow_id=flow_id,
+        status="PENDING_HUMAN",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount=Decimal("100.00"),
+        clear_amount=Decimal("99.00"),
+        amount_diff=Decimal("1.00"),
+    )
+
+
+def test_production_path_sse_span_set_matches_persisted_rows(monkeypatch) -> None:
+    """Through the real ReconciliationService finalize/persist path, the emitted
+    ``trace_span`` set equals the persisted DB rows, with the root and terminal
+    each emitted exactly once and canonical fields identical on both sides."""
+    engine = create_engine("sqlite:///:memory:")
+    service = ReconciliationService()
+    service._engine = engine
+    trace_service = TraceService(engine)
+
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.trace_service", trace_service
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
+        lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "银行流水"},
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_clear_row",
+        lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "清算流水"},
+    )
+
+    def deterministic_run_item(state, *, emitter):
+        return run_item(
+            state,
+            extraction_agent=SpyExtractionAgent(),
+            trace_agent=SpyTraceAgent(),
+            audit_agent=SpyAuditAgent(),
+            tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
+            emitter=emitter,
+        )
+
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.run_item", deterministic_run_item
+    )
+
+    user_id, task_id, flow_id = "prod_u", "TASK-PROD", "FLOW-PROD"
+    result = _prod_match_result(flow_id)
+    emitter = QueueEmitter()
+
+    queue_rows = service._write_queue_entries(user_id, task_id, "BANK_ENTERPRISE", [result])
+    service._write_ledger_entries(
+        user_id,
+        task_id,
+        "BANK_ENTERPRISE",
+        [result],
+        queue_rows=queue_rows,
+        emitter=emitter,
+    )
+
+    db_spans = trace_service.get_spans(user_id=user_id, task_id=task_id, flow_id=flow_id)
+    assert db_spans, "trace must persist through the real path"
+    db_by_id = {s.span_id: s for s in db_spans}
+
+    trace_events = [e for e in emitter.drain() if e.event_type == StreamEventType.TRACE_SPAN]
+    sse_by_id = {e.payload["span_id"]: e.payload for e in trace_events}
+
+    # 1. Exact identity-set match between SSE and persisted DB rows.
+    assert set(sse_by_id) == set(db_by_id)
+    # 2. No duplicate trace_span events.
+    assert len(trace_events) == len(sse_by_id)
+
+    # 3. Root and terminal each appear exactly once on both sides.
+    db_roots = [s for s in db_spans if s.span_type == SpanType.WORKFLOW]
+    db_terminals = [s for s in db_spans if s.span_type in (SpanType.FINAL, SpanType.FALLBACK)]
+    assert len(db_roots) == 1
+    assert len(db_terminals) == 1
+    sse_types = [p["span_type"] for p in sse_by_id.values()]
+    assert sse_types.count("WORKFLOW") == 1
+    assert sse_types.count("FINAL") + sse_types.count("FALLBACK") == 1
+
+    # 4. Canonical fields identical for every span shared by both sides.
+    for span_id, payload in sse_by_id.items():
+        span = db_by_id[span_id]
+        assert payload["trace_id"] == span.trace_id
+        assert payload["sequence_no"] == span.sequence_no
+        assert payload["span_type"] == span.span_type.value
+        assert payload["status"] == span.status.value
+        assert payload["outcome"] == span.outcome
+        assert "user_id" not in payload
+
+
+def test_production_path_emitter_failure_does_not_break_persistence(monkeypatch) -> None:
+    """A broken SSE emitter never blocks the batch persistence of a valid Trace."""
+    engine = create_engine("sqlite:///:memory:")
+    service = ReconciliationService()
+    service._engine = engine
+    trace_service = TraceService(engine)
+
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.trace_service", trace_service
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
+        lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "银行流水"},
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_clear_row",
+        lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "清算流水"},
+    )
+
+    def deterministic_run_item(state, *, emitter):
+        return run_item(
+            state,
+            extraction_agent=SpyExtractionAgent(),
+            trace_agent=SpyTraceAgent(),
+            audit_agent=SpyAuditAgent(),
+            tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
+            emitter=emitter,
+        )
+
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.run_item", deterministic_run_item
+    )
+
+    class _BrokenEmitter:
+        def emit(self, event) -> None:
+            if event.event_type == StreamEventType.TRACE_SPAN:
+                raise RuntimeError("trace_span emit broken")
+
+    user_id, task_id, flow_id = "iso_u", "TASK-ISO-SSE", "FLOW-ISO"
+    result = _prod_match_result(flow_id)
+    queue_rows = service._write_queue_entries(user_id, task_id, "BANK_ENTERPRISE", [result])
+
+    # Must not raise even though every trace_span emit fails.
+    service._write_ledger_entries(
+        user_id,
+        task_id,
+        "BANK_ENTERPRISE",
+        [result],
+        queue_rows=queue_rows,
+        emitter=_BrokenEmitter(),
+    )
+
+    db_spans = trace_service.get_spans(user_id=user_id, task_id=task_id, flow_id=flow_id)
+    types = [s.span_type for s in db_spans]
+    assert SpanType.WORKFLOW in types
+    assert types.count(SpanType.FINAL) + types.count(SpanType.FALLBACK) == 1

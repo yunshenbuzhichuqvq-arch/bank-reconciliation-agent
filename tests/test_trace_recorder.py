@@ -10,6 +10,7 @@ Refs: TASK-29.2
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -377,6 +378,146 @@ class TestToolProjection:
         assert "args" not in dumped
         assert "result" not in dumped
         assert "attempts" not in dumped
+
+
+# ---------------------------------------------------------------------------
+# 7b. Call-lifecycle spans (allocate before the real call, complete after)
+# ---------------------------------------------------------------------------
+
+
+class TestCallLifecycleSpans:
+    """start_tool/finish_tool and start_agent/finish_agent allocate the span
+    (id, sequence_no, started_at, parent) *before* the real call and only
+    complete it afterwards using the monotonic clock."""
+
+    def test_start_tool_allocates_identity_before_completion(self) -> None:
+        r = _make_recorder()
+        with r.span(SpanType.ROUTE, "AMOUNT_MISMATCH"):
+            pass
+        handle = r.start_tool("search_rules")
+        # Identity, ordering, start time and parent are assigned immediately.
+        assert handle is not None
+        assert handle.span_id
+        assert handle.sequence_no == 3  # root=1, route=2, tool=3
+        assert handle.started_at.tzinfo is not None
+        assert handle.parent_span_id == r._root.span_id  # parent is the root span
+
+        marker = datetime.now(timezone.utc)
+        r.finish_tool(
+            handle,
+            status=SpanStatus.SUCCEEDED,
+            outcome=ToolOutcome.RESULT,
+            attempt=1,
+            retry_recovered=False,
+            recovered_error_type=None,
+            result_count=2,
+            evidence_ids=["chunk_1"],
+        )
+        r.close_root(
+            status=SpanStatus.SUCCEEDED,
+            outcome=WorkflowOutcome.PENDING_HUMAN,
+            terminal_type=SpanType.FALLBACK,
+        )
+        snapshot = r.snapshot()
+        tool = [s for s in snapshot if s.span_type == SpanType.TOOL][0]
+        # started_at was captured at allocation (before completion marker);
+        # ended_at is at/after completion; duration is monotonic and non-negative.
+        assert tool.started_at <= marker
+        assert tool.ended_at >= marker
+        assert tool.duration_ms >= 0
+        assert tool.outcome == "RESULT"
+        assert tool.result_count == 2
+        assert tool.evidence_ids == ["chunk_1"]
+
+    def test_finish_tool_failed_keeps_null_outcome(self) -> None:
+        r = _make_recorder()
+        handle = r.start_tool("search_rules")
+        r.finish_tool(
+            handle,
+            status=SpanStatus.FAILED,
+            outcome=None,
+            attempt=2,
+            retry_recovered=False,
+            recovered_error_type=None,
+            error_type="CIRCUIT_OPEN",
+            fallback_reason="RAG_CIRCUIT_OPEN",
+        )
+        r.close_root(
+            status=SpanStatus.SUCCEEDED,
+            outcome=WorkflowOutcome.PENDING_HUMAN,
+            terminal_type=SpanType.FALLBACK,
+        )
+        tool = [s for s in r.snapshot() if s.span_type == SpanType.TOOL][0]
+        assert tool.status == SpanStatus.FAILED
+        assert tool.outcome is None
+        assert tool.error_type == "CIRCUIT_OPEN"
+        assert tool.fallback_reason == "RAG_CIRCUIT_OPEN"
+
+    def test_start_agent_allocates_identity_before_completion(self) -> None:
+        r = _make_recorder()
+        handle = r.start_agent("AuditAgent")
+        assert handle is not None
+        assert handle.span_id
+        assert handle.sequence_no == 2  # root=1, agent=2
+        marker = datetime.now(timezone.utc)
+        r.finish_agent(
+            handle,
+            status=SpanStatus.SUCCEEDED,
+            model_name="deepseek-chat",
+            prompt_tokens=500,
+            completion_tokens=200,
+            cached_calls=0,
+            attempt=1,
+        )
+        r.close_root(status=SpanStatus.SUCCEEDED, outcome=WorkflowOutcome.AUTO_FIXED)
+        agent = [s for s in r.snapshot() if s.span_type == SpanType.AGENT][0]
+        assert agent.started_at <= marker
+        assert agent.ended_at >= marker
+        assert agent.duration_ms >= 0
+        assert agent.prompt_tokens == 500
+        assert agent.model_name == "deepseek-chat"
+
+    def test_finish_agent_carries_recovered_error_type(self) -> None:
+        r = _make_recorder()
+        handle = r.start_agent("AuditAgent")
+        r.finish_agent(
+            handle,
+            status=SpanStatus.SUCCEEDED,
+            model_name="deepseek-chat",
+            prompt_tokens=10,
+            completion_tokens=5,
+            attempt=2,
+            retry_recovered=True,
+            recovered_error_type="timeout",
+        )
+        r.close_root(status=SpanStatus.SUCCEEDED, outcome=WorkflowOutcome.AUTO_FIXED)
+        agent = [s for s in r.snapshot() if s.span_type == SpanType.AGENT][0]
+        assert agent.retry_recovered is True
+        assert agent.recovered_error_type == "timeout"
+
+    def test_disabled_recorder_start_returns_none(self) -> None:
+        r = _make_recorder()
+        r.disable()
+        assert r.start_tool("search_rules") is None
+        assert r.start_agent("AuditAgent") is None
+        # finish with a None handle is a safe no-op.
+        r.finish_tool(
+            None,
+            status=SpanStatus.SUCCEEDED,
+            outcome=ToolOutcome.RESULT,
+            attempt=1,
+            retry_recovered=False,
+            recovered_error_type=None,
+        )
+        assert r.snapshot() == ()
+
+    def test_noop_recorder_lifecycle_is_safe(self) -> None:
+        r = NoOpRecorder()
+        assert r.start_tool("search_rules") is None
+        assert r.start_agent("AuditAgent") is None
+        r.finish_tool(None, status=SpanStatus.SUCCEEDED, outcome=None, attempt=1)
+        r.finish_agent(None, status=SpanStatus.SUCCEEDED)
+        assert r.snapshot() == ()
 
 
 # ---------------------------------------------------------------------------

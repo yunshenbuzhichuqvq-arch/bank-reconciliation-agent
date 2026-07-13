@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
@@ -112,28 +110,28 @@ def _emit_trace_span(
 ) -> None:
     """Emit a ``trace_span`` SSE event for the most recently completed span.
 
-    Uses the canonical ``to_trace_span_event`` path so the SSE payload
-    matches the persisted Trace identically.  Emit failures never affect
-    business decisions, ledger state, recorder snapshot or batch persistence.
+    The whole projection path — reading the last completed span, building the
+    canonical ``TraceSpanView``, advancing the SSE seq and calling
+    ``emitter.emit`` — runs inside a single best-effort boundary. Any failure
+    only produces a sanitized warning and never affects the business decision,
+    ledger state, recorder snapshot or the later batch persistence.
     """
     if emitter is None:
         return
-    span = recorder.last_completed_span()
-    if span is None:
-        return
     from bank_reconciliation_agent.schemas.trace import TraceSpanView
 
-    view = TraceSpanView.from_span(span)
-    stream_seq = int(state.get("stream_seq", 0)) + 1
-    state["stream_seq"] = stream_seq
     try:
+        span = recorder.last_completed_span()
+        if span is None:
+            return
+        view = TraceSpanView.from_span(span)
+        stream_seq = int(state.get("stream_seq", 0)) + 1
+        state["stream_seq"] = stream_seq
         event = to_trace_span_event(view, seq=stream_seq)
         emitter.emit(event)
     except Exception as exc:
         log.warning(
             "trace_span_emit_failed",
-            trace_id=view.trace_id,
-            span_id=view.span_id,
             error_type=type(exc).__name__,
         )
 
@@ -145,14 +143,15 @@ _TOOL_STATUS_MAP: dict[str, tuple[SpanStatus, str | None]] = {
 }
 
 
-def _record_tool_span(
+def _complete_tool_span(
     state: ReconciliationState,
+    handle: Any,
     result: ToolCallResult,
     projection: dict[str, Any],
     *,
     emitter: StreamEmitter | None = None,
-    started_at: datetime | None = None,
 ) -> None:
+    """Complete the pending TOOL span allocated before ``execute()``."""
     recorder = _recorder(state)
     status, outcome = _TOOL_STATUS_MAP.get(str(projection["status"]), (SpanStatus.FAILED, None))
     recovered_error_type: str | None = None
@@ -161,11 +160,10 @@ def _record_tool_span(
             if attempt.status == "FAILED" and attempt.error_type is not None:
                 recovered_error_type = attempt.error_type
                 break
-    recorder.record_tool(
-        name=str(projection["tool_name"]),
+    recorder.finish_tool(
+        handle,
         status=status,
         outcome=outcome,
-        duration_ms=float(projection.get("duration_ms", 0.0)),
         attempt=int(projection.get("attempt", 1)),
         retry_recovered=bool(projection.get("retry_recovered", False)),
         recovered_error_type=recovered_error_type,
@@ -173,50 +171,58 @@ def _record_tool_span(
         evidence_ids=list(projection.get("evidence_ids", [])),
         error_type=projection.get("error_type"),
         fallback_reason=projection.get("fallback_reason"),
-        started_at=started_at,
     )
     _emit_trace_span(state, recorder, emitter)
 
 
-def _record_agent_span(
+def _agent_recovered_error_type(agent: Any, usage: dict[str, Any]) -> str | None:
+    """Return the first failed transport ``failure_type`` when a retry recovered.
+
+    Sourced from the safe ``LLMResult.attempts`` metadata; ``None`` when there
+    was no retry recovery or no recorded failure attempt.
+    """
+    if not usage.get("retry_recovered"):
+        return None
+    result = getattr(agent, "last_llm_result", None)
+    attempts = getattr(result, "attempts", None) or []
+    for attempt in attempts:
+        if getattr(attempt, "outcome", None) == "failure" and attempt.failure_type is not None:
+            return attempt.failure_type
+    return None
+
+
+def _finish_agent_span(
     state: ReconciliationState,
+    handle: Any,
     *,
-    name: str,
     agent: Any,
-    duration_ms: float,
-    status: SpanStatus | None = None,
+    status: SpanStatus | None,
     emitter: StreamEmitter | None = None,
-    started_at: datetime | None = None,
 ) -> None:
+    """Complete the pending AGENT span allocated before the Agent call.
+
+    When *status* is ``None`` it is inferred from the safe LLM usage summary.
+    """
     recorder = _recorder(state)
     usage = _llm_usage(agent)
     span_status = status
     if span_status is None:
         span_status = SpanStatus.FAILED if usage.get("final_failure_type") else SpanStatus.SUCCEEDED
     model_name = getattr(getattr(agent, "last_llm_result", None), "model", None)
-    if started_at is None:
-        started_at = datetime.now(timezone.utc) - timedelta(milliseconds=duration_ms)
-    recovered_error_type: str | None = None
-    if usage.get("retry_recovered"):
-        summary = getattr(agent, "last_llm_summary", None)
-        if summary is not None:
-            recovered_error_type = getattr(summary, "recovered_error_type", None)
-    recorder.record_agent(
-        name=name,
+    recorder.finish_agent(
+        handle,
         status=span_status,
-        duration_ms=duration_ms,
         model_name=model_name,
         prompt_tokens=int(usage.get("prompt_tokens", 0)),
         completion_tokens=int(usage.get("completion_tokens", 0)),
         cached_calls=int(usage.get("cached_calls", 0)),
         attempt=max(1, int(usage.get("transport_attempts", 1) or 1)),
         retry_recovered=bool(usage.get("retry_recovered", False)),
-        recovered_error_type=recovered_error_type,
+        recovered_error_type=_agent_recovered_error_type(agent, usage),
         structured_repair_attempted=bool(usage.get("structured_repair_attempted", False)),
         structured_repair_succeeded=bool(usage.get("structured_repair_succeeded", False)),
         error_type=usage.get("final_failure_type"),
         fallback_reason=usage.get("fallback_reason"),
-        started_at=started_at,
     )
     _emit_trace_span(state, recorder, emitter)
 
@@ -257,7 +263,7 @@ def run_item(
     trace_payload: dict[str, Any] | None = None
 
     if exception_branch == "BE-R004" and _contains_reversal_hint(summary, remark):
-        _extract_start = time.monotonic()
+        _extract_handle = recorder.start_agent("ExtractionAgent")
         try:
             extraction_result = extraction_agent.extract(
                 flow_id=flow_id,
@@ -265,11 +271,10 @@ def run_item(
                 remark=remark,
             )
         except ExtractionAgentError:
-            _record_agent_span(
+            _finish_agent_span(
                 state,
-                name="ExtractionAgent",
+                _extract_handle,
                 agent=extraction_agent,
-                duration_ms=(time.monotonic() - _extract_start) * 1000,
                 status=SpanStatus.FAILED,
                 emitter=emitter,
             )
@@ -281,11 +286,10 @@ def run_item(
                 step="extract",
                 emitter=emitter,
             )
-        _record_agent_span(
+        _finish_agent_span(
             state,
-            name="ExtractionAgent",
+            _extract_handle,
             agent=extraction_agent,
-            duration_ms=(time.monotonic() - _extract_start) * 1000,
             status=SpanStatus.SUCCEEDED,
             emitter=emitter,
         )
@@ -336,15 +340,14 @@ def run_item(
         }
         if exception_branch == "BC-R003":
             trace_kwargs["cutoff_t1_context"] = cutoff_t1_context
-        _trace_start = time.monotonic()
+        _trace_handle = recorder.start_agent("TraceAgent")
         try:
             trace_result = trace_agent.trace(**trace_kwargs)
         except TraceAgentError:
-            _record_agent_span(
+            _finish_agent_span(
                 state,
-                name="TraceAgent",
+                _trace_handle,
                 agent=trace_agent,
-                duration_ms=(time.monotonic() - _trace_start) * 1000,
                 status=SpanStatus.FAILED,
                 emitter=emitter,
             )
@@ -356,11 +359,10 @@ def run_item(
                 step="trace",
                 emitter=emitter,
             )
-        _record_agent_span(
+        _finish_agent_span(
             state,
-            name="TraceAgent",
+            _trace_handle,
             agent=trace_agent,
-            duration_ms=(time.monotonic() - _trace_start) * 1000,
             status=SpanStatus.SUCCEEDED,
             emitter=emitter,
         )
@@ -545,15 +547,14 @@ def run_item(
             }
             if exception_branch == "BC-R003":
                 trace_kwargs["cutoff_t1_context"] = cutoff_t1_context
-            _l3_trace_start = time.monotonic()
+            _l3_trace_handle = recorder.start_agent("TraceAgent")
             try:
                 trace_result = trace_agent.trace(**trace_kwargs)
             except TraceAgentError:
-                _record_agent_span(
+                _finish_agent_span(
                     state,
-                    name="TraceAgent",
+                    _l3_trace_handle,
                     agent=trace_agent,
-                    duration_ms=(time.monotonic() - _l3_trace_start) * 1000,
                     status=SpanStatus.FAILED,
                     emitter=emitter,
                 )
@@ -565,11 +566,10 @@ def run_item(
                     step="trace",
                     emitter=emitter,
                 )
-            _record_agent_span(
+            _finish_agent_span(
                 state,
-                name="TraceAgent",
+                _l3_trace_handle,
                 agent=trace_agent,
-                duration_ms=(time.monotonic() - _l3_trace_start) * 1000,
                 status=SpanStatus.SUCCEEDED,
                 emitter=emitter,
             )
@@ -845,15 +845,15 @@ def _audit_decision_once(
 ) -> AuditDecision:
     state["error_message"] = None
     state["retry_count"] = 0
-    _agent_start = time.monotonic()
+    recorder = _recorder(state)
+    _audit_handle = recorder.start_agent("AuditAgent")
     try:
         decision = schema_hook(audit_agent.decide_with_llm(**audit_kwargs))
     except SchemaValidationError:
-        _record_agent_span(
+        _finish_agent_span(
             state,
-            name="AuditAgent",
+            _audit_handle,
             agent=audit_agent,
-            duration_ms=(time.monotonic() - _agent_start) * 1000,
             status=SpanStatus.FAILED,
             emitter=emitter,
         )
@@ -888,11 +888,11 @@ def _audit_decision_once(
             next_action="PENDING_HUMAN",
         )
 
-    _record_agent_span(
+    _finish_agent_span(
         state,
-        name="AuditAgent",
+        _audit_handle,
         agent=audit_agent,
-        duration_ms=(time.monotonic() - _agent_start) * 1000,
+        status=None,
         emitter=emitter,
     )
     return decision
@@ -923,16 +923,10 @@ def _execute_tool(
     fallback_level: int = 0,
 ) -> ToolCallResult:
     context = _build_tool_context(state, fallback_level=fallback_level)
-    _tool_start = time.monotonic()
+    handle = _recorder(state).start_tool(name)
     result = tool_executor.execute(name, args, context)
     projection = safe_tool_projection(result)
-    _record_tool_span(
-        state,
-        result,
-        projection,
-        emitter=emitter,
-        started_at=_datetime_from_monotonic_start(_tool_start, projection),
-    )
+    _complete_tool_span(state, handle, result, projection, emitter=emitter)
     _append_agent_log(
         state,
         {
@@ -944,16 +938,6 @@ def _execute_tool(
         emitter,
     )
     return result
-
-
-def _datetime_from_monotonic_start(
-    mono_start: float,
-    projection: dict[str, Any],
-) -> datetime | None:
-    """Back-calculate UTC started_at from monotonic start and wall-clock duration."""
-    return datetime.now(timezone.utc) - timedelta(
-        milliseconds=float(projection.get("duration_ms", 0.0))
-    )
 
 
 def _tool_fail_closed_item(

@@ -1,14 +1,25 @@
 """Deterministic Trace Replay evidence runner.
 
-Uses SQLite, Fake provider and hash embedding; covers:
-1. Complete success (FINAL, all spans present) — persisted, read back, validated
-2. Tool timeout/failed → Fallback — persisted, read back, validated
-3. LLM structured repair failure → Fallback — via Fake provider
-4. Safety Guard blocked → Fallback — persisted, read back, validated
-5. Cross-tenant Replay rejection — via HTTP TestClient
-6. Trace batch write failure isolation — via real business side-effect boundary
+Offline + Fake provider + hash embedding + local SQLite + non-production SLA.
 
-Refs: TASK-29.12
+All six scenarios enter the real exception workflow (``run_item``), so the
+completeness denominator is fixed at 6. Five of them persist a structurally
+valid Trace; the sixth deliberately fails the Trace write at the real
+``ReconciliationService`` side-effect boundary, so the honest completeness is
+``5/6``.
+
+Scenarios:
+1. Complete success (FINAL)                      — persisted, read back, validated
+2. Tool timeout/failed -> Fallback               — persisted, read back, validated
+3. LLM structured repair failure -> Fallback     — real Fake provider + structured boundary
+4. Safety Guard blocked -> Fallback              — persisted, read back, validated
+5. Cross-tenant Replay rejection                 — real FastAPI HTTP owner/non-owner requests
+6. Trace batch write failure isolation           — real ReconciliationService core-txn boundary
+
+``scenario_pass_count`` is judged per-scenario expectation (all six should pass:
+6/6), while completeness stays honestly at ``5/6``.
+
+Refs: TASK-29.15
 """
 
 from __future__ import annotations
@@ -16,25 +27,36 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
-os.environ["EMBEDDING_BACKEND"] = "hash"
-os.environ["MYSQL_DSN"] = "sqlite:///:memory:"
-os.environ["ENABLE_RAG_RERANKER"] = "false"
-os.environ["ENABLE_RAG_HYBRID"] = "false"
-os.environ["ENABLE_RAG_REWRITE"] = "false"
+# A file-backed SQLite keeps tables visible across the connections used by the
+# global services and the FastAPI TestClient (an in-memory DB would not persist
+# across the separate connections opened by the HTTP replay path). The DSN is
+# only defaulted when not already configured (pytest configures its own test DB
+# in conftest, which we must not override). The report is computed from
+# in-process scenario results and process-local counters, so any residual rows
+# in the file never affect the metrics.
+os.environ.setdefault(
+    "MYSQL_DSN",
+    f"sqlite:///{Path(tempfile.gettempdir()) / 'trace_replay_eval.sqlite'}",
+)
+os.environ.setdefault("EMBEDDING_BACKEND", "hash")
+os.environ.setdefault("ENABLE_RAG_RERANKER", "false")
+os.environ.setdefault("ENABLE_RAG_HYBRID", "false")
+os.environ.setdefault("ENABLE_RAG_REWRITE", "false")
 
 from sqlalchemy import create_engine
 
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
 from bank_reconciliation_agent.core.llm.provider import LLMResult
+from bank_reconciliation_agent.db.session import get_engine
+from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.schemas.rag import RagSearchItem
 from bank_reconciliation_agent.schemas.trace import (
-    SpanStatus,
     SpanType,
     TraceSpan,
-    WorkflowOutcome,
 )
 from bank_reconciliation_agent.schemas.tools import (
     SearchRulesOutput,
@@ -228,7 +250,7 @@ def _noop_trace_agent():
 
 
 # ---------------------------------------------------------------------------
-# State builder
+# State builder and workflow driver
 # ---------------------------------------------------------------------------
 
 
@@ -283,17 +305,23 @@ def _run_flow(
     )
 
 
-def _finalize(
-    recorder: TraceRecorder, decision: str, *, fallback_applied: bool = False
-) -> list[TraceSpan]:
-    outcome = (
-        WorkflowOutcome.AUTO_FIXED if decision == "AUTO_FIXED" else WorkflowOutcome.PENDING_HUMAN
+def _finalize_from_state(recorder: TraceRecorder, state: ReconciliationState) -> list[TraceSpan]:
+    """Close the recorder through the real service terminal-truth logic.
+
+    The terminal type/outcome is derived from the actual audit decision, not a
+    hand-set flag, so the evidence reflects real ``FINAL`` / ``FALLBACK`` truth.
+    """
+    from bank_reconciliation_agent.services.reconciliation import ReconciliationService
+
+    decision = AuditDecision.model_validate(state["audit_decision"])
+    return ReconciliationService()._finalize_recorder(recorder, decision)
+
+
+def _terminal_type(spans: list[TraceSpan]) -> str | None:
+    return next(
+        (s.span_type.value for s in spans if s.span_type in (SpanType.FINAL, SpanType.FALLBACK)),
+        None,
     )
-    terminal_type = (
-        SpanType.FALLBACK if fallback_applied and decision != "AUTO_FIXED" else SpanType.FINAL
-    )
-    recorder.close_root(status=SpanStatus.SUCCEEDED, outcome=outcome, terminal_type=terminal_type)
-    return list(recorder.snapshot())
 
 
 def _persist_and_verify(
@@ -314,36 +342,29 @@ def _persist_and_verify(
     return len(stored) == len(spans)
 
 
-def _collect(
-    trace_id: str,
-    flow_id: str,
-    spans: list[TraceSpan],
-    scenario: str,
-    *,
-    trace_persisted: bool = False,
-) -> dict[str, object]:
-    validate_trace_snapshot(spans)
+def _agent_span_facts(spans: list[TraceSpan]) -> dict[str, object]:
+    """Extract auditable facts about the failed structured-repair Agent span."""
+    failed_agents = [
+        s for s in spans if s.span_type == SpanType.AGENT and s.status.value == "FAILED"
+    ]
+    non_cached_tokens = sum(
+        (s.prompt_tokens or 0) + (s.completion_tokens or 0)
+        for s in spans
+        if s.span_type == SpanType.AGENT
+    )
+    failed = failed_agents[0] if failed_agents else None
     return {
-        "scenario": scenario,
-        "trace_id": trace_id,
-        "flow_id": flow_id,
-        "span_count": len(spans),
-        "span_sequence": [s.span_type.value for s in spans],
-        "terminal_type": next(
-            (
-                s.span_type.value
-                for s in spans
-                if s.span_type in (SpanType.FINAL, SpanType.FALLBACK)
-            ),
-            None,
-        ),
-        "trace_persisted": trace_persisted,
-        "all_spans": [s.model_dump(mode="json") for s in spans],
+        "failed_agent_spans": len(failed_agents),
+        "structured_repair_attempted": bool(failed and failed.structured_repair_attempted),
+        "structured_repair_succeeded": bool(failed and failed.structured_repair_succeeded),
+        "error_type": failed.error_type if failed else None,
+        "fallback_reason": failed.fallback_reason if failed else None,
+        "non_cached_agent_tokens": non_cached_tokens,
     }
 
 
 # ---------------------------------------------------------------------------
-# Scenario runners — persist, read back, verify via TraceService
+# Scenario runners
 # ---------------------------------------------------------------------------
 
 
@@ -351,118 +372,352 @@ def _make_trace_service() -> TraceService:
     return TraceService(create_engine("sqlite:///:memory:", future=True))
 
 
+def _base_scenario(
+    name: str,
+    spans: list[TraceSpan],
+    *,
+    trace_persisted: bool,
+    scenario_passed: bool,
+    expected_persistence: bool = True,
+    facts: dict[str, object] | None = None,
+    include_spans: bool = True,
+) -> dict[str, object]:
+    if spans:
+        validate_trace_snapshot(spans)
+    return {
+        "scenario": name,
+        "eligible_execution": True,
+        "expected_persistence": expected_persistence,
+        "trace_persisted": trace_persisted,
+        "scenario_passed": scenario_passed,
+        "span_sequence": [s.span_type.value for s in spans],
+        "terminal_type": _terminal_type(spans),
+        "span_count": len(spans),
+        "facts": facts or {},
+        "all_spans": [s.model_dump(mode="json") for s in spans] if include_spans else [],
+    }
+
+
 def scenario_success() -> dict[str, object]:
     ts = _make_trace_service()
     recorder = TraceRecorder(user_id="eval_user", task_id="TASK-EVAL", flow_id="F-SUCCESS")
-    _run_flow("F-SUCCESS", recorder, audit_agent=_AutoFixedAuditAgent())
-    spans = _finalize(recorder, "AUTO_FIXED")
+    state = _run_flow("F-SUCCESS", recorder, audit_agent=_AutoFixedAuditAgent())
+    spans = _finalize_from_state(recorder, state)
     persisted = _persist_and_verify(ts, "eval_user", "TASK-EVAL", "F-SUCCESS", spans)
-    return _collect(
-        recorder.trace_id, "F-SUCCESS", spans, "complete_success", trace_persisted=persisted
+    passed = persisted and _terminal_type(spans) == "FINAL"
+    return _base_scenario(
+        "complete_success",
+        spans,
+        trace_persisted=persisted,
+        scenario_passed=passed,
+        facts={"decision": state["audit_decision"].get("decision")},
     )
 
 
 def scenario_tool_failed() -> dict[str, object]:
     ts = _make_trace_service()
     recorder = TraceRecorder(user_id="eval_user", task_id="TASK-EVAL", flow_id="F-TOOL-FAIL")
-    _run_flow("F-TOOL-FAIL", recorder, tool_executor=_FailToolExecutor())
-    spans = _finalize(recorder, "PENDING_HUMAN", fallback_applied=True)
+    state = _run_flow("F-TOOL-FAIL", recorder, tool_executor=_FailToolExecutor())
+    spans = _finalize_from_state(recorder, state)
     persisted = _persist_and_verify(ts, "eval_user", "TASK-EVAL", "F-TOOL-FAIL", spans)
-    return _collect(
-        recorder.trace_id, "F-TOOL-FAIL", spans, "tool_failed_fallback", trace_persisted=persisted
+    seq = [s.span_type.value for s in spans]
+    passed = (
+        persisted
+        and _terminal_type(spans) == "FALLBACK"
+        and "TOOL" in seq
+        and "AGENT" not in seq
+        and "GUARD" not in seq
+    )
+    return _base_scenario(
+        "tool_failed_fallback",
+        spans,
+        trace_persisted=persisted,
+        scenario_passed=passed,
+        facts={"decision": state["audit_decision"].get("decision")},
     )
 
 
 def scenario_agent_repair_failure() -> dict[str, object]:
-    """Uses a real AuditAgent with a Fake provider that always returns
-    invalid decision literals, triggering the structured repair path to
-    exhaust and fallback via the real SchemaHook."""
+    """Real AuditAgent with a Fake provider that always returns invalid decision
+    literals, exhausting the structured repair path and falling back."""
     ts = _make_trace_service()
     recorder = TraceRecorder(user_id="eval_user", task_id="TASK-EVAL", flow_id="F-AGENT-FAIL")
-
     agent = AuditAgent(provider=_StructuredRepairFailureProvider())
-    _run_flow("F-AGENT-FAIL", recorder, audit_agent=agent)
-
-    spans = _finalize(recorder, "PENDING_HUMAN", fallback_applied=True)
+    state = _run_flow("F-AGENT-FAIL", recorder, audit_agent=agent)
+    spans = _finalize_from_state(recorder, state)
     persisted = _persist_and_verify(ts, "eval_user", "TASK-EVAL", "F-AGENT-FAIL", spans)
-    return _collect(
-        recorder.trace_id,
-        "F-AGENT-FAIL",
-        spans,
+    facts = _agent_span_facts(spans)
+    facts["decision"] = state["audit_decision"].get("decision")
+    passed = (
+        persisted
+        and _terminal_type(spans) == "FALLBACK"
+        and facts["failed_agent_spans"] >= 1
+        and facts["structured_repair_attempted"] is True
+        and facts["non_cached_agent_tokens"] > 0
+    )
+    return _base_scenario(
         "agent_repair_failure_fallback",
+        spans,
         trace_persisted=persisted,
+        scenario_passed=passed,
+        facts=facts,
     )
 
 
 def scenario_guard_blocked() -> dict[str, object]:
     ts = _make_trace_service()
     recorder = TraceRecorder(user_id="eval_user", task_id="TASK-EVAL", flow_id="F-GUARD")
-    _run_flow("F-GUARD", recorder, audit_agent=_GuardBlockAuditAgent())
-    spans = _finalize(recorder, "PENDING_HUMAN", fallback_applied=True)
+    state = _run_flow("F-GUARD", recorder, audit_agent=_GuardBlockAuditAgent())
+    spans = _finalize_from_state(recorder, state)
     persisted = _persist_and_verify(ts, "eval_user", "TASK-EVAL", "F-GUARD", spans)
-    return _collect(
-        recorder.trace_id, "F-GUARD", spans, "guard_blocked_fallback", trace_persisted=persisted
+    guard = next((s for s in spans if s.span_type == SpanType.GUARD), None)
+    passed = (
+        persisted
+        and _terminal_type(spans) == "FALLBACK"
+        and guard is not None
+        and guard.outcome == "BLOCKED"
+    )
+    return _base_scenario(
+        "guard_blocked_fallback",
+        spans,
+        trace_persisted=persisted,
+        scenario_passed=passed,
+        facts={"guard_outcome": guard.outcome if guard else None},
     )
 
 
 def scenario_cross_tenant_replay_rejection() -> dict[str, object]:
-    """Verify cross-user rejection using TraceService storage-level isolation.
+    """Cross-user rejection proven via the real FastAPI HTTP Replay endpoint.
 
-    Uses ``persist_snapshot`` and ``get_spans`` across different user_id values
-    to prove tenant-safe reads.  HTTP-level 404 is independently verified by
-    ``test_cross_tenant_http_replay_rejection`` in the test suite.
+    An owner persists a Trace and can read it (200 AVAILABLE); a non-owner gets
+    a 404 with a stable error code and no Trace payload. A storage-level empty
+    read is recorded only as supplementary evidence.
     """
-    user_a, user_b = "eval_a", "eval_b"
-    task_id, flow_id = "TASK-ISO", "F-ISO"
+    from fastapi.testclient import TestClient
 
-    engine = create_engine("sqlite:///:memory:", future=True)
-    ts = TraceService(engine)
+    from bank_reconciliation_agent.core.security import create_access_token
+    from bank_reconciliation_agent.main import app
+    from bank_reconciliation_agent.services.queue import queue_service
+    from bank_reconciliation_agent.services.task import task_service
+    from bank_reconciliation_agent.services.trace import trace_service as global_trace_service
 
-    recorder = TraceRecorder(user_id=user_a, task_id=task_id, flow_id=flow_id)
-    _run_flow(flow_id, recorder, audit_agent=_SpyAuditAgent())
-    spans = _finalize(recorder, "PENDING_HUMAN")
+    owner, intruder = "eval_owner", "eval_intruder"
+    task_id, flow_id = "TASK-XTEN", "F-XTEN"
 
-    persisted = _persist_and_verify(ts, user_a, task_id, flow_id, spans)
-    found_cross = bool(ts.get_spans(user_id=user_b, task_id=task_id, flow_id=flow_id))
-    found_own = bool(ts.get_spans(user_id=user_a, task_id=task_id, flow_id=flow_id))
+    task_service.replace_task(
+        user_id=owner,
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=1,
+        total_clear_rows=1,
+        auto_fixed_rows=0,
+        pending_ai_rows=0,
+        pending_human_rows=1,
+        status="COMPLETED",
+    )
+    queue_service.replace_task_rows(
+        user_id=owner,
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        rows=[
+            {
+                "task_id": task_id,
+                "flow_id": flow_id,
+                "bank_transaction_id": None,
+                "clear_transaction_id": None,
+                "error_type": "AMOUNT_MISMATCH",
+                "exception_branch": "BE-R002",
+                "status": "PENDING_HUMAN",
+                "risk_level": "MEDIUM",
+                "retry_count": 0,
+            }
+        ],
+    )
 
-    return {
-        "scenario": "cross_tenant_replay_rejection",
-        "trace_persisted": persisted,
-        "user_b_can_read_user_a_trace": found_cross,
-        "user_a_can_read_own_trace": found_own,
-        "evidence": "tenant_isolation_holds",
-    }
+    recorder = TraceRecorder(user_id=owner, task_id=task_id, flow_id=flow_id)
+    state = _run_flow(flow_id, recorder, audit_agent=_SpyAuditAgent())
+    spans = _finalize_from_state(recorder, state)
+    persisted = global_trace_service.persist_snapshot(
+        user_id=owner, task_id=task_id, flow_id=flow_id, spans=spans
+    )
+
+    client = TestClient(app)
+    url = f"/api/v1/traces/{task_id}/flows/{flow_id}"
+    owner_resp = client.get(url, headers={"Authorization": f"Bearer {create_access_token(owner)}"})
+    intruder_resp = client.get(
+        url, headers={"Authorization": f"Bearer {create_access_token(intruder)}"}
+    )
+
+    owner_data = owner_resp.json().get("data", {}) if owner_resp.status_code == 200 else {}
+    owner_available = (
+        owner_resp.status_code == 200 and owner_data.get("replay_status") == "AVAILABLE"
+    )
+    non_owner_status = intruder_resp.status_code
+    non_owner_error = intruder_resp.json().get("detail")
+    non_owner_leaked = (recorder.trace_id in intruder_resp.text) or (
+        '"span_id"' in intruder_resp.text
+    )
+    storage_empty = not global_trace_service.get_spans(
+        user_id=intruder, task_id=task_id, flow_id=flow_id
+    )
+
+    passed = (
+        bool(persisted)
+        and owner_available
+        and non_owner_status == 404
+        and non_owner_error == "TASK_NOT_FOUND"
+        and not non_owner_leaked
+        and storage_empty
+    )
+    return _base_scenario(
+        "cross_tenant_replay_rejection",
+        spans,
+        trace_persisted=bool(persisted),
+        scenario_passed=passed,
+        facts={
+            "owner_http_status": owner_resp.status_code,
+            "owner_replay_status": owner_data.get("replay_status"),
+            "non_owner_http_status": non_owner_status,
+            "non_owner_error_code": non_owner_error,
+            "non_owner_payload_leaked": bool(non_owner_leaked),
+            "storage_empty_read": bool(storage_empty),
+        },
+    )
 
 
 def scenario_trace_write_failure_isolation() -> dict[str, object]:
-    """Verify that a Trace write failure does not affect business results.
-    The recorder produces a valid snapshot, but persist_snapshot fails."""
-    engine = create_engine("sqlite:///:memory:")
-    ts = TraceService(engine)
+    """Trace write failure injected at the real ReconciliationService side-effect
+    boundary, after the core ledger/queue/task transaction commits.
 
-    recorder = TraceRecorder(user_id="eval_user", task_id="t-wf", flow_id="f-wf")
-    _run_flow("f-wf", recorder, audit_agent=_SpyAuditAgent())
-    spans = _finalize(recorder, "PENDING_HUMAN")
+    Proves the business result is committed and the API call succeeds while the
+    Trace batch is dropped (0 rows) and the failure counter increments by one.
+    """
+    import bank_reconciliation_agent.services.reconciliation as recon_module
+    from bank_reconciliation_agent.services.ledger import ledger_service
+    from bank_reconciliation_agent.services.queue import queue_service
+    from bank_reconciliation_agent.services.reconciliation import (
+        ReconciliationMatchResult,
+        ReconciliationService,
+    )
+    from bank_reconciliation_agent.services.task import task_service
+    from bank_reconciliation_agent.services.trace import trace_service as global_trace_service
+    from decimal import Decimal
 
-    before_fail = TraceService.metrics_snapshot()["trace_write_failure_count"]
+    user_id, task_id, flow_id = "eval_wf", "TASK-WF-ISO", "F-WF-ISO"
+    service = ReconciliationService()
+
+    task_service.replace_task(
+        user_id=user_id,
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=1,
+        total_clear_rows=1,
+        auto_fixed_rows=0,
+        pending_ai_rows=1,
+        pending_human_rows=0,
+        status="RUNNING",
+    )
 
     class _BrokenEngine:
         def begin(self):
-            raise RuntimeError("simulated db failure")
+            raise RuntimeError("simulated trace db failure")
 
-    ts._engine = _BrokenEngine()
-    ts._initialized = True
-    ok = ts.persist_snapshot(user_id="eval_user", task_id="t-wf", flow_id="f-wf", spans=spans)
+    broken_ts = TraceService(get_engine())
+    broken_ts._engine = _BrokenEngine()
+    broken_ts._initialized = True
+
+    def _det_run_item(state, *, emitter=None):
+        return run_item(
+            state,
+            extraction_agent=_noop_extraction_agent(),
+            trace_agent=_noop_trace_agent(),
+            audit_agent=_SpyAuditAgent(),
+            tool_executor=_SpyToolExecutor(),
+            emitter=emitter,
+        )
+
+    orig_trace = recon_module.trace_service
+    orig_run = recon_module.run_item
+    orig_bank = recon_module.transaction_service.get_bank_row
+    orig_clear = recon_module.transaction_service.get_clear_row
+    before_fail = TraceService.metrics_snapshot()["trace_write_failure_count"]
+    business_raised = False
+    try:
+        recon_module.trace_service = broken_ts
+        recon_module.run_item = _det_run_item
+        recon_module.transaction_service.get_bank_row = lambda **k: {
+            "flow_id": k["flow_id"],
+            "summary": "银行流水",
+        }
+        recon_module.transaction_service.get_clear_row = lambda **k: {
+            "flow_id": k["flow_id"],
+            "summary": "清算流水",
+        }
+        result = ReconciliationMatchResult(
+            flow_id=flow_id,
+            status="PENDING_HUMAN",
+            error_type="AMOUNT_MISMATCH",
+            exception_branch="BE-R002",
+            bank_amount=Decimal("100.00"),
+            clear_amount=Decimal("99.00"),
+            amount_diff=Decimal("1.00"),
+        )
+        queue_rows = service._write_queue_entries(user_id, task_id, "BANK_ENTERPRISE", [result])
+        try:
+            service._write_ledger_entries(
+                user_id, task_id, "BANK_ENTERPRISE", [result], queue_rows=queue_rows
+            )
+        except Exception:
+            business_raised = True
+    finally:
+        recon_module.trace_service = orig_trace
+        recon_module.run_item = orig_run
+        recon_module.transaction_service.get_bank_row = orig_bank
+        recon_module.transaction_service.get_clear_row = orig_clear
 
     after_fail = TraceService.metrics_snapshot()["trace_write_failure_count"]
-    return {
-        "scenario": "trace_write_failure_isolation",
-        "persist_returned_false": not ok,
-        "failure_count_incremented": after_fail > before_fail,
-        "spans_present_for_write": bool(spans),
-        "trace_structure_valid": True,
+
+    ledger_page = ledger_service.list(
+        user_id=user_id, query=LedgerQuery(task_id=task_id, page=1, page_size=100)
+    )
+    ledger_row = next((r for r in ledger_page.items if r.flow_id == flow_id), None)
+    queue_committed = (
+        queue_service.get_row(user_id=user_id, task_id=task_id, flow_id=flow_id) is not None
+    )
+    task_row = task_service.get(user_id=user_id, task_id=task_id)
+    task_stats_committed = bool(task_row and task_row.ai_processed_rows == 1)
+    trace_rows = len(
+        global_trace_service.get_spans(user_id=user_id, task_id=task_id, flow_id=flow_id)
+    )
+    failure_incremented = after_fail == before_fail + 1
+
+    facts = {
+        "business_call_succeeded": not business_raised,
+        "ledger_committed": ledger_row is not None,
+        "queue_committed": queue_committed,
+        "task_stats_committed": task_stats_committed,
+        "final_decision": ledger_row.handle_status if ledger_row else None,
+        "trace_rows": trace_rows,
+        "failure_counter_incremented": failure_incremented,
     }
+    passed = (
+        not business_raised
+        and ledger_row is not None
+        and queue_committed
+        and task_stats_committed
+        and ledger_row.handle_status == "PENDING_HUMAN"
+        and trace_rows == 0
+        and failure_incremented
+    )
+    return _base_scenario(
+        "trace_write_failure_isolation",
+        [],
+        trace_persisted=False,
+        scenario_passed=passed,
+        expected_persistence=False,
+        facts=facts,
+        include_spans=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -487,22 +742,13 @@ def _p95(values: list[int]) -> int:
     return sorted(values)[int(len(values) * 0.95)]
 
 
-_VALID_SCENARIO_NAMES = {
-    "complete_success",
-    "tool_failed_fallback",
-    "agent_repair_failure_fallback",
-    "guard_blocked_fallback",
-}
-
-
 def _compute_metrics(scenarios: list[dict[str, object]]) -> dict[str, object]:
     all_spans: list[dict[str, object]] = []
-    persisted = 0
     eligible_count = 0
+    persisted = 0
     for s in scenarios:
-        spans = s.get("all_spans", [])
-        all_spans.extend(spans)
-        if s.get("scenario") in _VALID_SCENARIO_NAMES:
+        all_spans.extend(s.get("all_spans", []))
+        if s.get("eligible_execution"):
             eligible_count += 1
             if s.get("trace_persisted", False):
                 persisted += 1
@@ -542,8 +788,8 @@ def _compute_metrics(scenarios: list[dict[str, object]]) -> dict[str, object]:
         "numerator": persisted,
         "denominator": eligible_count,
         "duration_p50_p95_by_type": dur_stats,
-        "error_distribution": dict(error_dist),
-        "fallback_distribution": dict(fallback_dist),
+        "error_distribution": dict(sorted(error_dist.items())),
+        "fallback_distribution": dict(sorted(fallback_dist.items())),
         "token_by_agent": token_by_agent,
         "trace_write_success_count": metrics.get("trace_write_success_count", 0),
         "trace_write_failure_count": metrics.get("trace_write_failure_count", 0),
@@ -562,25 +808,31 @@ def _build_json(
     scenario_summaries = []
     pass_count = 0
     for s in scenarios:
-        passed = s.get("trace_persisted", False)
-        if passed:
+        if s.get("scenario_passed"):
             pass_count += 1
         scenario_summaries.append(
             {
                 "scenario": s["scenario"],
+                "eligible_execution": s.get("eligible_execution", False),
+                "expected_persistence": s.get("expected_persistence", False),
+                "trace_persisted": s.get("trace_persisted", False),
+                "scenario_passed": s.get("scenario_passed", False),
                 "span_sequence": s.get("span_sequence", []),
                 "terminal_type": s.get("terminal_type"),
                 "span_count": s.get("span_count", 0),
-                "trace_persisted": passed,
+                "facts": s.get("facts", {}),
             }
         )
     return {
         "environment": "offline",
         "provider": "fake",
         "embedding": "hash",
-        "database": "sqlite_in_memory",
+        "database": "sqlite_local",
         "claim": {
             "offline": True,
+            "fake_provider": True,
+            "hash_embedding": True,
+            "local_sqlite": True,
             "local_latency_only": True,
             "not_production_sla": True,
         },
@@ -601,27 +853,39 @@ def _build_markdown(json_report: dict[str, object]) -> str:
     )
     lines.append("")
     lines.append(
-        "> This report is generated from a single deterministic run using fake "
-        "LLM provider, hash embedding, and local SQLite. Latency figures are local-only "
-        "and must not be interpreted as production SLAs."
+        "> This report is generated from a single deterministic run using a fake "
+        "LLM provider, hash embedding and local SQLite. Latency figures are "
+        "local-only and must not be interpreted as production SLAs."
     )
     lines.append("")
 
     metrics = json_report["metrics"]
     lines.append("## Completeness")
     lines.append(f"- **Rate**: {metrics['trace_completeness_rate']:.2%}")
-    lines.append(f"- **Numerator**: {metrics['numerator']}")
-    lines.append(f"- **Denominator**: {metrics['denominator']}")
+    lines.append(f"- **Numerator (eligible flows persisted)**: {metrics['numerator']}")
+    lines.append(f"- **Denominator (eligible flows executed)**: {metrics['denominator']}")
+    lines.append(
+        f"- **Scenario pass count**: {json_report['scenario_pass_count']}"
+        f"/{json_report['scenario_total']}"
+    )
     lines.append("")
 
     lines.append("## Scenarios")
     for scenario in json_report["scenarios"]:
         lines.append(f"### {scenario['scenario']}")
+        lines.append(f"- Passed: {scenario['scenario_passed']}")
+        lines.append(f"- Eligible execution: {scenario['eligible_execution']}")
+        lines.append(
+            f"- Persistence expected/actual: "
+            f"{scenario['expected_persistence']}/{scenario['trace_persisted']}"
+        )
         lines.append(f"- Terminal: {scenario['terminal_type']}")
         lines.append(f"- Span count: {scenario['span_count']}")
-        lines.append(f"- Persisted: {scenario.get('trace_persisted', False)}")
-        seq_str = " → ".join(scenario["span_sequence"])
-        lines.append(f"- Sequence: `{seq_str}`")
+        if scenario["span_sequence"]:
+            seq_str = " → ".join(scenario["span_sequence"])
+            lines.append(f"- Sequence: `{seq_str}`")
+        for key, value in scenario["facts"].items():
+            lines.append(f"- {key}: `{value}`")
         lines.append("")
 
     lines.append("## Duration (P50 / P95)")
@@ -667,64 +931,85 @@ def _build_markdown(json_report: dict[str, object]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def _validate_report(json_report: dict[str, object]) -> list[str]:
+    """Return a list of validation errors; empty means the report is trustworthy."""
+    errors: list[str] = []
+    scenarios = json_report["scenarios"]
+    metrics = json_report["metrics"]
+
+    expected_names = [
+        "complete_success",
+        "tool_failed_fallback",
+        "agent_repair_failure_fallback",
+        "guard_blocked_fallback",
+        "cross_tenant_replay_rejection",
+        "trace_write_failure_isolation",
+    ]
+    if [s["scenario"] for s in scenarios] != expected_names:
+        errors.append("scenario set/order mismatch")
+
+    for s in scenarios:
+        if not s["scenario_passed"]:
+            errors.append(f"scenario failed expectation: {s['scenario']}")
+
+    passed = sum(1 for s in scenarios if s["scenario_passed"])
+    if json_report["scenario_pass_count"] != passed:
+        errors.append("scenario_pass_count inconsistent with scenarios")
+    if json_report["scenario_pass_count"] != 6:
+        errors.append(f"expected 6/6 scenario passes, got {json_report['scenario_pass_count']}")
+
+    if metrics["denominator"] != 6:
+        errors.append(f"expected completeness denominator 6, got {metrics['denominator']}")
+    if metrics["numerator"] != 5:
+        errors.append(f"expected completeness numerator 5, got {metrics['numerator']}")
+    if abs(metrics["trace_completeness_rate"] - 5 / 6) > 1e-9:
+        errors.append("completeness rate is not 5/6")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 def main() -> int:
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    scenarios_run: list[dict[str, object]] = []
-
     print("=== Trace Replay Evidence Runner ===")
     print("Provider: fake | Embedding: hash | Database: sqlite (in-memory)")
     print()
 
-    # 1. Complete success
-    print("[1/6] complete_success ... ", end="")
-    s1 = scenario_success()
-    assert s1["trace_persisted"], "complete_success must persist"
-    print("OK")
-    scenarios_run.append(s1)
+    runners = [
+        ("complete_success", scenario_success),
+        ("tool_failed_fallback", scenario_tool_failed),
+        ("agent_repair_failure_fallback", scenario_agent_repair_failure),
+        ("guard_blocked_fallback", scenario_guard_blocked),
+        ("cross_tenant_replay_rejection", scenario_cross_tenant_replay_rejection),
+        ("trace_write_failure_isolation", scenario_trace_write_failure_isolation),
+    ]
 
-    # 2. Tool failed → Fallback
-    print("[2/6] tool_failed_fallback ... ", end="")
-    s2 = scenario_tool_failed()
-    assert s2["trace_persisted"], "tool_failed_fallback must persist"
-    print("OK")
-    scenarios_run.append(s2)
-
-    # 3. LLM structured repair failure → Fallback
-    print("[3/6] agent_repair_failure_fallback ... ", end="")
-    s3 = scenario_agent_repair_failure()
-    assert s3["trace_persisted"], "agent_repair_failure_fallback must persist"
-    print("OK")
-    scenarios_run.append(s3)
-
-    # 4. Guard blocked → Fallback
-    print("[4/6] guard_blocked_fallback ... ", end="")
-    s4 = scenario_guard_blocked()
-    assert s4["trace_persisted"], "guard_blocked_fallback must persist"
-    print("OK")
-    scenarios_run.append(s4)
-
-    # 5. Cross-tenant rejection via HTTP API
-    print("[5/6] cross_tenant_replay_rejection ... ", end="")
-    s5 = scenario_cross_tenant_replay_rejection()
-    assert not s5["user_b_can_read_user_a_trace"], "Cross-user read must be rejected"
-    print("OK")
-    scenarios_run.append(s5)
-
-    # 6. Write failure isolation — denominator includes this execution
-    print("[6/6] trace_write_failure_isolation ... ", end="")
-    s6 = scenario_trace_write_failure_isolation()
-    assert s6["persist_returned_false"], "Persist must return False on write failure"
-    print("OK")
-    scenarios_run.append(s6)
+    scenarios_run: list[dict[str, object]] = []
+    for idx, (name, runner) in enumerate(runners, start=1):
+        print(f"[{idx}/{len(runners)}] {name} ... ", end="")
+        result = runner()
+        status = "OK" if result["scenario_passed"] else "FAIL"
+        print(status)
+        scenarios_run.append(result)
 
     metrics = _compute_metrics(scenarios_run)
     json_report = _build_json(scenarios_run, metrics)
 
+    errors = _validate_report(json_report)
+    if errors:
+        print("\nValidation failed; existing reports left untouched:")
+        for err in errors:
+            print(f"  - {err}")
+        return 1
+
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     json_path = REPORTS_DIR / "trace_replay_evidence.json"
     json_path.write_text(json.dumps(json_report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nJSON report  → {json_path}")
@@ -736,7 +1021,8 @@ def main() -> int:
 
     print(
         f"\nCompleteness: {metrics['trace_completeness_rate']:.2%} "
-        f"({metrics['numerator']}/{metrics['denominator']})"
+        f"({metrics['numerator']}/{metrics['denominator']}) | "
+        f"scenario pass {json_report['scenario_pass_count']}/{json_report['scenario_total']}"
     )
     print("All scenarios passed.")
     return 0

@@ -10,12 +10,14 @@ Refs: TASK-29.3
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 from sqlalchemy import create_engine
 
-from bank_reconciliation_agent.agents.audit_agent import AuditDecision
+from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
 from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgentError
+from bank_reconciliation_agent.core.llm.provider import LLMAttemptRecord, LLMResult
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.schemas.trace import SpanStatus, SpanType, WorkflowOutcome
 from bank_reconciliation_agent.services.reconciliation import (
@@ -401,3 +403,207 @@ def test_agent_processing_error_still_produces_complete_fallback_trace(monkeypat
     terminals = [s for s in spans if s.span_type in {SpanType.FINAL, SpanType.FALLBACK}]
     assert len(terminals) == 1
     assert terminals[0].span_type == SpanType.FALLBACK
+
+
+# ---------------------------------------------------------------------------
+# 6. Call-lifecycle: span allocated BEFORE the real Tool/Agent call
+# ---------------------------------------------------------------------------
+
+
+class _AllocationProbeToolExecutor:
+    """Wraps a real executor and, during each ``execute()`` call, records
+    whether a matching TOOL span was already allocated and still open."""
+
+    def __init__(self, recorder: TraceRecorder, retriever) -> None:
+        self._recorder = recorder
+        self._inner = RetrieverBackedToolExecutor(retriever=retriever)
+        self.observations: list[tuple[str, bool, bool]] = []
+
+    def execute(self, name, args, context):
+        in_progress = [
+            b
+            for b in self._recorder._spans
+            if b.span_type == SpanType.TOOL and b.name == name and b.ended_at is None
+        ]
+        allocated_before_call = len(in_progress) == 1 and in_progress[0].started_at is not None
+        still_open = len(in_progress) == 1 and in_progress[0].ended_at is None
+        self.observations.append((name, allocated_before_call, still_open))
+        return self._inner.execute(name, args, context)
+
+
+class _AllocationProbeAuditAgent:
+    """Audit agent that verifies an AGENT span is already open mid-call."""
+
+    def __init__(self, recorder: TraceRecorder) -> None:
+        self._recorder = recorder
+        self.last_llm_result = None
+        self.last_llm_summary = None
+        self.span_open_during_call: bool | None = None
+
+    def decide_with_llm(self, flow_id: str, evidence, **kwargs) -> AuditDecision:
+        del kwargs
+        open_agent = [
+            b
+            for b in self._recorder._spans
+            if b.span_type == SpanType.AGENT and b.name == "AuditAgent" and b.ended_at is None
+        ]
+        self.span_open_during_call = len(open_agent) == 1 and open_agent[0].started_at is not None
+        return AuditDecision(
+            flow_id=flow_id,
+            decision="PENDING_HUMAN",
+            risk_level="MEDIUM",
+            reason="probe",
+            ai_suggestion="PENDING_HUMAN",
+            evidence=evidence,
+            confidence=0.88,
+            fallback_applied=False,
+            fallback_level=0,
+            next_action="PENDING_HUMAN",
+        )
+
+
+def test_tool_span_allocated_before_execute_call() -> None:
+    recorder = _recorder()
+    probe = _AllocationProbeToolExecutor(recorder, StaticRetriever())
+    run_item(
+        _state("BE-R002", recorder),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=SpyAuditAgent(),
+        tool_executor=probe,
+    )
+    recorder.close_root(
+        status=SpanStatus.SUCCEEDED,
+        outcome=WorkflowOutcome.PENDING_HUMAN,
+        terminal_type=SpanType.FALLBACK,
+    )
+    assert probe.observations, "at least one tool call must be observed"
+    for name, allocated_before_call, still_open in probe.observations:
+        assert allocated_before_call, f"{name} span not allocated before execute()"
+        assert still_open, f"{name} span already closed during execute()"
+
+    # After completion the span carries a real, non-negative duration.
+    tool = [s for s in recorder.snapshot() if s.span_type == SpanType.TOOL][0]
+    assert tool.duration_ms >= 0
+    assert tool.ended_at >= tool.started_at
+
+
+def test_agent_span_allocated_before_agent_call() -> None:
+    recorder = _recorder()
+    probe = _AllocationProbeAuditAgent(recorder)
+    run_item(
+        _state("BE-R002", recorder),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=probe,
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
+    )
+    assert probe.span_open_during_call is True
+
+
+# ---------------------------------------------------------------------------
+# 7. LLM retry recovery projection from LLMResult.attempts
+# ---------------------------------------------------------------------------
+
+
+class _RetryRecoveredProvider:
+    """Fake provider whose single logical call reports a recovered transport
+    retry via ``LLMResult.attempts`` (one failure, then success)."""
+
+    model = "fake-retry"
+
+    def complete(
+        self,
+        messages,
+        *,
+        temperature: float = 0.0,
+        response_format: str = "json_object",
+        response_validator=None,
+    ) -> LLMResult:
+        del messages, temperature, response_format, response_validator
+        payload = {
+            "decision": "PENDING_HUMAN",
+            "risk_level": "MEDIUM",
+            "reason": "recovered after retry",
+            "ai_suggestion": "PENDING_HUMAN",
+            "evidence": ["rule-001"],
+            "confidence": 0.8,
+        }
+        return LLMResult(
+            text=json.dumps(payload, ensure_ascii=False),
+            prompt_tokens=12,
+            completion_tokens=6,
+            model="fake-retry",
+            attempts=[
+                LLMAttemptRecord(
+                    physical_attempt=1, outcome="failure", failure_type="timeout", duration_ms=1
+                ),
+                LLMAttemptRecord(physical_attempt=2, outcome="success", duration_ms=1),
+            ],
+        )
+
+
+def test_agent_span_recovered_error_type_from_attempts() -> None:
+    recorder = _recorder()
+    run_item(
+        _state("BE-R002", recorder),
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=_RetryRecoveredProvider()),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
+    )
+    recorder.close_root(
+        status=SpanStatus.SUCCEEDED,
+        outcome=WorkflowOutcome.PENDING_HUMAN,
+        terminal_type=SpanType.FALLBACK,
+    )
+    agent = [s for s in recorder.snapshot() if s.span_type == SpanType.AGENT][0]
+    assert agent.retry_recovered is True
+    assert agent.recovered_error_type == "timeout"
+    assert agent.prompt_tokens == 12
+    assert agent.completion_tokens == 6
+
+
+# ---------------------------------------------------------------------------
+# 8. Terminal truth: outcome mirrors the real decision
+# ---------------------------------------------------------------------------
+
+
+def _decision(decision: str, *, fallback_applied: bool, evidence: bool) -> AuditDecision:
+    return AuditDecision(
+        flow_id="f",
+        decision=decision,
+        risk_level="MEDIUM",
+        reason="r",
+        ai_suggestion="PENDING_HUMAN",
+        evidence=[_evidence()] if evidence else [],
+        confidence=0.5,
+        fallback_applied=fallback_applied,
+        next_action="PENDING_HUMAN",
+    )
+
+
+def test_finalize_recorder_pending_human_without_fallback_is_final() -> None:
+    service = ReconciliationService()
+    recorder = TraceRecorder(user_id="u", task_id="t", flow_id="f")
+    spans = service._finalize_recorder(
+        recorder, _decision("PENDING_HUMAN", fallback_applied=False, evidence=False)
+    )
+    validate_trace_snapshot(spans)
+    terminal = [s for s in spans if s.span_type in {SpanType.FINAL, SpanType.FALLBACK}][0]
+    assert terminal.span_type == SpanType.FINAL
+    assert terminal.outcome == "PENDING_HUMAN"
+    assert spans[0].outcome == "PENDING_HUMAN"
+
+
+def test_finalize_recorder_unresolved_is_final_with_unresolved_outcome() -> None:
+    service = ReconciliationService()
+    recorder = TraceRecorder(user_id="u", task_id="t", flow_id="f")
+    spans = service._finalize_recorder(
+        recorder, _decision("UNRESOLVED", fallback_applied=False, evidence=True)
+    )
+    validate_trace_snapshot(spans)
+    terminal = [s for s in spans if s.span_type in {SpanType.FINAL, SpanType.FALLBACK}][0]
+    assert terminal.span_type == SpanType.FINAL
+    assert terminal.outcome == "UNRESOLVED"
+    assert spans[0].outcome == "UNRESOLVED"
