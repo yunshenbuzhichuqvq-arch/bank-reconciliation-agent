@@ -1639,3 +1639,55 @@ def test_stage31_unexpected_error_not_converted_to_no_go(monkeypatch, tmp_path: 
     report = json.loads(json_path.read_text(encoding="utf-8"))
     assert report["decision"] == "no_go"
     assert report["reliability"]["failure_count"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TASK-31.7: Trace eligibility, full-flow accounting, independence truth
+# ---------------------------------------------------------------------------
+
+
+def test_stage31_independence_findings_have_source(monkeypatch, tmp_path: Path) -> None:
+    from bank_reconciliation_agent.rag import retriever as _retriever
+
+    monkeypatch.setattr(
+        _retriever.rule_retriever,
+        "search",
+        lambda req: type("RagResp", (), {"items": [], "rewritten_query": req.query})(),
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.workflow.run_item",
+        _make_mock_run_item(),
+    )
+
+    json_path = tmp_path / "bench31.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    indep = report["independence"]
+    required_keys = {
+        "data_dependency",
+        "shared_state",
+        "failure_order",
+        "cancellation",
+        "resource_reclamation",
+    }
+    assert set(indep.keys()) == required_keys
+    for key, finding in indep.items():
+        assert "finding" in finding
+        assert "detail" in finding
+        assert "source" in finding
+        assert finding["finding"] in ("safe", "bounded", "unknown", "unsafe", "unbounded")

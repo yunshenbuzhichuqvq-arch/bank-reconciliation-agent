@@ -394,6 +394,9 @@ def run_stage31_critical_path(
 
     total_prompt_tokens = 0
     total_completion_tokens = 0
+    total_agent_calls = 0
+    total_tool_calls = 0
+    total_transport_attempts = 0
     success_count = 0
     failure_count = 0
 
@@ -477,17 +480,63 @@ def run_stage31_critical_path(
             rag_spans = [s for s in spans if s.span_type == "TOOL" and s.name == "search_rules"]
 
             is_complete = False
-            if len(root_spans) == 1 and len(ext_spans) == 1 and len(rag_spans) == 1:
-                if (
-                    root_spans[0].status == "SUCCEEDED"
-                    and ext_spans[0].status == "SUCCEEDED"
-                    and rag_spans[0].status == "SUCCEEDED"
+            trace_failure_reason = "unknown"
+
+            terminal_spans = [
+                s
+                for s in spans
+                if s.span_type in ("FINAL", "FALLBACK") and s.parent_span_id is not None
+            ]
+
+            if len(root_spans) != 1:
+                trace_failure_reason = "missing_or_duplicate_root"
+            elif len(terminal_spans) != 1:
+                trace_failure_reason = "missing_or_duplicate_terminal"
+            elif len(ext_spans) != 1:
+                trace_failure_reason = "missing_or_duplicate_extraction"
+            elif len(rag_spans) != 1:
+                trace_failure_reason = "missing_or_duplicate_rag"
+            else:
+                root = root_spans[0]
+                terminal = terminal_spans[0]
+                ext = ext_spans[0]
+                rag = rag_spans[0]
+
+                seqs = {s.sequence_no for s in spans}
+                if len(seqs) != len(spans):
+                    trace_failure_reason = "duplicate_sequence"
+                elif max(seqs) - min(seqs) + 1 != len(seqs):
+                    trace_failure_reason = "broken_sequence"
+                elif terminal.parent_span_id != root.span_id:
+                    trace_failure_reason = "bad_terminal_parent"
+                elif ext.parent_span_id not in (root.span_id, terminal.span_id):
+                    trace_failure_reason = "bad_extraction_parent"
+                elif root.trace_id != ext.trace_id or root.trace_id != rag.trace_id:
+                    trace_failure_reason = "identity_mismatch"
+                elif root.user_id != "bench_user":
+                    trace_failure_reason = "wrong_user"
+                elif root.duration_ms < 0:
+                    trace_failure_reason = "negative_duration"
+                elif (
+                    root.status != "SUCCEEDED"
+                    or terminal.status != "SUCCEEDED"
+                    or ext.status != "SUCCEEDED"
+                    or rag.status != "SUCCEEDED"
                 ):
+                    trace_failure_reason = "non_succeeded_status"
+                elif effective_provider == "fake":
+                    trace_failure_reason = "fake_provider"
+                else:
                     is_complete = True
-                    if effective_provider != "fake" and (
-                        ext_spans[0].prompt_tokens is None or ext_spans[0].prompt_tokens == 0
-                    ):
-                        token_usage_unavailable = True
+
+            if is_complete:
+                ext_tok_prompt = ext_spans[0].prompt_tokens or 0
+                if effective_provider != "fake" and ext_tok_prompt == 0:
+                    token_usage_unavailable = True
+            else:
+                error_distribution[trace_failure_reason] = (
+                    error_distribution.get(trace_failure_reason, 0) + 1
+                )
 
             ext_dur = ext_spans[0].duration_ms if ext_spans else 0
             rag_dur = rag_spans[0].duration_ms if rag_spans else 0
@@ -496,10 +545,18 @@ def run_stage31_critical_path(
             if is_measured:
                 if is_complete:
                     success_count += 1
-                    if ext_spans[0].prompt_tokens:
-                        total_prompt_tokens += ext_spans[0].prompt_tokens
-                    if ext_spans[0].completion_tokens:
-                        total_completion_tokens += ext_spans[0].completion_tokens
+                    # Count all AGENT spans for full-flow token accounting
+                    agent_spans = [s for s in spans if s.span_type == "AGENT"]
+                    total_agent_calls += len(agent_spans)
+                    for ag in agent_spans:
+                        if ag.prompt_tokens:
+                            total_prompt_tokens += ag.prompt_tokens
+                        if ag.completion_tokens:
+                            total_completion_tokens += ag.completion_tokens
+
+                    tool_spans = [s for s in spans if s.span_type == "TOOL"]
+                    total_tool_calls += len(tool_spans)
+                    total_transport_attempts += sum((s.attempt or 0) for s in agent_spans)
                 else:
                     failure_count += 1
                     err_key = "incomplete_trace"
@@ -515,8 +572,13 @@ def run_stage31_critical_path(
                     {
                         "trace_id": root_spans[0].trace_id if root_spans else "unknown",
                         "is_complete": is_complete,
+                        "failure_reason": trace_failure_reason if not is_complete else None,
+                        "root_span": len(root_spans),
+                        "terminal_span": len(terminal_spans),
                         "ext_spans": len(ext_spans),
                         "rag_spans": len(rag_spans),
+                        "agent_count": len([s for s in spans if s.span_type == "AGENT"]),
+                        "tool_count": len([s for s in spans if s.span_type == "TOOL"]),
                     }
                 )
 
@@ -544,8 +606,13 @@ def run_stage31_critical_path(
 
     if env_gap:
         trusted = False
+    elif effective_provider == "fake":
+        trusted = False
+    elif total_agent_calls < 2 * success_count:
+        trusted = False
+        trust_reasons.append("incomplete_agent_accounting")
     else:
-        trusted = effective_provider != "fake"
+        trusted = True
 
     actual_p95 = round(_p95(warm_e2e), 3)
     pred_p95 = round(_p95(predicted_parallel_e2e), 3)
@@ -560,42 +627,48 @@ def run_stage31_critical_path(
             "finding": "safe",
             "detail": (
                 "RAG query is built from scenario_type, error_type, exception_branch, "
-                "and amounts; does not read extraction_result. Extraction and RAG are "
-                "data-independent."
+                "and amounts via _build_rag_query(); does not read extraction_result. "
+                "Static code analysis confirms data independence."
             ),
+            "source": "static_code_analysis",
         },
         "shared_state": {
             "finding": "safe",
             "detail": (
                 "In serial runtime there is no concurrent access. For a parallel "
-                "candidate, workers must receive read-only inputs and return results "
-                "without modifying ReconciliationState, Trace recorder, SSE emitter, "
-                "or persistent state."
+                "candidate, this assessment is conditional on workers receiving "
+                "read-only inputs and returning results without modifying shared "
+                "ReconciliationState, Trace recorder, SSE emitter, or persistent state. "
+                "This has NOT been verified in running code."
             ),
+            "source": "static_analysis_unverified",
         },
         "failure_order": {
             "finding": "bounded",
             "detail": (
                 "In serial runtime, Extraction failure causes early return before RAG. "
                 "In a parallel candidate, the failure of one side while the other is "
-                "in-flight requires explicit fail-closed handling: both must be "
-                "complete, and any failure must prevent automatic audit."
+                "in-flight requires explicit fail-closed handling. This has NOT been "
+                "verified in running code; the analysis assumes both sides are guarded."
             ),
+            "source": "static_analysis_unverified",
         },
         "cancellation": {
             "finding": "bounded",
             "detail": (
                 "Synchronous provider/retriever calls may not support hard interrupt. "
                 "A thread pool must use bounded timeouts and guarantee no background "
-                "state mutation after timeout."
+                "state mutation after timeout. This has NOT been verified in running code."
             ),
+            "source": "static_analysis_unverified",
         },
         "resource_reclamation": {
             "finding": "safe",
             "detail": (
-                "Thread pool resources are released via context manager. No persistent "
-                "background threads or shared buffers."
+                "Thread pool context manager guarantees resource release on exit. "
+                "This assessment is conditional on proper implementation."
             ),
+            "source": "static_analysis_unverified",
         },
     }
 
@@ -702,7 +775,9 @@ def run_stage31_critical_path(
         },
         "independence": independence_findings,
         "usage": {
-            "provider_call_count": success_count,
+            "logical_agent_calls": total_agent_calls,
+            "logical_tool_calls": total_tool_calls,
+            "provider_transport_attempts": total_transport_attempts,
             "input_tokens": total_prompt_tokens if token_usage_available else None,
             "output_tokens": total_completion_tokens if token_usage_available else None,
             "total_tokens": (total_prompt_tokens + total_completion_tokens)
