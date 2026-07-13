@@ -5,12 +5,17 @@ import hashlib
 import json
 import math
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
 
 from bank_reconciliation_agent.core.config import settings
+from bank_reconciliation_agent.rag.query_enrichment import (
+    DEFAULT_PROFILE_PATH as QUERY_ENRICHMENT_PROFILE_PATH,
+)
+from bank_reconciliation_agent.rag.query_enrichment import QueryEnricher, load_config
 from bank_reconciliation_agent.rag.scoring import representative_score
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRequest
 
@@ -184,10 +189,12 @@ def request_for_eval_mode(
     mode: RagEvalMode,
     top_k: int,
     min_score: float = 0.0,
+    query_override: str | None = None,
 ) -> RagSearchRequest:
+    query = case.query if query_override is None else query_override
     if mode == "dense":
         return RagSearchRequest(
-            query=case.query,
+            query=query,
             top_k=top_k,
             min_score=min_score,
             scenario_type=case.scenario_type,
@@ -196,7 +203,7 @@ def request_for_eval_mode(
         )
     if mode == "hybrid":
         return RagSearchRequest(
-            query=case.query,
+            query=query,
             top_k=top_k,
             min_score=min_score,
             scenario_type=case.scenario_type,
@@ -205,7 +212,7 @@ def request_for_eval_mode(
         )
     if mode == "hybrid_rerank":
         return RagSearchRequest(
-            query=case.query,
+            query=query,
             top_k=top_k,
             min_score=min_score,
             scenario_type=case.scenario_type,
@@ -222,11 +229,21 @@ def evaluate_eval_set(
     top_k: int = 5,
     embedding_backend: str = "hash",
     mode: RagEvalMode = "dense",
+    query_enricher: QueryEnricher | None = None,
+    latencies: list[float] | None = None,
 ) -> dict[str, Any]:
     if retriever is None:
         retriever = _get_rule_retriever()
     results = [
-        _evaluate_case(case, retriever=retriever, top_k=top_k, min_score=0.0, mode=mode)
+        _evaluate_case(
+            case,
+            retriever=retriever,
+            top_k=top_k,
+            min_score=0.0,
+            mode=mode,
+            query_enricher=query_enricher,
+            latencies=latencies,
+        )
         for case in cases
     ]
     scenario_types = sorted({case.scenario_type for case in cases})
@@ -254,6 +271,8 @@ def evaluate_mode_comparison(
     modes: list[RagEvalMode] | None = None,
     top_k: int = 5,
     embedding_backend: str = "hash",
+    query_enricher: QueryEnricher | None = None,
+    latencies: list[float] | None = None,
 ) -> dict[str, Any]:
     if modes is None:
         modes = ["dense", "hybrid", "hybrid_rerank"]
@@ -263,8 +282,13 @@ def evaluate_mode_comparison(
     mode_reports: dict[str, dict[str, Any]] = {}
     for m in modes:
         mode_reports[m] = evaluate_eval_set(
-            cases, retriever=retriever, top_k=top_k,
-            embedding_backend=embedding_backend, mode=m,
+            cases,
+            retriever=retriever,
+            top_k=top_k,
+            embedding_backend=embedding_backend,
+            mode=m,
+            query_enricher=query_enricher,
+            latencies=latencies,
         )
 
     dense_metrics = mode_reports["dense"]["global_metrics"]
@@ -362,6 +386,9 @@ def evaluate_backend_mode_matrix(
     eval_set_path: Path | None = None,
     chunk_corpus_paths: list[Path] | None = None,
     query_enrichment: dict[str, Any] | None = None,
+    query_enricher: QueryEnricher | None = None,
+    enrichment_profile_id: str | None = None,
+    query_profile_sha256: str | None = None,
     git_revision: str | None = None,
 ) -> dict[str, Any]:
     if requested_backends is None:
@@ -370,6 +397,8 @@ def evaluate_backend_mode_matrix(
         modes = ["dense", "hybrid", "hybrid_rerank"]
 
     _R, _S = _get_retriever_classes()
+
+    latencies: list[float] | None = [] if query_enricher is not None else None
 
     rows: dict[str, dict[str, Any]] = {}
     for backend in requested_backends:
@@ -404,6 +433,8 @@ def evaluate_backend_mode_matrix(
             modes=modes,
             top_k=top_k,
             embedding_backend=effective_backend,
+            query_enricher=query_enricher,
+            latencies=latencies,
         )
 
         rows[backend] = {
@@ -420,9 +451,20 @@ def evaluate_backend_mode_matrix(
     best_real_mode = rows[best_real_backend]["selected_mode"] if best_real_backend else None
     real_backend_requirement = _build_real_backend_requirement(rows)
     miss_buckets = (
-        _build_miss_buckets(cases, rows, best_real_backend, top_k, retriever_factory, modes)
+        _build_miss_buckets(
+            cases, rows, best_real_backend, top_k, retriever_factory, modes,
+            query_enricher=query_enricher,
+        )
         if best_real_backend is not None
         else []
+    )
+
+    query_enrichment_meta = _build_query_enrichment_metadata(
+        query_enricher,
+        enrichment_profile_id,
+        query_profile_sha256,
+        latencies,
+        override=query_enrichment,
     )
 
     return {
@@ -439,12 +481,53 @@ def evaluate_backend_mode_matrix(
         "chunk_corpus_sha256": (
             compute_corpus_sha256(chunk_corpus_paths) if chunk_corpus_paths is not None else None
         ),
-        "query_enrichment": query_enrichment or default_query_enrichment_metadata(),
+        "query_enrichment": query_enrichment_meta,
         "rows": rows,
         "best_real_backend": best_real_backend,
         "best_real_mode": best_real_mode,
         "real_backend_requirement": real_backend_requirement,
         "miss_buckets": miss_buckets,
+    }
+
+
+def _percentile(sorted_values: list[float], fraction: float) -> float:
+    if not sorted_values:
+        return 0.0
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    rank = fraction * (len(sorted_values) - 1)
+    low = math.floor(rank)
+    high = math.ceil(rank)
+    if low == high:
+        return sorted_values[low]
+    return sorted_values[low] + (sorted_values[high] - sorted_values[low]) * (rank - low)
+
+
+def _latency_summary(latencies: list[float]) -> dict[str, Any]:
+    ordered = sorted(latencies)
+    return {
+        "count": len(ordered),
+        "p50": _percentile(ordered, 0.50),
+        "p95": _percentile(ordered, 0.95),
+        "max": ordered[-1] if ordered else 0.0,
+    }
+
+
+def _build_query_enrichment_metadata(
+    query_enricher: QueryEnricher | None,
+    enrichment_profile_id: str | None,
+    query_profile_sha256: str | None,
+    latencies: list[float] | None,
+    *,
+    override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if query_enricher is None:
+        return override or default_query_enrichment_metadata()
+    return {
+        "enabled": True,
+        "profile": enrichment_profile_id,
+        "profile_sha256": query_profile_sha256,
+        "latency_ms": _latency_summary(latencies or []),
     }
 
 
@@ -516,6 +599,8 @@ def _build_miss_buckets(
     top_k: int,
     retriever_factory: Callable[[str], Any] | None,
     modes: list[RagEvalMode],
+    *,
+    query_enricher: QueryEnricher | None = None,
 ) -> list[dict[str, Any]]:
     row = rows[best_real_backend]
     selected_mode: str = row["selected_mode"]
@@ -535,6 +620,8 @@ def _build_miss_buckets(
         top_k=top_k,
         embedding_backend=effective_backend,
         mode=selected_mode,  # type: ignore[arg-type]
+        query_enricher=query_enricher,
+        latencies=None,
     )
 
     results: list[EvalCaseResult] = [EvalCaseResult(**r) for r in report["results"]]
@@ -1395,6 +1482,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--real-backend-policy", choices=["skip", "auto"], default="skip")
     parser.add_argument("--matrix-report", type=Path, default=DEFAULT_MATRIX_REPORT_PATH)
     parser.add_argument("--matrix-json", type=Path, default=DEFAULT_MATRIX_JSON_PATH)
+    parser.add_argument("--query-enrichment-profile", type=str, default=None)
     parser.add_argument("--optimization-baseline-json", type=Path, default=None)
     parser.add_argument("--optimization-after-json", type=Path, default=None)
     parser.add_argument("--optimization-report", type=Path, default=DEFAULT_OPTIMIZATION_COMPARISON_REPORT_PATH)
@@ -1451,6 +1539,16 @@ def main(argv: list[str] | None = None) -> None:
         matrix_modes: list[RagEvalMode] = [
             m.strip() for m in (args.matrix_modes or "dense,hybrid,hybrid_rerank").split(",")  # type: ignore[assignment]
         ]
+        matrix_enricher: QueryEnricher | None = None
+        enrichment_profile_id: str | None = None
+        query_profile_sha256: str | None = None
+        if args.query_enrichment_profile is not None:
+            available = {p.id for p in load_config(QUERY_ENRICHMENT_PROFILE_PATH).profiles}
+            if args.query_enrichment_profile not in available:
+                parser.error(f"unknown query enrichment profile: {args.query_enrichment_profile}")
+            matrix_enricher = QueryEnricher.from_path(QUERY_ENRICHMENT_PROFILE_PATH)
+            enrichment_profile_id = args.query_enrichment_profile
+            query_profile_sha256 = compute_file_sha256(QUERY_ENRICHMENT_PROFILE_PATH)
         matrix_report = evaluate_backend_mode_matrix(
             load_eval_set(args.eval_set),
             requested_backends=matrix_backends,
@@ -1459,6 +1557,9 @@ def main(argv: list[str] | None = None) -> None:
             real_backend_policy=args.real_backend_policy,
             eval_set_path=args.eval_set,
             chunk_corpus_paths=DEFAULT_CHUNK_CORPUS_PATHS,
+            query_enricher=matrix_enricher,
+            enrichment_profile_id=enrichment_profile_id,
+            query_profile_sha256=query_profile_sha256,
             git_revision=current_git_revision(),
         )
         if args.matrix_report:
@@ -1698,9 +1799,19 @@ def _evaluate_case(
     top_k: int,
     min_score: float,
     mode: RagEvalMode = "dense",
+    query_enricher: QueryEnricher | None = None,
+    latencies: list[float] | None = None,
 ) -> EvalCaseResult:
+    query_override: str | None = None
+    if query_enricher is not None:
+        start = time.perf_counter()
+        query_override = query_enricher.enrich(case.query, case.scenario_type, case.error_type)
+        if latencies is not None:
+            latencies.append((time.perf_counter() - start) * 1000.0)
     response = retriever.search(
-        request_for_eval_mode(case, mode=mode, top_k=top_k, min_score=min_score)
+        request_for_eval_mode(
+            case, mode=mode, top_k=top_k, min_score=min_score, query_override=query_override
+        )
     )
     retrieved_chunk_ids = [item.chunk_id for item in response.items[:top_k]]
     return EvalCaseResult(

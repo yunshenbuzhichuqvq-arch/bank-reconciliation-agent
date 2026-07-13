@@ -1,7 +1,81 @@
+from decimal import Decimal
+
 from bank_reconciliation_agent.agents.audit_agent import AuditDecision
+from bank_reconciliation_agent.rag import query_enrichment
 from bank_reconciliation_agent.schemas.rag import RagSearchRequest, RagSearchResponse
+from bank_reconciliation_agent.services.reconciliation import (
+    ReconciliationMatchResult,
+    ReconciliationService,
+)
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
 from tests.tool_workflow_helpers import RetrieverBackedToolExecutor
+
+
+def _profile_terms() -> list[str]:
+    config = query_enrichment.load_config(query_enrichment.DEFAULT_PROFILE_PATH)
+    return list(config.profiles[0].terms)
+
+
+def _profile_terms_suffix() -> str:
+    return " ".join(_profile_terms())
+
+
+def _service() -> ReconciliationService:
+    return ReconciliationService.__new__(ReconciliationService)
+
+
+def _match_result(*, error_type, exception_branch) -> ReconciliationMatchResult:
+    return ReconciliationMatchResult(
+        flow_id="FLOW-30-4",
+        status="PENDING_AI",
+        error_type=error_type,
+        exception_branch=exception_branch,
+        bank_amount=Decimal("100.00"),
+        clear_amount=None,
+        amount_diff=None,
+    )
+
+
+def test_build_rag_query_enriches_clearing_single_side_via_shared_helper() -> None:
+    service = _service()
+    result = _match_result(error_type="CLEARING_SINGLE_SIDE", exception_branch="BC-R001")
+    query = service._build_rag_query(result, "BANK_CLEARING")
+    assert query.endswith(" " + _profile_terms_suffix())
+
+
+def test_build_rag_query_branch_only_bc_r001_enriches() -> None:
+    service = _service()
+    result = _match_result(error_type=None, exception_branch="BC-R001")
+    query = service._build_rag_query(result, "BANK_CLEARING")
+    assert query.endswith(" " + _profile_terms_suffix())
+
+
+def test_build_rag_query_bank_enterprise_not_enriched() -> None:
+    service = _service()
+    result = _match_result(error_type="SINGLE_SIDE_MISSING", exception_branch=None)
+    query = service._build_rag_query(result, "BANK_ENTERPRISE")
+    for term in _profile_terms():
+        assert term not in query
+
+
+def test_build_rag_query_clearing_cutoff_bc_r003_not_enriched() -> None:
+    service = _service()
+    result = _match_result(error_type="CUTOFF_CROSS_DAY", exception_branch="BC-R003")
+    query = service._build_rag_query(result, "BANK_CLEARING")
+    for term in _profile_terms():
+        assert term not in query
+
+
+def test_runtime_and_eval_produce_same_appended_terms() -> None:
+    service = _service()
+    runtime_result = _match_result(error_type="CLEARING_SINGLE_SIDE", exception_branch="BC-R001")
+    runtime_query = service._build_rag_query(runtime_result, "BANK_CLEARING")
+
+    eval_query = query_enrichment.enrich("base", "BANK_CLEARING", "SINGLE_SIDE_MISSING")
+
+    suffix = _profile_terms_suffix()
+    assert runtime_query.endswith(" " + suffix)
+    assert eval_query.endswith(" " + suffix)
 
 
 def test_rule_retriever_search_returns_bank_clearing_chunks() -> None:
