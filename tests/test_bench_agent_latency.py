@@ -508,6 +508,10 @@ def test_stage31_critical_path_no_go(tmp_path: Path) -> None:
             "--scenario",
             "stage31-critical-path",
             "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
             "1",
             "--provider",
             "fake",
@@ -571,7 +575,7 @@ def _make_mock_run_item(
 ):
     from bank_reconciliation_agent.services.trace import TraceRecorder
 
-    def mock_run_item(state):
+    def mock_run_item(state, **_kwargs):
         recorder = state.get("recorder")
         if recorder is None or not isinstance(recorder, TraceRecorder):
             return state
@@ -633,11 +637,11 @@ def test_stage31_critical_path_incomplete_trace_no_go(monkeypatch, tmp_path: Pat
             "--scenario",
             "stage31-critical-path",
             "--runs",
-            "3",
+            "20",
             "--cold-runs",
-            "0",
+            "1",
             "--warmup-runs",
-            "0",
+            "1",
             "--provider",
             "fake",
             "--json-report",
@@ -671,11 +675,11 @@ def test_stage31_critical_path_duplicate_extraction_spans_no_go(
             "--scenario",
             "stage31-critical-path",
             "--runs",
-            "3",
+            "20",
             "--cold-runs",
-            "0",
+            "1",
             "--warmup-runs",
-            "0",
+            "1",
             "--provider",
             "fake",
             "--json-report",
@@ -707,11 +711,11 @@ def test_stage31_critical_path_theory_below_20pct_no_go(monkeypatch, tmp_path: P
             "--scenario",
             "stage31-critical-path",
             "--runs",
-            "5",
+            "20",
             "--cold-runs",
-            "0",
+            "1",
             "--warmup-runs",
-            "0",
+            "1",
             "--provider",
             "fake",
             "--json-report",
@@ -805,7 +809,7 @@ def test_stage31_baseline_has_all_required_sections(monkeypatch, tmp_path: Path)
             "--scenario",
             "stage31-critical-path",
             "--runs",
-            "3",
+            "20",
             "--cold-runs",
             "1",
             "--warmup-runs",
@@ -841,7 +845,7 @@ def test_stage31_cold_warmup_separation(monkeypatch, tmp_path: Path) -> None:
             "--scenario",
             "stage31-critical-path",
             "--runs",
-            "3",
+            "20",
             "--cold-runs",
             "2",
             "--warmup-runs",
@@ -859,11 +863,11 @@ def test_stage31_cold_warmup_separation(monkeypatch, tmp_path: Path) -> None:
     assert len(cold) == 2
 
     e2e_stats = report["latency"]["end_to_end"]
-    assert len(e2e_stats["samples_ms"]) == 3
+    assert len(e2e_stats["samples_ms"]) == 20
 
     assert report["run_plan"]["cold_runs"] == 2
     assert report["run_plan"]["warmup_runs"] == 1
-    assert report["run_plan"]["measured_runs"] == 3
+    assert report["run_plan"]["measured_runs"] == 20
 
 
 def test_stage31_trace_completeness_fields(monkeypatch, tmp_path: Path) -> None:
@@ -885,11 +889,11 @@ def test_stage31_trace_completeness_fields(monkeypatch, tmp_path: Path) -> None:
             "--scenario",
             "stage31-critical-path",
             "--runs",
-            "2",
+            "20",
             "--cold-runs",
-            "0",
+            "1",
             "--warmup-runs",
-            "0",
+            "1",
             "--provider",
             "fake",
             "--json-report",
@@ -903,7 +907,7 @@ def test_stage31_trace_completeness_fields(monkeypatch, tmp_path: Path) -> None:
     assert "completeness_denominator" in trace
     assert "completeness_rate" in trace
     assert "samples" in trace
-    assert len(trace["samples"]) == 2
+    assert len(trace["samples"]) == 20
 
 
 def test_stage31_input_sha256_stable() -> None:
@@ -1405,11 +1409,11 @@ def test_stage31_markdown_baseline_includes_key_sections(monkeypatch, tmp_path: 
             "--scenario",
             "stage31-critical-path",
             "--runs",
-            "2",
+            "20",
             "--cold-runs",
-            "0",
+            "1",
             "--warmup-runs",
-            "0",
+            "1",
             "--provider",
             "fake",
             "--report",
@@ -1464,3 +1468,174 @@ def test_stage31_comparison_json_has_contract_keys(tmp_path: Path) -> None:
         "contract_gates",
     ]:
         assert key in rep, f"Missing key in comparison JSON: {key}"
+
+
+# ---------------------------------------------------------------------------
+# TASK-31.6: Runtime identity, input hash, environment gap, authorizer
+# ---------------------------------------------------------------------------
+
+
+def test_stage31_environment_gap_insufficient_run_plan(tmp_path: Path) -> None:
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "5",
+            "--cold-runs",
+            "0",
+            "--warmup-runs",
+            "0",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 1
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "environment_gap"
+    assert "insufficient_run_plan" in report["closed_reasons"]
+
+
+def test_stage31_environment_gap_missing_deepseek_key(monkeypatch, tmp_path: Path) -> None:
+    import bank_reconciliation_agent.core.config as _cfg
+
+    monkeypatch.setattr(_cfg.settings, "deepseek_api_key", None)
+
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "deepseek",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 1
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "environment_gap"
+    assert report["trust"]["trusted"] is False
+    assert report["provider"]["effective_provider"] is None
+
+
+def test_stage31_fake_provider_with_deepseek_cli_not_trusted(tmp_path: Path) -> None:
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--embedding-backend",
+            "bge_m3",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 0
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "no_go"
+    assert report["trust"]["trusted"] is False
+    assert report["provider"]["effective_provider"] == "fake"
+
+
+def test_stage31_canonical_input_hash_covers_execution_fields() -> None:
+    import hashlib as _hl
+    import json as _json
+
+    base = {
+        "scenario_type": "BANK_ENTERPRISE",
+        "exception_branch": "BE-R004",
+        "error_type": "NARRATIVE_NAME_MISMATCH",
+        "source_a_summary": "冲正退款备注待核验",
+        "source_a_remark": "原流水疑似冲正，需要抽取原始流水号",
+        "source_a_amount": "100.00",
+        "source_b_summary": "REVERSAL",
+        "bank_amount": "100.00",
+        "clear_amount": "100.00",
+        "amount_diff": "0.00",
+    }
+
+    h1 = _hl.sha256(_json.dumps(base, sort_keys=True).encode()).hexdigest()
+
+    changed = dict(base)
+    changed["source_a_summary"] = "different summary"
+    h2 = _hl.sha256(_json.dumps(changed, sort_keys=True).encode()).hexdigest()
+    assert h1 != h2
+
+    changed2 = dict(base)
+    changed2["bank_amount"] = "200.00"
+    h3 = _hl.sha256(_json.dumps(changed2, sort_keys=True).encode()).hexdigest()
+    assert h1 != h3
+
+    assert len(h1) == 64
+    assert h1 != ""
+
+
+def test_stage31_environment_gap_minimum_samples_not_met(tmp_path: Path) -> None:
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "10",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 1
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "environment_gap"
+    assert any("insufficient_run_plan" in r for r in report["closed_reasons"])
+
+
+def test_stage31_unexpected_error_not_converted_to_no_go(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.workflow.run_item",
+        lambda state, **kwargs: (_ for _ in ()).throw(ValueError("unexpected error")),
+    )
+
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 0
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "no_go"
+    assert report["reliability"]["failure_count"] > 0

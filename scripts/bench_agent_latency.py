@@ -258,37 +258,133 @@ def run_stage31_critical_path(
     from bank_reconciliation_agent.core.llm.cost import compute_cost
     from bank_reconciliation_agent.services.workflow import run_item
     from bank_reconciliation_agent.services.trace import TraceRecorder
-    from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
+    from bank_reconciliation_agent.core.llm.provider import (
+        DeepSeekProvider,
+        FakeLLMProvider,
+    )
+    from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgent
+    from bank_reconciliation_agent.agents.audit_agent import AuditAgent
+    from bank_reconciliation_agent.agents.trace_agent import TraceAgent
     from bank_reconciliation_agent.services.tool_adapters import build_default_registry
     from bank_reconciliation_agent.services.tool_executor import ToolExecutor
+    from bank_reconciliation_agent.rag.retriever import rule_retriever
 
-    is_real_provider = provider_name == "deepseek"
-    is_real_backend = embedding_backend == "bge_m3"
-    is_real_env = is_real_provider and is_real_backend
-
-    trust_reasons = []
     env_gap = None
+    trust_reasons = []
     token_usage_unavailable = False
+    effective_provider = None
+    effective_model = None
 
-    if provider_name == "deepseek" and not settings.deepseek_api_key:
-        raise LLMUnavailable("DEEPSEEK_API_KEY is not configured.")
+    # -- Resolve provider --------------------------------------------------
 
-    if not is_real_provider:
-        trust_reasons.append("fake_provider")
-    if not is_real_backend:
-        trust_reasons.append("fake_embedding_backend")
+    requested_provider = provider_name
+    requested_model = model
+
+    if provider_name == "deepseek":
+        api_key = settings.deepseek_api_key
+        if not api_key:
+            env_gap = {
+                "reason": "missing_deepseek_api_key",
+                "message": "DEEPSEEK_API_KEY is not configured.",
+            }
+        else:
+            llm_provider = DeepSeekProvider(
+                api_key=api_key,
+                model=model,
+                base_url=settings.deepseek_base_url,
+                timeout=settings.llm_timeout_seconds,
+            )
+            effective_provider = "deepseek"
+            effective_model = llm_provider.model
+    elif provider_name == "fake":
+        llm_provider = FakeLLMProvider()
+        effective_provider = "fake"
+        effective_model = "fake-llm"
+    else:
+        raise ValueError(f"Unsupported provider: {provider_name}. Use 'fake' or 'deepseek'.")
+
+    if not env_gap:
+        extraction_agent = ExtractionAgent(provider=llm_provider)
+        audit_agent = AuditAgent(provider=llm_provider)
+        trace_agent = TraceAgent(provider=llm_provider)
+
+    # -- Resolve embedding backend -----------------------------------------
+
+    requested_backend = embedding_backend
+    effective_backend = getattr(rule_retriever.store, "embedding_backend", "unknown")
+
+    if requested_backend != effective_backend and not env_gap and effective_provider != "fake":
+        env_gap = {
+            "reason": "embedding_backend_mismatch",
+            "message": (
+                f"Requested embedding backend '{requested_backend}' but effective "
+                f"backend is '{effective_backend}'. The retriever may have fallen back "
+                f"to a different backend."
+            ),
+        }
+        effective_provider = None
+        effective_model = None
+
+    # -- Validate provider identity ----------------------------------------
+
+    if not env_gap and effective_provider != "fake":
+        provider_mismatch = effective_provider != requested_provider
+        model_mismatch = effective_model != requested_model
+        if provider_mismatch or model_mismatch:
+            env_gap = {
+                "reason": "provider_identity_mismatch",
+                "message": (
+                    f"Requested provider '{requested_provider}' model "
+                    f"'{requested_model}' but effective provider "
+                    f"'{effective_provider}' model '{effective_model}'."
+                ),
+            }
+
+    # -- Bench authorizer --------------------------------------------------
+
+    def _bench_authorizer(ctx):
+        try:
+            uid = getattr(ctx, "user_id", "")
+            st = getattr(ctx, "scenario_type", "")
+            eb = getattr(ctx, "exception_branch", "")
+            return uid == "bench_user" and st == "BANK_ENTERPRISE" and eb == "BE-R004"
+        except Exception:
+            return False
 
     bench_tool_executor = ToolExecutor(
         build_default_registry(),
-        lambda ctx: True,
+        _bench_authorizer,
     )
 
-    input_data = {
+    # -- Canonical input hash ----------------------------------------------
+
+    canonical_input = {
         "scenario_type": "BANK_ENTERPRISE",
         "exception_branch": "BE-R004",
         "error_type": "NARRATIVE_NAME_MISMATCH",
+        "source_a_summary": "冲正退款备注待核验",
+        "source_a_remark": "原流水疑似冲正，需要抽取原始流水号",
+        "source_a_amount": "100.00",
+        "source_b_summary": "REVERSAL",
+        "bank_amount": "100.00",
+        "clear_amount": "100.00",
+        "amount_diff": "0.00",
     }
-    input_sha256 = hashlib.sha256(json.dumps(input_data, sort_keys=True).encode()).hexdigest()
+    input_sha256 = hashlib.sha256(json.dumps(canonical_input, sort_keys=True).encode()).hexdigest()
+
+    # -- Run plan gate -----------------------------------------------------
+
+    if cold_runs < 1 or warmup_runs < 1 or runs < 20:
+        if not env_gap:
+            env_gap = {
+                "reason": "insufficient_run_plan",
+                "message": (
+                    f"cold_runs={cold_runs} (min 1), warmup_runs={warmup_runs} "
+                    f"(min 1), measured_runs={runs} (min 20). "
+                ),
+            }
+
+    # -- Run samples -------------------------------------------------------
 
     cold_observations = []
     warm_e2e = []
@@ -304,142 +400,152 @@ def run_stage31_critical_path(
     trace_completeness = []
     error_distribution: dict[str, int] = {}
 
-    base_time = int(time.time())
-    total_runs_count = cold_runs + warmup_runs + runs
+    if not env_gap:
+        base_time = int(time.time())
+        total_runs_count = cold_runs + warmup_runs + runs
 
-    for i in range(total_runs_count):
-        is_cold = i < cold_runs
-        is_measured = i >= cold_runs + warmup_runs
-        flow_id = f"FLOW-BENCH-{base_time}-{i:03d}"
+        for i in range(total_runs_count):
+            is_cold = i < cold_runs
+            is_measured = i >= cold_runs + warmup_runs
+            flow_id = f"FLOW-BENCH-{base_time}-{i:03d}"
 
-        recorder = TraceRecorder(
-            user_id="bench_user",
-            task_id=f"task-{base_time}-{i:03d}",
-            flow_id=flow_id,
-        )
+            recorder = TraceRecorder(
+                user_id="bench_user",
+                task_id=f"task-{base_time}-{i:03d}",
+                flow_id=flow_id,
+            )
 
-        state = {
-            "task_id": f"task-{base_time}-{i:03d}",
-            "user_id": "bench_user",
-            "thread_id": "thread-bench",
-            "scenario_type": "BANK_ENTERPRISE",
-            "current_queue_id": 12345,
-            "source_a_item": {
-                "flow_id": flow_id,
-                "summary": "冲正退款备注待核验",
-                "remark": "原流水疑似冲正，需要抽取原始流水号",
-                "amount": "100.00",
-            },
-            "source_b_item": {
-                "flow_id": flow_id,
-                "summary": "REVERSAL",
-                "remark": "remark",
-            },
-            "error_type": "NARRATIVE_NAME_MISMATCH",
-            "exception_branch": "BE-R004",
-            "math_result": {
-                "bank_amount": "100.00",
-                "clear_amount": "100.00",
-                "amount_diff": "0.00",
-            },
-            "extraction_result": {},
-            "rag_context": [],
-            "audit_decision": {},
-            "confidence": None,
-            "retry_count": 0,
-            "fallback_level": 0,
-            "next_action": "",
-            "error_message": None,
-            "agent_logs": [],
-            "recorder": recorder,
-        }
+            state = {
+                "task_id": f"task-{base_time}-{i:03d}",
+                "user_id": "bench_user",
+                "thread_id": "thread-bench",
+                "scenario_type": "BANK_ENTERPRISE",
+                "current_queue_id": 12345,
+                "source_a_item": {
+                    "flow_id": flow_id,
+                    "summary": "冲正退款备注待核验",
+                    "remark": "原流水疑似冲正，需要抽取原始流水号",
+                    "amount": "100.00",
+                },
+                "source_b_item": {
+                    "flow_id": flow_id,
+                    "summary": "REVERSAL",
+                    "remark": "remark",
+                },
+                "error_type": "NARRATIVE_NAME_MISMATCH",
+                "exception_branch": "BE-R004",
+                "math_result": {
+                    "bank_amount": "100.00",
+                    "clear_amount": "100.00",
+                    "amount_diff": "0.00",
+                },
+                "extraction_result": {},
+                "rag_context": [],
+                "audit_decision": {},
+                "confidence": None,
+                "retry_count": 0,
+                "fallback_level": 0,
+                "next_action": "",
+                "error_message": None,
+                "agent_logs": [],
+                "recorder": recorder,
+            }
 
-        started = time.perf_counter()
-        try:
-            final_state = run_item(state, tool_executor=bench_tool_executor)
-            root_status = "SUCCEEDED"
-        except Exception:
-            root_status = "FAILED"
-            final_state = state
+            started = time.perf_counter()
+            try:
+                final_state = run_item(
+                    state,
+                    extraction_agent=extraction_agent,
+                    audit_agent=audit_agent,
+                    trace_agent=trace_agent,
+                    tool_executor=bench_tool_executor,
+                )
+                root_status = "SUCCEEDED"
+            except Exception:
+                root_status = "FAILED"
+                final_state = state
 
-        recorder.close_root(
-            status=root_status,
-            outcome=final_state.get("next_action") or "PENDING_HUMAN",
-        )
-        spans = recorder.snapshot()
-        e2e_ms = (time.perf_counter() - started) * 1000
+            recorder.close_root(
+                status=root_status,
+                outcome=final_state.get("next_action") or "PENDING_HUMAN",
+            )
+            spans = recorder.snapshot()
+            e2e_ms = (time.perf_counter() - started) * 1000
 
-        root_spans = [s for s in spans if s.span_type == "WORKFLOW" and not s.parent_span_id]
-        ext_spans = [s for s in spans if s.span_type == "AGENT" and s.name == "ExtractionAgent"]
-        rag_spans = [s for s in spans if s.span_type == "TOOL" and s.name == "search_rules"]
+            root_spans = [s for s in spans if s.span_type == "WORKFLOW" and not s.parent_span_id]
+            ext_spans = [s for s in spans if s.span_type == "AGENT" and s.name == "ExtractionAgent"]
+            rag_spans = [s for s in spans if s.span_type == "TOOL" and s.name == "search_rules"]
 
-        is_complete = False
-        if len(root_spans) == 1 and len(ext_spans) == 1 and len(rag_spans) == 1:
-            if (
-                root_spans[0].status == "SUCCEEDED"
-                and ext_spans[0].status == "SUCCEEDED"
-                and rag_spans[0].status == "SUCCEEDED"
-            ):
-                is_complete = True
-                if is_real_env and (
-                    ext_spans[0].prompt_tokens is None or ext_spans[0].prompt_tokens == 0
+            is_complete = False
+            if len(root_spans) == 1 and len(ext_spans) == 1 and len(rag_spans) == 1:
+                if (
+                    root_spans[0].status == "SUCCEEDED"
+                    and ext_spans[0].status == "SUCCEEDED"
+                    and rag_spans[0].status == "SUCCEEDED"
                 ):
-                    token_usage_unavailable = True
+                    is_complete = True
+                    if effective_provider != "fake" and (
+                        ext_spans[0].prompt_tokens is None or ext_spans[0].prompt_tokens == 0
+                    ):
+                        token_usage_unavailable = True
 
-        ext_dur = ext_spans[0].duration_ms if ext_spans else 0
-        rag_dur = rag_spans[0].duration_ms if rag_spans else 0
-        pred_parallel = e2e_ms - ext_dur - rag_dur + max(ext_dur, rag_dur)
+            ext_dur = ext_spans[0].duration_ms if ext_spans else 0
+            rag_dur = rag_spans[0].duration_ms if rag_spans else 0
+            pred_parallel = e2e_ms - ext_dur - rag_dur + max(ext_dur, rag_dur)
 
-        if is_measured:
-            if is_complete:
-                success_count += 1
-                if ext_spans[0].prompt_tokens:
-                    total_prompt_tokens += ext_spans[0].prompt_tokens
-                if ext_spans[0].completion_tokens:
-                    total_completion_tokens += ext_spans[0].completion_tokens
-            else:
-                failure_count += 1
-                err_key = "incomplete_trace"
-                if len(root_spans) != 1:
-                    err_key = "missing_or_duplicate_root"
-                elif len(ext_spans) != 1:
-                    err_key = "missing_or_duplicate_extraction"
-                elif len(rag_spans) != 1:
-                    err_key = "missing_or_duplicate_rag"
-                error_distribution[err_key] = error_distribution.get(err_key, 0) + 1
+            if is_measured:
+                if is_complete:
+                    success_count += 1
+                    if ext_spans[0].prompt_tokens:
+                        total_prompt_tokens += ext_spans[0].prompt_tokens
+                    if ext_spans[0].completion_tokens:
+                        total_completion_tokens += ext_spans[0].completion_tokens
+                else:
+                    failure_count += 1
+                    err_key = "incomplete_trace"
+                    if len(root_spans) != 1:
+                        err_key = "missing_or_duplicate_root"
+                    elif len(ext_spans) != 1:
+                        err_key = "missing_or_duplicate_extraction"
+                    elif len(rag_spans) != 1:
+                        err_key = "missing_or_duplicate_rag"
+                    error_distribution[err_key] = error_distribution.get(err_key, 0) + 1
 
-            trace_completeness.append(
-                {
-                    "trace_id": root_spans[0].trace_id if root_spans else "unknown",
-                    "is_complete": is_complete,
-                    "ext_spans": len(ext_spans),
-                    "rag_spans": len(rag_spans),
-                }
-            )
+                trace_completeness.append(
+                    {
+                        "trace_id": root_spans[0].trace_id if root_spans else "unknown",
+                        "is_complete": is_complete,
+                        "ext_spans": len(ext_spans),
+                        "rag_spans": len(rag_spans),
+                    }
+                )
 
-            warm_e2e.append(e2e_ms)
-            warm_extraction.append(ext_dur)
-            warm_rag.append(rag_dur)
-            predicted_parallel_e2e.append(pred_parallel)
-        elif is_cold:
-            cold_observations.append(
-                {
-                    "e2e_ms": round(e2e_ms, 3),
-                    "extraction_ms": round(ext_dur, 3),
-                    "rag_ms": round(rag_dur, 3),
-                }
-            )
+                warm_e2e.append(e2e_ms)
+                warm_extraction.append(ext_dur)
+                warm_rag.append(rag_dur)
+                predicted_parallel_e2e.append(pred_parallel)
+            elif is_cold:
+                cold_observations.append(
+                    {
+                        "e2e_ms": round(e2e_ms, 3),
+                        "extraction_ms": round(ext_dur, 3),
+                        "rag_ms": round(rag_dur, 3),
+                    }
+                )
 
     complete_count = sum(1 for t in trace_completeness if t["is_complete"])
 
-    if is_real_env and token_usage_unavailable:
-        trust_reasons.append("token_usage_unavailable")
+    if not env_gap and effective_provider != "fake" and token_usage_unavailable:
         env_gap = {
             "reason": "token_usage_unavailable",
             "message": "DeepSeek provider returned no token usage metadata.",
         }
+        trust_reasons.append("token_usage_unavailable")
 
-    trusted = is_real_env and not env_gap
+    if env_gap:
+        trusted = False
+    else:
+        trusted = effective_provider != "fake"
 
     actual_p95 = round(_p95(warm_e2e), 3)
     pred_p95 = round(_p95(predicted_parallel_e2e), 3)
@@ -447,37 +553,41 @@ def run_stage31_critical_path(
     if actual_p95 > 0:
         theory_pct = round(((actual_p95 - pred_p95) / actual_p95) * 100, 3)
 
+    # -- Independence gate -------------------------------------------------
+
     independence_findings = {
         "data_dependency": {
             "finding": "safe",
             "detail": (
-                "RAG query is built from scenario_type, error_type, exception_branch, and "
-                "amounts; does not read extraction_result. Extraction and RAG are data-independent."
+                "RAG query is built from scenario_type, error_type, exception_branch, "
+                "and amounts; does not read extraction_result. Extraction and RAG are "
+                "data-independent."
             ),
         },
         "shared_state": {
             "finding": "safe",
             "detail": (
-                "In serial runtime there is no concurrent access. For a parallel candidate, "
-                "workers must receive read-only inputs and return results without modifying "
-                "ReconciliationState, Trace recorder, SSE emitter, or persistent state."
+                "In serial runtime there is no concurrent access. For a parallel "
+                "candidate, workers must receive read-only inputs and return results "
+                "without modifying ReconciliationState, Trace recorder, SSE emitter, "
+                "or persistent state."
             ),
         },
         "failure_order": {
             "finding": "bounded",
             "detail": (
                 "In serial runtime, Extraction failure causes early return before RAG. "
-                "In a parallel candidate, the failure of one side while the other is in-flight "
-                "requires explicit fail-closed handling: both must be complete, and any failure "
-                "must prevent automatic audit."
+                "In a parallel candidate, the failure of one side while the other is "
+                "in-flight requires explicit fail-closed handling: both must be "
+                "complete, and any failure must prevent automatic audit."
             ),
         },
         "cancellation": {
             "finding": "bounded",
             "detail": (
                 "Synchronous provider/retriever calls may not support hard interrupt. "
-                "A thread pool must use bounded timeouts and guarantee no background state "
-                "mutation after timeout."
+                "A thread pool must use bounded timeouts and guarantee no background "
+                "state mutation after timeout."
             ),
         },
         "resource_reclamation": {
@@ -493,12 +603,14 @@ def run_stage31_critical_path(
         f["finding"] in ("unknown", "unsafe", "unbounded") for f in independence_findings.values()
     )
 
+    # -- Gate decision -----------------------------------------------------
+
     decision = "candidate_allowed"
     closed_reasons = []
 
     if env_gap:
         decision = "environment_gap"
-        closed_reasons.append("environment_gap")
+        closed_reasons.append(env_gap.get("reason", "environment_gap"))
     elif any_unsafe:
         decision = "no_go"
         closed_reasons.append("independence_gate_failed")
@@ -513,6 +625,8 @@ def run_stage31_critical_path(
             decision = "no_go"
             closed_reasons.append(f"theory_pct_{theory_pct}_lt_20.0")
 
+    # -- Usage / cost ------------------------------------------------------
+
     token_usage_available = not token_usage_unavailable and total_prompt_tokens > 0
     cost_value = (
         compute_cost(total_prompt_tokens, total_completion_tokens)
@@ -520,6 +634,8 @@ def run_stage31_critical_path(
         else Decimal(0)
     )
     per_case_cost = cost_value / Decimal(success_count) if success_count else Decimal(0)
+
+    # -- Report ------------------------------------------------------------
 
     return {
         "schema_version": "1.0",
@@ -535,14 +651,20 @@ def run_stage31_critical_path(
             "boundary": "offline benchmark; not production SLA",
         },
         "provider": {
-            "requested_provider": provider_name,
-            "effective_provider": provider_name if is_real_env else "fake",
-            "requested_model": model,
-            "effective_model": model if is_real_env else "fake-llm",
+            "requested_provider": requested_provider,
+            "effective_provider": effective_provider
+            if not env_gap or env_gap.get("reason") != "missing_deepseek_api_key"
+            else None,
+            "requested_model": requested_model,
+            "effective_model": effective_model if effective_provider else None,
         },
         "rag": {
-            "requested_embedding_backend": embedding_backend,
-            "effective_embedding_backend": embedding_backend if is_real_backend else "fake",
+            "requested_embedding_backend": requested_backend,
+            "effective_embedding_backend": (
+                effective_backend
+                if not env_gap or env_gap.get("reason") != "embedding_backend_mismatch"
+                else None
+            ),
             "retrieval_mode": "dense",
         },
         "run_plan": {
