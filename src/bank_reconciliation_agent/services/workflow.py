@@ -40,6 +40,7 @@ from bank_reconciliation_agent.services.stream_emitter import (
     NullEmitter,
     StreamEmitter,
     to_stream_event,
+    to_trace_span_event,
 )
 from bank_reconciliation_agent.services.tool_adapters import default_tool_executor
 from bank_reconciliation_agent.services.tool_executor import safe_tool_projection
@@ -109,7 +110,12 @@ def _emit_trace_span(
     recorder: Recorder,
     emitter: StreamEmitter | None,
 ) -> None:
-    """Emit a ``trace_span`` SSE event for the most recently completed span."""
+    """Emit a ``trace_span`` SSE event for the most recently completed span.
+
+    Uses the canonical ``to_trace_span_event`` path so the SSE payload
+    matches the persisted Trace identically.  Emit failures never affect
+    business decisions, ledger state, recorder snapshot or batch persistence.
+    """
     if emitter is None:
         return
     span = recorder.last_completed_span()
@@ -120,14 +126,16 @@ def _emit_trace_span(
     view = TraceSpanView.from_span(span)
     stream_seq = int(state.get("stream_seq", 0)) + 1
     state["stream_seq"] = stream_seq
-    emitter.emit(
-        to_stream_event(
-            view.model_dump(mode="json"),
-            seq=stream_seq,
-            task_id=state["task_id"],
-            event_type=StreamEventType.TRACE_SPAN,
+    try:
+        event = to_trace_span_event(view, seq=stream_seq)
+        emitter.emit(event)
+    except Exception as exc:
+        log.warning(
+            "trace_span_emit_failed",
+            trace_id=view.trace_id,
+            span_id=view.span_id,
+            error_type=type(exc).__name__,
         )
-    )
 
 
 _TOOL_STATUS_MAP: dict[str, tuple[SpanStatus, str | None]] = {

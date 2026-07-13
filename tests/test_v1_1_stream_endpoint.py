@@ -131,8 +131,7 @@ def test_event_frames_preserve_workflow_event_sequence_numbers() -> None:
             )
         ]
         events = [
-            AgentStreamEvent.model_validate_json(frame.removeprefix("data: "))
-            for frame in frames
+            AgentStreamEvent.model_validate_json(frame.removeprefix("data: ")) for frame in frames
         ]
 
         assert [event.seq for event in events] == [0, 1, 2]
