@@ -99,4 +99,19 @@ describe("TraceTimeline", () => {
     const without = await render([_span()]);
     expect(without).toContain("无引用");
   });
+
+  it("evidence copy button is a native focusable element", async () => {
+    const html = await render([
+      _span({ evidence_ids: ["rule-001"] }),
+    ]);
+    expect(html).toContain("<button");
+    expect(html).toContain("aria-label");
+    expect(html).toContain("复制证据 ID");
+  });
+
+  it("empty evidence shows non-interactive placeholder only", async () => {
+    const html = await render([_span()]);
+    expect(html).not.toContain("<button");
+    expect(html).toContain("无引用");
+  });
 });

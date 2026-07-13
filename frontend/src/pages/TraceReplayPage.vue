@@ -9,15 +9,12 @@ import TraceTimeline from "../components/TraceTimeline.vue";
 const route = useRoute();
 const router = useRouter();
 
-const taskId = route.params.taskId as string;
-const flowId = route.params.flowId as string;
-
 const loading = ref(true);
 const error = ref<string | null>(null);
 const data = ref<TraceReplayData | null>(null);
 const selectedTraceId = ref<string | undefined>(undefined);
 
-async function load(traceId?: string) {
+async function load(taskId: string, flowId: string, traceId?: string) {
   loading.value = true;
   error.value = null;
   try {
@@ -37,7 +34,7 @@ async function load(traceId?: string) {
 
 function selectRun(run: TraceRunSummary) {
   selectedTraceId.value = run.trace_id;
-  load(run.trace_id);
+  load(route.params.taskId as string, route.params.flowId as string, run.trace_id);
 }
 
 function statusLabel(): string {
@@ -56,8 +53,14 @@ function back() {
 }
 
 watch(
-  () => [taskId, flowId],
-  () => load(),
+  () => [route.params.taskId as string, route.params.flowId as string],
+  ([taskId, flowId]) => {
+    if (taskId && flowId) {
+      selectedTraceId.value = undefined;
+      data.value = null;
+      load(taskId, flowId);
+    }
+  },
   { immediate: true },
 );
 </script>
@@ -67,7 +70,7 @@ watch(
     <header class="replay-page__bar">
       <button class="btn-back" @click="back" aria-label="返回">← 返回</button>
       <h1 class="replay-page__title">执行轨迹</h1>
-      <p class="replay-page__id">{{ taskId }} / {{ flowId }}</p>
+      <p class="replay-page__id">{{ route.params.taskId }} / {{ route.params.flowId }}</p>
     </header>
 
     <div v-if="loading" class="replay-page__state" role="status">加载中...</div>

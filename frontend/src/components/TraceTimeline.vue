@@ -39,6 +39,13 @@ async function copyId(id: string) {
     // clipboard API unsupported — silently degrade
   }
 }
+
+function onCopyKeydown(e: KeyboardEvent, id: string) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    copyId(id);
+  }
+}
 </script>
 
 <template>
@@ -86,14 +93,15 @@ async function copyId(id: string) {
 
         <div class="timeline__evidence">
           <span class="timeline__evidence-label">证据:</span>
-          <span
+          <button
             v-if="span.evidence_ids.length"
             class="timeline__evidence-ids"
             @click="copyId(span.evidence_ids.join(', '))"
-            :title="`点击复制: ${evidenceText(span.evidence_ids)}`"
+            @keydown="onCopyKeydown($event, span.evidence_ids.join(', '))"
+            :aria-label="`复制证据 ID: ${evidenceText(span.evidence_ids)}`"
           >
             {{ evidenceText(span.evidence_ids) }}
-          </span>
+          </button>
           <span v-else class="timeline__evidence-empty">无引用</span>
         </div>
       </div>
@@ -211,6 +219,17 @@ async function copyId(id: string) {
   cursor: pointer;
   overflow-wrap: anywhere;
   word-break: break-all;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  text-align: left;
+}
+
+.timeline__evidence-ids:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .timeline__evidence-empty {
