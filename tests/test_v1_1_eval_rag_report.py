@@ -1847,3 +1847,115 @@ def test_stage30_target_locked_to_10_even_when_synchronized_to_9() -> None:
     assert report["trust"]["trusted"] is False
     assert report["success"] is False
     assert any("target bucket case_count" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_no_exception_on_missing_identity() -> None:
+    baseline, after = _stage30_pair()
+    del _mode_buckets(after)[0]["scenario_type"]
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("scenario_type is missing or not a string" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_no_exception_on_unhashable_identity() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after)[0]["error_type"] = []
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("error_type is missing or not a string" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_no_exception_on_non_object_bucket() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after)[0] = "not-a-bucket"
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("bucket is not an object" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_no_exception_on_non_list_bucket_metrics() -> None:
+    baseline, after = _stage30_pair()
+    after["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"] = 1
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("bucket_metrics" in r and "not a list" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_no_exception_on_non_object_query_enrichment() -> None:
+    baseline, after = _stage30_pair()
+    after["query_enrichment"] = "enabled"
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any(
+        "query_enrichment metadata is not an object" in r for r in report["trust"]["reasons"]
+    )
+
+
+def test_stage30_gate_fails_when_top_k_missing_on_both_sides() -> None:
+    baseline, after = _stage30_pair()
+    del baseline["top_k"]
+    del after["top_k"]
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("top_k" in r and "required 5" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_gate_fails_when_case_count_is_synchronized_but_not_120() -> None:
+    baseline, after = _stage30_pair()
+    for matrix in (baseline, after):
+        matrix["case_count"] = 119
+        for bucket in _mode_buckets(matrix):
+            if bucket["error_type"] != "SINGLE_SIDE_MISSING" and bucket["case_count"] > 0:
+                bucket["case_count"] -= 1
+                break
+    after["query_enrichment"]["latency_ms"]["count"] = 119
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("case_count" in r and "required 120" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_gate_fails_when_hashes_are_non_string_on_both_sides() -> None:
+    baseline, after = _stage30_pair()
+    baseline["eval_set_sha256"] = 123
+    after["eval_set_sha256"] = 123
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("eval_set_sha256" in r and "not a string" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_gate_fails_when_global_metric_missing_on_both_sides() -> None:
+    baseline, after = _stage30_pair()
+    for matrix in (baseline, after):
+        del matrix["rows"]["bge_m3"]["modes"]["hybrid"]["global_metrics"]["mrr"]
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["global"]["within_regression_limit"] is False
+    assert report["success"] is False
+    assert any("global_metrics field mrr" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_gate_no_exception_when_global_metrics_is_not_an_object() -> None:
+    baseline, after = _stage30_pair()
+    after["rows"]["bge_m3"]["modes"]["hybrid"]["global_metrics"] = "invalid"
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("global_metrics is missing or not an object" in r for r in report["trust"]["reasons"])

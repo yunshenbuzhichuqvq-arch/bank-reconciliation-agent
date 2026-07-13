@@ -850,7 +850,7 @@ def _is_stage30_format(matrix: dict[str, Any]) -> bool:
     return any(key in matrix for key in _STAGE30_INTENT_KEYS)
 
 
-def _global_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) -> dict[str, float]:
+def _global_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) -> Any:
     row = _matrix_row_for_backend(matrix, backend)
     return row.get("modes", {}).get(mode, {}).get("global_metrics", {})
 
@@ -866,6 +866,8 @@ def _bucket_metrics_for_mode(
     row = _matrix_row_for_backend(matrix, backend)
     mode_entry = row.get("modes", {}).get(mode, {})
     bucket_metrics = mode_entry.get("bucket_metrics")
+    if bucket_metrics is not None and not isinstance(bucket_metrics, list):
+        return [], None, f"{source_label} bucket_metrics for {backend}/{mode} is not a list"
     if bucket_metrics:
         return list(bucket_metrics), "mode_bucket_metrics", None
 
@@ -893,6 +895,8 @@ def _bucket_by_key(
     for bucket in _bucket_metrics_for_mode(
         matrix, backend, mode, allow_legacy_fallback=allow_legacy_fallback
     )[0]:
+        if not isinstance(bucket, dict):
+            continue
         if bucket.get("scenario_type") == scenario_type and bucket.get("error_type") == error_type:
             return bucket
     return {}
@@ -900,6 +904,10 @@ def _bucket_by_key(
 
 def _is_finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _is_non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _is_non_negative_int(value: Any) -> bool:
@@ -930,21 +938,25 @@ def _bucket_deltas(
     after_buckets = _bucket_metrics_for_mode(
         after_matrix, backend, mode, allow_legacy_fallback=allow_legacy_fallback
     )[0]
-    after_by_key: dict[tuple[str, str], dict[str, Any]] = {
-        (b["scenario_type"], b["error_type"]): b for b in after_buckets
-    }
+    after_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for bucket in after_buckets:
+        key = _valid_bucket_key(bucket)
+        if key is not None:
+            after_by_key[key] = bucket
 
     deltas: list[dict[str, Any]] = []
     for baseline_bucket in baseline_buckets:
-        key = (baseline_bucket["scenario_type"], baseline_bucket["error_type"])
+        key = _valid_bucket_key(baseline_bucket)
+        if key is None:
+            continue
         after_bucket = after_by_key.get(key)
         if after_bucket is None:
             continue
         delta = _metric_delta(after_bucket, baseline_bucket)
         deltas.append(
             {
-                "scenario_type": baseline_bucket["scenario_type"],
-                "error_type": baseline_bucket["error_type"],
+                "scenario_type": key[0],
+                "error_type": key[1],
                 "before": {
                     "case_count": baseline_bucket.get("case_count"),
                     "miss_count": baseline_bucket.get("miss_count"),
@@ -976,8 +988,7 @@ def _validate_after_latency(latency: Any, case_count: Any) -> list[str]:
     if missing:
         return [f"after latency summary missing {key}" for key in missing]
     count, p50, p95, mx = (latency["count"], latency["p50"], latency["p95"], latency["max"])
-    numbers = (count, p50, p95, mx)
-    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in numbers):
+    if not _is_non_negative_int(count) or not all(_is_finite_number(v) for v in (p50, p95, mx)):
         return ["after latency summary has non-numeric values"]
     if count != case_count:
         reasons.append(f"after latency count {count} != case_count {case_count}")
@@ -993,9 +1004,9 @@ def _validate_stage30_roles(
     after_matrix: dict[str, Any],
 ) -> list[str]:
     reasons: list[str] = []
-    if not baseline_matrix.get("git_revision"):
+    if not _is_non_empty_string(baseline_matrix.get("git_revision")):
         reasons.append("baseline missing git_revision")
-    if not after_matrix.get("git_revision"):
+    if not _is_non_empty_string(after_matrix.get("git_revision")):
         reasons.append("after missing git_revision")
 
     if "query_enrichment" not in baseline_matrix:
@@ -1003,7 +1014,10 @@ def _validate_stage30_roles(
     if "query_enrichment" not in after_matrix:
         reasons.append("after missing query_enrichment metadata")
 
-    baseline_qe = baseline_matrix.get("query_enrichment") or {}
+    baseline_qe = baseline_matrix.get("query_enrichment")
+    if not isinstance(baseline_qe, dict):
+        reasons.append("baseline query_enrichment metadata is not an object")
+        baseline_qe = {}
     if baseline_qe.get("enabled") is not False:
         reasons.append(
             f"baseline query_enrichment must be disabled (enabled={baseline_qe.get('enabled')!r})"
@@ -1013,14 +1027,17 @@ def _validate_stage30_roles(
             f"baseline query_enrichment profile must be null (profile={baseline_qe.get('profile')!r})"
         )
 
-    after_qe = after_matrix.get("query_enrichment") or {}
+    after_qe = after_matrix.get("query_enrichment")
+    if not isinstance(after_qe, dict):
+        reasons.append("after query_enrichment metadata is not an object")
+        after_qe = {}
     if after_qe.get("enabled") is not True:
         reasons.append(
             f"after query_enrichment must be enabled (enabled={after_qe.get('enabled')!r})"
         )
-    if not after_qe.get("profile"):
+    if not _is_non_empty_string(after_qe.get("profile")):
         reasons.append("after query_enrichment missing profile")
-    if not after_qe.get("profile_sha256"):
+    if not _is_non_empty_string(after_qe.get("profile_sha256")):
         reasons.append("after query_enrichment missing profile_sha256")
     latency = after_qe.get("latency_ms")
     reasons.extend(_validate_after_latency(latency, after_matrix.get("case_count")))
@@ -1068,20 +1085,36 @@ def _validate_stage30_requested(
 
 _BUCKET_INT_FIELDS = ("case_count", "miss_count")
 _BUCKET_FLOAT_FIELDS = ("hit_at_1", "recall_at_5", "mrr", "ndcg_at_5")
+STAGE30_CASE_COUNT = 120
+STAGE30_TOP_K = 5
 STAGE30_TARGET_CASE_COUNT = 10
 
 
-def _bucket_key_counts(buckets: list[dict[str, Any]]) -> dict[tuple[Any, Any], int]:
-    counts: dict[tuple[Any, Any], int] = {}
+def _valid_bucket_key(bucket: Any) -> tuple[str, str] | None:
+    if not isinstance(bucket, dict):
+        return None
+    scenario_type = bucket.get("scenario_type")
+    error_type = bucket.get("error_type")
+    if not isinstance(scenario_type, str) or not scenario_type.strip():
+        return None
+    if not isinstance(error_type, str) or not error_type.strip():
+        return None
+    return scenario_type, error_type
+
+
+def _bucket_key_counts(buckets: list[Any]) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
     for bucket in buckets:
-        key = (bucket.get("scenario_type"), bucket.get("error_type"))
+        key = _valid_bucket_key(bucket)
+        if key is None:
+            continue
         counts[key] = counts.get(key, 0) + 1
     return counts
 
 
 def _validate_stage30_buckets(
-    baseline_buckets: list[dict[str, Any]],
-    after_buckets: list[dict[str, Any]],
+    baseline_buckets: list[Any],
+    after_buckets: list[Any],
     *,
     baseline_case_count: Any,
     after_case_count: Any,
@@ -1090,6 +1123,9 @@ def _validate_stage30_buckets(
 
     for label, buckets in (("baseline", baseline_buckets), ("after", after_buckets)):
         for bucket in buckets:
+            if not isinstance(bucket, dict):
+                reasons.append(f"{label} bucket is not an object: {bucket!r}")
+                continue
             key = (bucket.get("scenario_type"), bucket.get("error_type"))
             for field in ("scenario_type", "error_type"):
                 value = bucket.get(field)
@@ -1129,8 +1165,12 @@ def _validate_stage30_buckets(
     if extra_in_after:
         reasons.append(f"after has extra buckets not in baseline: {extra_in_after}")
 
-    baseline_by_key = {(b.get("scenario_type"), b.get("error_type")): b for b in baseline_buckets}
-    after_by_key = {(b.get("scenario_type"), b.get("error_type")): b for b in after_buckets}
+    baseline_by_key = {
+        key: bucket for bucket in baseline_buckets if (key := _valid_bucket_key(bucket)) is not None
+    }
+    after_by_key = {
+        key: bucket for bucket in after_buckets if (key := _valid_bucket_key(bucket)) is not None
+    }
     for key in sorted(baseline_keys & after_keys, key=str):
         before_count = baseline_by_key[key].get("case_count")
         after_count = after_by_key[key].get("case_count")
@@ -1144,7 +1184,9 @@ def _validate_stage30_buckets(
         ("baseline", baseline_buckets, baseline_case_count),
         ("after", after_buckets, after_case_count),
     ):
-        counts = [b.get("case_count") for b in buckets]
+        counts = [b.get("case_count") for b in buckets if isinstance(b, dict)]
+        if len(counts) != len(buckets):
+            continue
         if all(_is_non_negative_int(c) for c in counts):
             total = sum(counts)
             if total != expected:
@@ -1153,6 +1195,16 @@ def _validate_stage30_buckets(
                 )
 
     return reasons
+
+
+def _validate_stage30_global_metrics(label: str, metrics: Any) -> list[str]:
+    if not isinstance(metrics, dict):
+        return [f"{label} global_metrics is missing or not an object"]
+    return [
+        f"{label} global_metrics field {field} is missing or not finite"
+        for field in _BUCKET_FLOAT_FIELDS
+        if not _is_finite_number(metrics.get(field))
+    ]
 
 
 def build_optimization_comparison_report(
@@ -1225,6 +1277,17 @@ def build_optimization_comparison_report(
             trust_reasons.extend(requested_reasons)
             trusted = False
         for label, source in (("baseline", baseline_source), ("after", after_source)):
+            if source["case_count"] != STAGE30_CASE_COUNT:
+                trust_reasons.append(
+                    f"{label} case_count {source['case_count']!r} "
+                    f"!= required {STAGE30_CASE_COUNT}"
+                )
+                trusted = False
+            if source["top_k"] != STAGE30_TOP_K:
+                trust_reasons.append(
+                    f"{label} top_k {source['top_k']!r} != required {STAGE30_TOP_K}"
+                )
+                trusted = False
             if source["requested_backend"] != backend:
                 trust_reasons.append(
                     f"{label} requested_backend mismatch: "
@@ -1234,9 +1297,10 @@ def build_optimization_comparison_report(
         for hash_key in ("eval_set_sha256", "chunk_corpus_sha256"):
             baseline_hash = baseline_source[hash_key]
             after_hash = after_source[hash_key]
-            if not baseline_hash or not after_hash:
+            if not _is_non_empty_string(baseline_hash) or not _is_non_empty_string(after_hash):
                 trust_reasons.append(
-                    f"{hash_key} missing (baseline={baseline_hash!r}, after={after_hash!r})"
+                    f"{hash_key} missing or not a string "
+                    f"(baseline={baseline_hash!r}, after={after_hash!r})"
                 )
                 trusted = False
             elif baseline_hash != after_hash:
@@ -1271,12 +1335,22 @@ def build_optimization_comparison_report(
             trust_reasons.extend(bucket_reasons)
             trusted = False
 
-    baseline_global = _global_metrics_for_mode(baseline_matrix, backend, mode)
-    after_global = _global_metrics_for_mode(after_matrix, backend, mode)
-    if not baseline_global:
+    baseline_global_raw = _global_metrics_for_mode(baseline_matrix, backend, mode)
+    after_global_raw = _global_metrics_for_mode(after_matrix, backend, mode)
+    baseline_global = baseline_global_raw if isinstance(baseline_global_raw, dict) else {}
+    after_global = after_global_raw if isinstance(after_global_raw, dict) else {}
+    if stage30:
+        global_reasons = [
+            *_validate_stage30_global_metrics("baseline", baseline_global_raw),
+            *_validate_stage30_global_metrics("after", after_global_raw),
+        ]
+        if global_reasons:
+            trust_reasons.extend(global_reasons)
+            trusted = False
+    elif not baseline_global:
         trust_reasons.append(f"baseline matrix lacks global_metrics for {backend}/{mode}")
         trusted = False
-    if not after_global:
+    if not stage30 and not after_global:
         trust_reasons.append(f"after matrix lacks global_metrics for {backend}/{mode}")
         trusted = False
 
@@ -1363,7 +1437,7 @@ def build_optimization_comparison_report(
 
     if baseline_global and after_global:
         global_delta = _metric_delta(after_global, baseline_global)
-        within_regression_limit = True
+        within_regression_limit = {"mrr", "ndcg_at_5"}.issubset(global_delta)
         if "mrr" in global_delta and global_delta["mrr"] < -max_global_regression:
             within_regression_limit = False
         if "ndcg_at_5" in global_delta and global_delta["ndcg_at_5"] < -max_global_regression:
