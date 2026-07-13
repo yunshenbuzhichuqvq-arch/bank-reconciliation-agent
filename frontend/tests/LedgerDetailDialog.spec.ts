@@ -1,4 +1,3 @@
-import { nextTick, ref } from "vue";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
@@ -66,14 +65,13 @@ describe("LedgerDetailDialog", () => {
     expect(btn.text()).toContain("查看执行轨迹");
   });
 
-  it("goToTrace pushes correct encoded route and closes dialog", async () => {
+  it("navigates to correct route and closes dialog", async () => {
     const { wrapper, router } = await mountDialog();
 
     const pushSpy = vi.spyOn(router, "push");
 
     const btn = wrapper.find(".btn-trace");
     await btn.trigger("click");
-    await nextTick();
 
     expect(pushSpy).toHaveBeenCalledWith(
       `/traces/${encodeURIComponent("TASK-1")}/${encodeURIComponent("FLOW-1")}`,
@@ -84,20 +82,46 @@ describe("LedgerDetailDialog", () => {
     expect(emitted![0]).toEqual([false]);
   });
 
-  it("encodes reserved characters in task/flow IDs", async () => {
+  it("encodes reserved characters and preserves decoded route params", async () => {
     const { wrapper, router } = await mountDialog({
-      task_id: "TASK#1/2?x=y",
-      flow_id: "FLOW&3=4",
+      task_id: "T/A#S?K&1",
+      flow_id: "F=L:O;W",
     });
 
     const pushSpy = vi.spyOn(router, "push");
+
     const btn = wrapper.find(".btn-trace");
     await btn.trigger("click");
 
-    const taskEncoded = encodeURIComponent("TASK#1/2?x=y");
-    const flowEncoded = encodeURIComponent("FLOW&3=4");
+    const taskEncoded = encodeURIComponent("T/A#S?K&1");
+    const flowEncoded = encodeURIComponent("F=L:O;W");
     expect(pushSpy).toHaveBeenCalledWith(
       `/traces/${taskEncoded}/${flowEncoded}`,
     );
+    // Each reserved char encoded exactly once; no double-wrap.
+    expect(taskEncoded).toContain("%2F");
+    expect(taskEncoded).toContain("%23");
+    expect(taskEncoded).toContain("%3F");
+    expect(taskEncoded).toContain("%26");
+    // One / in "T/A#S?K&1".
+    expect(taskEncoded.match(/%2F/g)?.length).toBe(1);
+    expect(taskEncoded.match(/%26/g)?.length).toBe(1);
+  });
+
+  it("renders bank and clear amounts in detail", async () => {
+    const { wrapper } = await mountDialog();
+    expect(wrapper.text()).toContain("100.00");
+    expect(wrapper.text()).toContain("99.00");
+    expect(wrapper.text()).toContain("1.00");
+  });
+
+  it("renders AI audit opinion", async () => {
+    const { wrapper } = await mountDialog();
+    expect(wrapper.text()).toContain("金额不一致");
+  });
+
+  it("renders error type and branch", async () => {
+    const { wrapper } = await mountDialog();
+    expect(wrapper.text()).toContain("BE-R002");
   });
 });

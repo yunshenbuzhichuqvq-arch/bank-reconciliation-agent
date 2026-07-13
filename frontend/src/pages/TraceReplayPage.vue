@@ -14,12 +14,21 @@ const error = ref<string | null>(null);
 const data = ref<TraceReplayData | null>(null);
 const selectedTraceId = ref<string | undefined>(undefined);
 
+let _generation = 0;
+
 async function load(taskId: string, flowId: string, traceId?: string) {
+  _generation += 1;
+  const generation = _generation;
+
   loading.value = true;
   error.value = null;
+
   try {
-    data.value = await fetchTraceReplay(taskId, flowId, traceId);
+    const result = await fetchTraceReplay(taskId, flowId, traceId);
+    if (generation !== _generation) return;
+    data.value = result;
   } catch (err: unknown) {
+    if (generation !== _generation) return;
     const apiError = err as ApiError;
     if (apiError?.status === 404) {
       error.value = "任务或执行记录未找到";
@@ -28,7 +37,9 @@ async function load(taskId: string, flowId: string, traceId?: string) {
     }
     data.value = null;
   } finally {
-    loading.value = false;
+    if (generation === _generation) {
+      loading.value = false;
+    }
   }
 }
 
