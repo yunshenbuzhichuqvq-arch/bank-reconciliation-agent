@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +41,10 @@ def _get_rule_retriever() -> Any:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVAL_SET_PATH = PROJECT_ROOT / "data/rag_eval_set.json"
 DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl"
+DEFAULT_CHUNK_CORPUS_PATHS = [
+    PROJECT_ROOT / "data/rag/rule_chunks_bank_enterprise.jsonl",
+    PROJECT_ROOT / "data/rag/rule_chunks_bank_clearing.jsonl",
+]
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval.md"
 DEFAULT_JSON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_metrics.json"
 DEFAULT_COMPARISON_REPORT_PATH = PROJECT_ROOT / "reports/rag_eval_mode_comparison.md"
@@ -140,6 +146,36 @@ SMOKE_CASES = [
 def load_eval_set(path: Path = DEFAULT_EVAL_SET_PATH) -> list[EvalCase]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     return [EvalCase(**item) for item in payload]
+
+
+def compute_file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def compute_corpus_sha256(paths: list[Path]) -> str:
+    hasher = hashlib.sha256()
+    for path in sorted(paths, key=lambda p: str(p)):
+        hasher.update(path.read_bytes())
+    return hasher.hexdigest()
+
+
+def current_git_revision() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    revision = result.stdout.strip()
+    return revision or None
+
+
+def default_query_enrichment_metadata() -> dict[str, Any]:
+    return {"enabled": False, "profile": None}
 
 
 def request_for_eval_mode(
@@ -323,6 +359,10 @@ def evaluate_backend_mode_matrix(
     top_k: int = 5,
     real_backend_policy: RealBackendPolicy = "skip",
     retriever_factory: Callable[[str], Any] | None = None,
+    eval_set_path: Path | None = None,
+    chunk_corpus_paths: list[Path] | None = None,
+    query_enrichment: dict[str, Any] | None = None,
+    git_revision: str | None = None,
 ) -> dict[str, Any]:
     if requested_backends is None:
         requested_backends = ["hash", "bge_small", "bge_m3"]
@@ -392,6 +432,14 @@ def evaluate_backend_mode_matrix(
         "modes": [str(m) for m in modes],
         "real_backend_policy": real_backend_policy,
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "git_revision": git_revision,
+        "eval_set_sha256": (
+            compute_file_sha256(eval_set_path) if eval_set_path is not None else None
+        ),
+        "chunk_corpus_sha256": (
+            compute_corpus_sha256(chunk_corpus_paths) if chunk_corpus_paths is not None else None
+        ),
+        "query_enrichment": query_enrichment or default_query_enrichment_metadata(),
         "rows": rows,
         "best_real_backend": best_real_backend,
         "best_real_mode": best_real_mode,
@@ -790,6 +838,10 @@ def _matrix_row_for_backend(matrix: dict[str, Any], backend: str) -> dict[str, A
     return matrix.get("rows", {}).get(backend, {})
 
 
+def _is_stage30_format(matrix: dict[str, Any]) -> bool:
+    return "query_enrichment" in matrix
+
+
 def _global_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) -> dict[str, float]:
     row = _matrix_row_for_backend(matrix, backend)
     return row.get("modes", {}).get(mode, {}).get("global_metrics", {})
@@ -801,6 +853,7 @@ def _bucket_metrics_for_mode(
     mode: str,
     *,
     source_label: str = "",
+    allow_legacy_fallback: bool = True,
 ) -> tuple[list[dict[str, Any]], str | None, str | None]:
     row = _matrix_row_for_backend(matrix, backend)
     mode_entry = row.get("modes", {}).get(mode, {})
@@ -808,7 +861,11 @@ def _bucket_metrics_for_mode(
     if bucket_metrics:
         return list(bucket_metrics), "mode_bucket_metrics", None
 
-    if matrix.get("best_real_backend") == backend and matrix.get("best_real_mode") == mode:
+    if (
+        allow_legacy_fallback
+        and matrix.get("best_real_backend") == backend
+        and matrix.get("best_real_mode") == mode
+    ):
         legacy_buckets = matrix.get("miss_buckets", [])
         if legacy_buckets:
             return list(legacy_buckets), "legacy_top_level_miss_buckets", None
@@ -816,8 +873,18 @@ def _bucket_metrics_for_mode(
     return [], None, f"{source_label} matrix lacks bucket_metrics for {backend}/{mode}"
 
 
-def _bucket_by_key(matrix: dict[str, Any], backend: str, mode: str, scenario_type: str, error_type: str) -> dict[str, Any]:
-    for bucket in _bucket_metrics_for_mode(matrix, backend, mode)[0]:
+def _bucket_by_key(
+    matrix: dict[str, Any],
+    backend: str,
+    mode: str,
+    scenario_type: str,
+    error_type: str,
+    *,
+    allow_legacy_fallback: bool = True,
+) -> dict[str, Any]:
+    for bucket in _bucket_metrics_for_mode(
+        matrix, backend, mode, allow_legacy_fallback=allow_legacy_fallback
+    )[0]:
         if bucket.get("scenario_type") == scenario_type and bucket.get("error_type") == error_type:
             return bucket
     return {}
@@ -831,9 +898,20 @@ def _metric_delta(after: dict[str, Any], before: dict[str, Any]) -> dict[str, An
     return delta
 
 
-def _bucket_deltas(baseline_matrix: dict[str, Any], after_matrix: dict[str, Any], backend: str, mode: str) -> list[dict[str, Any]]:
-    baseline_buckets = _bucket_metrics_for_mode(baseline_matrix, backend, mode)[0]
-    after_buckets = _bucket_metrics_for_mode(after_matrix, backend, mode)[0]
+def _bucket_deltas(
+    baseline_matrix: dict[str, Any],
+    after_matrix: dict[str, Any],
+    backend: str,
+    mode: str,
+    *,
+    allow_legacy_fallback: bool = True,
+) -> list[dict[str, Any]]:
+    baseline_buckets = _bucket_metrics_for_mode(
+        baseline_matrix, backend, mode, allow_legacy_fallback=allow_legacy_fallback
+    )[0]
+    after_buckets = _bucket_metrics_for_mode(
+        after_matrix, backend, mode, allow_legacy_fallback=allow_legacy_fallback
+    )[0]
     after_by_key: dict[tuple[str, str], dict[str, Any]] = {
         (b["scenario_type"], b["error_type"]): b for b in after_buckets
     }
@@ -884,23 +962,30 @@ def build_optimization_comparison_report(
     baseline_row = _matrix_row_for_backend(baseline_matrix, backend)
     after_row = _matrix_row_for_backend(after_matrix, backend)
 
+    stage30 = _is_stage30_format(baseline_matrix) and _is_stage30_format(after_matrix)
+    allow_legacy_fallback = not stage30
+
     baseline_source = {
         "case_count": baseline_matrix.get("case_count"),
         "top_k": baseline_matrix.get("top_k"),
         "real_backend_policy": baseline_matrix.get("real_backend_policy"),
-        "requested_backend": backend,
+        "requested_backend": baseline_row.get("requested_backend", backend),
         "effective_backend": baseline_row.get("effective_backend"),
         "status": baseline_row.get("status"),
         "mode": mode,
+        "eval_set_sha256": baseline_matrix.get("eval_set_sha256"),
+        "chunk_corpus_sha256": baseline_matrix.get("chunk_corpus_sha256"),
     }
     after_source = {
         "case_count": after_matrix.get("case_count"),
         "top_k": after_matrix.get("top_k"),
         "real_backend_policy": after_matrix.get("real_backend_policy"),
-        "requested_backend": backend,
+        "requested_backend": after_row.get("requested_backend", backend),
         "effective_backend": after_row.get("effective_backend"),
         "status": after_row.get("status"),
         "mode": mode,
+        "eval_set_sha256": after_matrix.get("eval_set_sha256"),
+        "chunk_corpus_sha256": after_matrix.get("chunk_corpus_sha256"),
     }
 
     trust_reasons: list[str] = []
@@ -918,11 +1003,35 @@ def build_optimization_comparison_report(
         trust_reasons.append(f"top_k mismatch: baseline={baseline_source['top_k']}, after={after_source['top_k']}")
         trusted = False
 
+    if stage30:
+        for label, source in (("baseline", baseline_source), ("after", after_source)):
+            if source["requested_backend"] != backend:
+                trust_reasons.append(
+                    f"{label} requested_backend mismatch: "
+                    f"{source['requested_backend']} != {backend}"
+                )
+                trusted = False
+        for hash_key in ("eval_set_sha256", "chunk_corpus_sha256"):
+            baseline_hash = baseline_source[hash_key]
+            after_hash = after_source[hash_key]
+            if not baseline_hash or not after_hash:
+                trust_reasons.append(
+                    f"{hash_key} missing (baseline={baseline_hash!r}, after={after_hash!r})"
+                )
+                trusted = False
+            elif baseline_hash != after_hash:
+                trust_reasons.append(
+                    f"{hash_key} mismatch: baseline={baseline_hash}, after={after_hash}"
+                )
+                trusted = False
+
     baseline_buckets, baseline_bucket_source, baseline_bucket_err = _bucket_metrics_for_mode(
-        baseline_matrix, backend, mode, source_label="baseline"
+        baseline_matrix, backend, mode, source_label="baseline",
+        allow_legacy_fallback=allow_legacy_fallback,
     )
     after_buckets, after_bucket_source, after_bucket_err = _bucket_metrics_for_mode(
-        after_matrix, backend, mode, source_label="after"
+        after_matrix, backend, mode, source_label="after",
+        allow_legacy_fallback=allow_legacy_fallback,
     )
     if baseline_bucket_err:
         trust_reasons.append(baseline_bucket_err)
@@ -949,8 +1058,28 @@ def build_optimization_comparison_report(
         },
     }
 
-    target_before = _bucket_by_key(baseline_matrix, backend, mode, target_scenario_type, target_error_type)
-    target_after = _bucket_by_key(after_matrix, backend, mode, target_scenario_type, target_error_type)
+    target_before = _bucket_by_key(
+        baseline_matrix, backend, mode, target_scenario_type, target_error_type,
+        allow_legacy_fallback=allow_legacy_fallback,
+    )
+    target_after = _bucket_by_key(
+        after_matrix, backend, mode, target_scenario_type, target_error_type,
+        allow_legacy_fallback=allow_legacy_fallback,
+    )
+
+    if stage30:
+        if not target_before:
+            trust_reasons.append(
+                f"baseline lacks target bucket {target_scenario_type}/{target_error_type}"
+            )
+            trusted = False
+            trust["trusted"] = False
+        if not target_after:
+            trust_reasons.append(
+                f"after lacks target bucket {target_scenario_type}/{target_error_type}"
+            )
+            trusted = False
+            trust["trusted"] = False
 
     if target_before and target_after:
         target_delta = _metric_delta(target_after, target_before)
@@ -1012,7 +1141,10 @@ def build_optimization_comparison_report(
         "max_global_regression": max_global_regression,
     }
 
-    all_deltas = _bucket_deltas(baseline_matrix, after_matrix, backend, mode)
+    all_deltas = _bucket_deltas(
+        baseline_matrix, after_matrix, backend, mode,
+        allow_legacy_fallback=allow_legacy_fallback,
+    )
     non_target_deltas = [
         d for d in all_deltas
         if not (d["scenario_type"] == target_scenario_type and d["error_type"] == target_error_type)
@@ -1024,6 +1156,7 @@ def build_optimization_comparison_report(
     improvements.sort(key=lambda d: (-d["delta"]["ndcg_at_5"], d["scenario_type"], d["error_type"]))
 
     side_effect_buckets = {
+        "all_non_target": non_target_deltas,
         "largest_regressions": regressions[:3],
         "largest_improvements": improvements[:3],
     }
@@ -1120,6 +1253,8 @@ def _format_optimization_comparison_markdown(report: dict[str, Any]) -> str:
         f"- status: {baseline.get('status')}",
         f"- effective_backend: `{baseline.get('effective_backend')}`",
         f"- real_backend_policy: {baseline.get('real_backend_policy')}",
+        f"- eval_set_sha256: `{baseline.get('eval_set_sha256')}`",
+        f"- chunk_corpus_sha256: `{baseline.get('chunk_corpus_sha256')}`",
         "",
         "## After Source",
         "",
@@ -1128,6 +1263,8 @@ def _format_optimization_comparison_markdown(report: dict[str, Any]) -> str:
         f"- status: {after.get('status')}",
         f"- effective_backend: `{after.get('effective_backend')}`",
         f"- real_backend_policy: {after.get('real_backend_policy')}",
+        f"- eval_set_sha256: `{after.get('eval_set_sha256')}`",
+        f"- chunk_corpus_sha256: `{after.get('chunk_corpus_sha256')}`",
         "",
         "## Target Bucket",
         "",
@@ -1175,6 +1312,23 @@ def _format_optimization_comparison_markdown(report: dict[str, Any]) -> str:
     ])
 
     se = report["side_effect_buckets"]
+    all_non_target = se.get("all_non_target", [])
+    if all_non_target:
+        lines.extend([
+            "## Side Effect Buckets (All Non-Target)",
+            "",
+            "| Scenario | Error Type | Δ Recall@5 | Δ MRR | Δ NDCG@5 | Δ Miss |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+        ])
+        for d in all_non_target:
+            delta = d["delta"]
+            lines.append(
+                f"| {d['scenario_type']} | {d['error_type']} | "
+                f"{delta.get('recall_at_5', 0):.4f} | {delta.get('mrr', 0):.4f} | "
+                f"{delta.get('ndcg_at_5', 0):.4f} | {delta.get('miss_count', 0)} |"
+            )
+        lines.append("")
+
     regressions = se.get("largest_regressions", [])
     if regressions:
         lines.extend([
@@ -1303,6 +1457,9 @@ def main(argv: list[str] | None = None) -> None:
             modes=matrix_modes,
             top_k=args.top_k,
             real_backend_policy=args.real_backend_policy,
+            eval_set_path=args.eval_set,
+            chunk_corpus_paths=DEFAULT_CHUNK_CORPUS_PATHS,
+            git_revision=current_git_revision(),
         )
         if args.matrix_report:
             write_matrix_markdown(matrix_report, args.matrix_report)

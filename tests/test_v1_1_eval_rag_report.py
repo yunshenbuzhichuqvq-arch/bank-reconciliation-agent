@@ -1099,3 +1099,194 @@ def test_build_optimization_comparison_rejects_legacy_mode_mismatch() -> None:
     assert report["trust"]["trusted"] is False
     reasons_text = " ".join(report["trust"]["reasons"])
     assert "lacks" in reasons_text.lower() or "missing" in reasons_text.lower()
+
+
+# ---------------------------------------------------------------------------
+# TASK-30.1: Stage 30 new-format trust contract and full side-effect reporting
+# ---------------------------------------------------------------------------
+
+
+def _make_stage30_matrix(
+    *,
+    eval_set_sha256: str | None = "eval-hash-abc",
+    chunk_corpus_sha256: str | None = "chunk-hash-xyz",
+    query_enrichment: dict | None = None,
+    **kwargs,
+) -> dict:
+    matrix = _make_matrix(**kwargs)
+    matrix["eval_set_sha256"] = eval_set_sha256
+    matrix["chunk_corpus_sha256"] = chunk_corpus_sha256
+    matrix["git_revision"] = "deadbeef"
+    matrix["query_enrichment"] = query_enrichment or {"enabled": False, "profile": None}
+    return matrix
+
+
+def test_stage30_comparison_trusted_when_hashes_match() -> None:
+    baseline = _make_stage30_matrix(
+        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+        global_mrr=0.66, global_ndcg=0.65,
+    )
+    after = _make_stage30_matrix(
+        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+        global_mrr=0.67, global_ndcg=0.66,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is True
+    assert report["success"] is True
+
+
+def test_stage30_comparison_trust_fails_when_eval_set_hash_mismatch() -> None:
+    baseline = _make_stage30_matrix(eval_set_sha256="hash-a")
+    after = _make_stage30_matrix(
+        eval_set_sha256="hash-b",
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert "eval_set_sha256" in " ".join(report["trust"]["reasons"])
+
+
+def test_stage30_comparison_trust_fails_when_chunk_corpus_hash_mismatch() -> None:
+    baseline = _make_stage30_matrix(chunk_corpus_sha256="chunk-a")
+    after = _make_stage30_matrix(
+        chunk_corpus_sha256="chunk-b",
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert "chunk_corpus_sha256" in " ".join(report["trust"]["reasons"])
+
+
+def test_stage30_comparison_trust_fails_when_hash_missing() -> None:
+    baseline = _make_stage30_matrix(eval_set_sha256=None)
+    after = _make_stage30_matrix(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+
+
+def test_stage30_comparison_does_not_use_legacy_bucket_fallback() -> None:
+    baseline = _make_stage30_matrix(
+        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+    )
+    del baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+
+    after = _make_stage30_matrix(
+        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+        backend="bge_m3",
+        mode="hybrid",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert any("bucket_metrics" in r for r in report["trust"]["reasons"])
+
+
+def test_build_optimization_comparison_success_false_when_global_mrr_regresses() -> None:
+    baseline = _make_matrix(
+        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+        global_mrr=0.66, global_ndcg=0.65,
+    )
+    after = _make_matrix(
+        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+        global_mrr=0.60, global_ndcg=0.65,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["success"] is False
+    assert report["global"]["within_regression_limit"] is False
+    assert "mrr" in " ".join(report["failure_reasons"]).lower()
+
+
+def test_comparison_json_includes_all_non_target_buckets() -> None:
+    baseline = _make_stage30_matrix(
+        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+    )
+    after = _make_stage30_matrix(
+        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    se = report["side_effect_buckets"]
+    assert "all_non_target" in se
+    keys = {(d["scenario_type"], d["error_type"]) for d in se["all_non_target"]}
+    assert ("BANK_ENTERPRISE", "AMOUNT_MISMATCH") in keys
+    assert ("BANK_ENTERPRISE", "TIMING_DIFFERENCE") in keys
+    assert ("BANK_CLEARING", "SINGLE_SIDE_MISSING") not in keys
+    for d in se["all_non_target"]:
+        assert "before" in d
+        assert "after" in d
+        assert "delta" in d
+
+
+def test_comparison_markdown_shows_full_side_effect_data() -> None:
+    baseline = _make_stage30_matrix(
+        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+    )
+    after = _make_stage30_matrix(
+        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    md = eval_rag._format_optimization_comparison_markdown(report)
+    assert "TIMING_DIFFERENCE" in md
+    assert "AMOUNT_MISMATCH" in md
