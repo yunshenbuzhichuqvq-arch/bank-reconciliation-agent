@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
@@ -37,6 +38,15 @@ from bank_reconciliation_agent.services.hooks import (
 from bank_reconciliation_agent.services.stream_emitter import NullEmitter, StreamEmitter, to_stream_event
 from bank_reconciliation_agent.services.tool_adapters import default_tool_executor
 from bank_reconciliation_agent.services.tool_executor import safe_tool_projection
+from bank_reconciliation_agent.services.trace import NoOpRecorder, TraceRecorder
+from bank_reconciliation_agent.schemas.trace import (
+    GuardOutcome,
+    SpanStatus,
+    SpanType,
+)
+
+
+Recorder = TraceRecorder | NoOpRecorder
 
 
 REVERSAL_HINTS = ("冲正", "红冲", "退款", "抹账", "撤销")
@@ -70,6 +80,7 @@ class ReconciliationState(TypedDict):
     fallback_cases: NotRequired[list[dict[str, Any]]]
     t1_candidate: NotRequired[dict[str, str] | None]
     fuzzy_candidate: NotRequired[dict[str, str] | None]
+    recorder: NotRequired[Recorder]
 
 
 class ToolExecutorProtocol(Protocol):
@@ -79,6 +90,84 @@ class ToolExecutorProtocol(Protocol):
         args: Any,
         context: ToolContext,
     ) -> ToolCallResult: ...
+
+
+_NOOP_RECORDER = NoOpRecorder()
+
+
+def _recorder(state: ReconciliationState) -> Recorder:
+    return state.get("recorder") or _NOOP_RECORDER
+
+
+_TOOL_STATUS_MAP: dict[str, tuple[SpanStatus, str | None]] = {
+    "SUCCEEDED": (SpanStatus.SUCCEEDED, "RESULT"),
+    "EMPTY": (SpanStatus.SUCCEEDED, "EMPTY"),
+    "FAILED": (SpanStatus.FAILED, None),
+}
+
+
+def _record_tool_span(
+    state: ReconciliationState,
+    result: ToolCallResult,
+    projection: dict[str, Any],
+) -> None:
+    recorder = _recorder(state)
+    status, outcome = _TOOL_STATUS_MAP.get(
+        str(projection["status"]), (SpanStatus.FAILED, None)
+    )
+    recovered_error_type: str | None = None
+    if projection.get("retry_recovered"):
+        for attempt in result.attempts:
+            if attempt.status == "FAILED" and attempt.error_type is not None:
+                recovered_error_type = attempt.error_type
+                break
+    recorder.record_tool(
+        name=str(projection["tool_name"]),
+        status=status,
+        outcome=outcome,
+        duration_ms=float(projection.get("duration_ms", 0.0)),
+        attempt=int(projection.get("attempt", 1)),
+        retry_recovered=bool(projection.get("retry_recovered", False)),
+        recovered_error_type=recovered_error_type,
+        result_count=int(projection.get("result_count", 0)),
+        evidence_ids=list(projection.get("evidence_ids", [])),
+        error_type=projection.get("error_type"),
+        fallback_reason=projection.get("fallback_reason"),
+    )
+
+
+def _record_agent_span(
+    state: ReconciliationState,
+    *,
+    name: str,
+    agent: Any,
+    duration_ms: float,
+    status: SpanStatus | None = None,
+) -> None:
+    recorder = _recorder(state)
+    usage = _llm_usage(agent)
+    span_status = status
+    if span_status is None:
+        span_status = (
+            SpanStatus.FAILED if usage.get("final_failure_type") else SpanStatus.SUCCEEDED
+        )
+    model_name = getattr(getattr(agent, "last_llm_result", None), "model", None)
+    recorder.record_agent(
+        name=name,
+        status=span_status,
+        duration_ms=duration_ms,
+        model_name=model_name,
+        prompt_tokens=int(usage.get("prompt_tokens", 0)),
+        completion_tokens=int(usage.get("completion_tokens", 0)),
+        cached_calls=int(usage.get("cached_calls", 0)),
+        attempt=max(1, int(usage.get("transport_attempts", 1) or 1)),
+        retry_recovered=bool(usage.get("retry_recovered", False)),
+        recovered_error_type=None,
+        structured_repair_attempted=bool(usage.get("structured_repair_attempted", False)),
+        structured_repair_succeeded=bool(usage.get("structured_repair_succeeded", False)),
+        error_type=usage.get("final_failure_type"),
+        fallback_reason=usage.get("fallback_reason"),
+    )
 
 
 def run_item(
@@ -91,10 +180,13 @@ def run_item(
     emitter: StreamEmitter | None = None,
 ) -> ReconciliationState:
     emitter = emitter or NullEmitter()
+    recorder = _recorder(state)
     bind_trace_context(
-        trace_id=state["task_id"],
+        trace_id=recorder.trace_id or state["task_id"],
         user_id=state["user_id"],
         thread_id=state["thread_id"],
+        task_id=state["task_id"],
+        flow_id=_flow_id(state),
     )
     log.info(
         "workflow_node_start",
@@ -103,13 +195,17 @@ def run_item(
         exception_branch=state.get("exception_branch"),
     )
     flow_id = _flow_id(state)
+    exception_branch = state.get("exception_branch")
+    if exception_branch:
+        with recorder.span(SpanType.ROUTE, str(exception_branch)):
+            pass
     summary = _combined_text(state, "summary")
     remark = _combined_text(state, "remark") or None
-    exception_branch = state.get("exception_branch")
     math_result = state.get("math_result", {})
     trace_payload: dict[str, Any] | None = None
 
     if exception_branch == "BE-R004" and _contains_reversal_hint(summary, remark):
+        _extract_start = time.monotonic()
         try:
             extraction_result = extraction_agent.extract(
                 flow_id=flow_id,
@@ -117,6 +213,13 @@ def run_item(
                 remark=remark,
             )
         except ExtractionAgentError:
+            _record_agent_span(
+                state,
+                name="ExtractionAgent",
+                agent=extraction_agent,
+                duration_ms=(time.monotonic() - _extract_start) * 1000,
+                status=SpanStatus.FAILED,
+            )
             return _fail_closed_item(
                 state,
                 flow_id=flow_id,
@@ -125,6 +228,13 @@ def run_item(
                 step="extract",
                 emitter=emitter,
             )
+        _record_agent_span(
+            state,
+            name="ExtractionAgent",
+            agent=extraction_agent,
+            duration_ms=(time.monotonic() - _extract_start) * 1000,
+            status=SpanStatus.SUCCEEDED,
+        )
         state["extraction_result"] = _model_or_mapping_dump(extraction_result)
         _append_agent_log(state, {
             "agent_name": "ExtractionAgent",
@@ -166,9 +276,17 @@ def run_item(
         }
         if exception_branch == "BC-R003":
             trace_kwargs["cutoff_t1_context"] = cutoff_t1_context
+        _trace_start = time.monotonic()
         try:
             trace_result = trace_agent.trace(**trace_kwargs)
         except TraceAgentError:
+            _record_agent_span(
+                state,
+                name="TraceAgent",
+                agent=trace_agent,
+                duration_ms=(time.monotonic() - _trace_start) * 1000,
+                status=SpanStatus.FAILED,
+            )
             return _fail_closed_item(
                 state,
                 flow_id=flow_id,
@@ -177,6 +295,13 @@ def run_item(
                 step="trace",
                 emitter=emitter,
             )
+        _record_agent_span(
+            state,
+            name="TraceAgent",
+            agent=trace_agent,
+            duration_ms=(time.monotonic() - _trace_start) * 1000,
+            status=SpanStatus.SUCCEEDED,
+        )
         trace_payload = _model_or_mapping_dump(trace_result)
         _append_agent_log(state, {
             "agent_name": "TraceAgent",
@@ -346,9 +471,17 @@ def run_item(
             }
             if exception_branch == "BC-R003":
                 trace_kwargs["cutoff_t1_context"] = cutoff_t1_context
+            _l3_trace_start = time.monotonic()
             try:
                 trace_result = trace_agent.trace(**trace_kwargs)
             except TraceAgentError:
+                _record_agent_span(
+                    state,
+                    name="TraceAgent",
+                    agent=trace_agent,
+                    duration_ms=(time.monotonic() - _l3_trace_start) * 1000,
+                    status=SpanStatus.FAILED,
+                )
                 return _fail_closed_item(
                     state,
                     flow_id=flow_id,
@@ -357,6 +490,13 @@ def run_item(
                     step="trace",
                     emitter=emitter,
                 )
+            _record_agent_span(
+                state,
+                name="TraceAgent",
+                agent=trace_agent,
+                duration_ms=(time.monotonic() - _l3_trace_start) * 1000,
+                status=SpanStatus.SUCCEEDED,
+            )
             trace_payload = _model_or_mapping_dump(trace_result)
             _append_agent_log(state, {
                 "agent_name": "TraceAgent",
@@ -610,9 +750,17 @@ def _audit_decision_once(
 ) -> AuditDecision:
     state["error_message"] = None
     state["retry_count"] = 0
+    _agent_start = time.monotonic()
     try:
-        return schema_hook(audit_agent.decide_with_llm(**audit_kwargs))
+        decision = schema_hook(audit_agent.decide_with_llm(**audit_kwargs))
     except SchemaValidationError:
+        _record_agent_span(
+            state,
+            name="AuditAgent",
+            agent=audit_agent,
+            duration_ms=(time.monotonic() - _agent_start) * 1000,
+            status=SpanStatus.FAILED,
+        )
         log.warning(
             "schema_hook_failed",
             hook_name="SchemaHook",
@@ -626,19 +774,27 @@ def _audit_decision_once(
             "error_message": "schema validation failed",
         }, emitter)
 
-    state["error_message"] = "schema validation failed"
-    return AuditDecision(
-        flow_id=str(audit_kwargs.get("flow_id") or ""),
-        decision="PENDING_HUMAN",
-        risk_level="HIGH",
-        reason="SchemaHook 校验失败，转人工。",
-        ai_suggestion="PENDING_HUMAN",
-        evidence=[],
-        confidence=0.0,
-        fallback_applied=True,
-        fallback_level=1,
-        next_action="PENDING_HUMAN",
+        state["error_message"] = "schema validation failed"
+        return AuditDecision(
+            flow_id=str(audit_kwargs.get("flow_id") or ""),
+            decision="PENDING_HUMAN",
+            risk_level="HIGH",
+            reason="SchemaHook 校验失败，转人工。",
+            ai_suggestion="PENDING_HUMAN",
+            evidence=[],
+            confidence=0.0,
+            fallback_applied=True,
+            fallback_level=1,
+            next_action="PENDING_HUMAN",
+        )
+
+    _record_agent_span(
+        state,
+        name="AuditAgent",
+        agent=audit_agent,
+        duration_ms=(time.monotonic() - _agent_start) * 1000,
     )
+    return decision
 
 
 def _build_tool_context(
@@ -668,6 +824,7 @@ def _execute_tool(
     context = _build_tool_context(state, fallback_level=fallback_level)
     result = tool_executor.execute(name, args, context)
     projection = safe_tool_projection(result)
+    _record_tool_span(state, result, projection)
     _append_agent_log(state, {
         "agent_name": "ToolExecutor",
         "step": "tool_call",
@@ -735,6 +892,9 @@ def _apply_post_hooks(
         amount_diff=_to_decimal(state.get("math_result", {}).get("amount_diff")),
         rag_best_score=max((item.score for item in rag_items), default=None),
     )
+    guard_outcome = GuardOutcome.PASSED if constraint.ok else GuardOutcome.BLOCKED
+    with _recorder(state).span(SpanType.GUARD, "ConstraintGuard", outcome=guard_outcome):
+        pass
     if not constraint.ok:
         violated_suffix = f"；违反约束: {', '.join(constraint.violated)}"
         audit_decision.reason = f"{audit_decision.reason}{violated_suffix}" if audit_decision.reason else (

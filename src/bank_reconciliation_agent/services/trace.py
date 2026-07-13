@@ -2,11 +2,11 @@
 
 Contains:
 - ``t_trace_span`` SQLAlchemy Core Table definition.
-- ``TraceService`` with tenant-scoped batch insert and query methods.
+- ``TraceService`` with tenant-scoped batch insert, query, best-effort
+  persistence with failure isolation and process-local metrics.
 - ``TraceRecorder`` — flow-scoped, in-memory span collector (TASK-29.2).
 - ``NoOpRecorder`` — zero-side-effect substitute when tracing is disabled.
 - ``validate_trace_snapshot`` — structural invariant checker.
-- Legacy ``TraceWriter`` (to be removed in TASK-29.3).
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ import time as _time
 import uuid as _uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Generator
+from threading import Lock
+from typing import ClassVar, Generator
 
 import structlog
 
@@ -39,7 +39,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.schemas.trace import (
     SpanStatus,
@@ -119,6 +118,13 @@ t_trace_span = Table(
 class TraceService:
     """Tenant-scoped, append-only Trace persistence."""
 
+    # Process-local best-effort write counters. These are never aggregated
+    # across backend/worker processes; ``source`` is fixed to
+    # ``runtime_memory`` so callers cannot mistake them for cluster metrics.
+    _metrics_lock: ClassVar[Lock] = Lock()
+    _write_success_count: ClassVar[int] = 0
+    _write_failure_count: ClassVar[int] = 0
+
     def __init__(self, engine: Engine | None = None) -> None:
         self._engine = engine or get_engine()
         self._initialized = False
@@ -147,6 +153,68 @@ class TraceService:
         rows = [self._span_to_row(user_id, s) for s in spans]
         with self._engine.begin() as conn:
             conn.execute(insert(t_trace_span), rows)
+
+    def persist_snapshot(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        flow_id: str,
+        spans: tuple[TraceSpan, ...] | list[TraceSpan],
+    ) -> bool:
+        """Best-effort persist a flow snapshot with full failure isolation.
+
+        Validates structural invariants and writes the whole batch inside a
+        single transaction. Any validation or write failure is swallowed after
+        recording a process-local counter and a sanitized warning; it never
+        raises, so business results stay unchanged. Returns ``True`` on
+        success, ``False`` on isolated failure or empty snapshot.
+        """
+        span_list = list(spans)
+        if not span_list:
+            return False
+
+        trace_id = span_list[0].trace_id
+        try:
+            validate_trace_snapshot(span_list)
+            self.save_trace(user_id=user_id, spans=span_list)
+        except Exception as exc:
+            self._record_write_failure()
+            _log.warning(
+                "trace_write_failed",
+                task_id=task_id,
+                flow_id=flow_id,
+                trace_id=trace_id,
+                error_type=type(exc).__name__,
+                expected_span_count=len(span_list),
+            )
+            return False
+        self._record_write_success()
+        return True
+
+    @classmethod
+    def _record_write_success(cls) -> None:
+        with cls._metrics_lock:
+            cls._write_success_count += 1
+
+    @classmethod
+    def _record_write_failure(cls) -> None:
+        with cls._metrics_lock:
+            cls._write_failure_count += 1
+
+    @classmethod
+    def metrics_snapshot(cls) -> dict[str, object]:
+        """Return process-local Trace write counters.
+
+        ``source`` is fixed to ``runtime_memory``; these counters are never
+        aggregated across backend/worker processes.
+        """
+        with cls._metrics_lock:
+            return {
+                "source": "runtime_memory",
+                "trace_write_success_count": cls._write_success_count,
+                "trace_write_failure_count": cls._write_failure_count,
+            }
 
     # -- read --------------------------------------------------------------
 
@@ -854,22 +922,4 @@ class NoOpRecorder:
         pass
 
 
-# ---------------------------------------------------------------------------
-
-
-class TraceWriter:
-    def __init__(self, trace_dir: str | None = None) -> None:
-        self.trace_dir = Path(trace_dir or settings.trace_dir)
-
-    def write(self, *, task_id: str, flow_id: str, payload: dict) -> Path:
-        task_trace_dir = self.trace_dir / task_id
-        task_trace_dir.mkdir(parents=True, exist_ok=True)
-        trace_path = task_trace_dir / f"{flow_id}.json"
-        trace_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return trace_path
-
-
-trace_writer = TraceWriter()
+trace_service = TraceService()

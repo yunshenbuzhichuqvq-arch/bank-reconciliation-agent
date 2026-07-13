@@ -23,13 +23,24 @@ def configure_logging() -> None:
     )
 
 
-def bind_trace_context(*, trace_id: str, user_id: str, thread_id: str) -> None:
+def bind_trace_context(
+    *,
+    trace_id: str,
+    user_id: str,
+    thread_id: str,
+    task_id: str | None = None,
+    flow_id: str | None = None,
+) -> None:
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(
         trace_id=trace_id,
         user_id=user_id,
         thread_id=thread_id,
     )
+    if task_id is not None:
+        structlog.contextvars.bind_contextvars(task_id=task_id)
+    if flow_id is not None:
+        structlog.contextvars.bind_contextvars(flow_id=flow_id)
 
 
 log: Any = structlog.get_logger()

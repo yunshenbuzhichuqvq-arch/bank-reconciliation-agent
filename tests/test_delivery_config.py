@@ -313,7 +313,7 @@ REQUIRED_ENV_KEYS = {
     "APP_NAME", "APP_ENV", "API_V1_PREFIX",
     "JWT_SECRET_KEY", "JWT_ALGORITHM", "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
     "DEMO_USER_PASSWORD",
-    "MYSQL_DSN", "CHROMA_PATH", "UPLOAD_DIR", "TRACE_DIR",
+    "MYSQL_DSN", "CHROMA_PATH", "UPLOAD_DIR",
     "CHECKPOINT_ENABLED", "CHECKPOINT_SQLITE_PATH",
     "REDIS_DSN", "ASYNC_QUEUE_ENABLED", "JOB_IDEMPOTENCY_TTL_SECONDS",
     "ARQ_JOB_MAX_ATTEMPTS", "ARQ_JOB_TIMEOUT_SECONDS",
@@ -349,6 +349,12 @@ def test_env_example_covers_all_settings_keys() -> None:
     env_keys = _parse_env_keys(ENV_EXAMPLE_PATH)
     missing = REQUIRED_ENV_KEYS - env_keys
     assert not missing, f".env.example missing keys: {missing}"
+
+
+def test_env_example_no_longer_declares_trace_dir() -> None:
+    # Stage 29 retired local JSON Trace; TRACE_DIR must not reappear.
+    env_keys = _parse_env_keys(ENV_EXAMPLE_PATH)
+    assert "TRACE_DIR" not in env_keys
 
 
 def test_env_example_no_real_secret() -> None:

@@ -46,9 +46,14 @@ from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEve
 from bank_reconciliation_agent.services.live_registry import mark_finished, register
 from bank_reconciliation_agent.services.stream_emitter import QueueEmitter, StreamEmitter
 from bank_reconciliation_agent.services.task import reconciliation_task_table, task_service
-from bank_reconciliation_agent.services.trace import trace_writer
+from bank_reconciliation_agent.services.trace import (
+    NoOpRecorder,
+    TraceRecorder,
+    trace_service,
+)
 from bank_reconciliation_agent.services.transactions import transaction_service
 from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from bank_reconciliation_agent.schemas.trace import SpanStatus, SpanType, TraceSpan, WorkflowOutcome
 
 
 AGENT_PROCESSING_ERRORS = (
@@ -82,7 +87,7 @@ class ReconciliationWriteBundle(NamedTuple):
     ledger_rows: list[LedgerRow]
     rag_log_rows: list[dict[str, object]]
     agent_log_rows: list[dict[str, object]]
-    trace_payloads: list[tuple[str, dict[str, object]]]
+    trace_snapshots: list[tuple[str, str, list[TraceSpan]]]
     ai_processed_rows: int
     fallback_l2_rows: int
     fallback_l3_rows: int
@@ -702,13 +707,15 @@ class ReconciliationService:
             ),
             task_id=task_id,
         )
-        for flow_id, payload in write_bundle.trace_payloads:
+        for flow_id, trace_id, spans in write_bundle.trace_snapshots:
+            del trace_id
             self._run_side_effect(
                 side_effect_name="trace",
-                operation=lambda flow_id=flow_id, payload=payload: trace_writer.write(
+                operation=lambda flow_id=flow_id, spans=spans: trace_service.persist_snapshot(
+                    user_id=user_id,
                     task_id=task_id,
                     flow_id=flow_id,
-                    payload=payload,
+                    spans=spans,
                 ),
                 task_id=task_id,
                 flow_id=flow_id,
@@ -726,7 +733,7 @@ class ReconciliationService:
         rows: list[LedgerRow] = []
         rag_log_rows: list[dict[str, object]] = []
         agent_log_rows: list[dict[str, object]] = []
-        trace_payloads: list[tuple[str, dict[str, object]]] = []
+        trace_snapshots: list[tuple[str, str, list[TraceSpan]]] = []
         ai_processed_rows = 0
         fallback_l2_rows = 0
         fallback_l3_rows = 0
@@ -744,6 +751,7 @@ class ReconciliationService:
                 "error_type": result.error_type or "",
                 "exception_branch": result.exception_branch,
             }
+            recorder = self._new_recorder(user_id=user_id, task_id=task_id, result=result)
             try:
                 workflow_kwargs = {
                     "user_id": user_id,
@@ -751,6 +759,7 @@ class ReconciliationService:
                     "scenario_type": scenario_type,
                     "result": result,
                     "rag_query": rag_query,
+                    "recorder": recorder,
                 }
                 if emitter is not None:
                     workflow_kwargs["emitter"] = emitter
@@ -771,6 +780,7 @@ class ReconciliationService:
                     scenario_type=scenario_type,
                     result=result,
                     error=exc,
+                    recorder=recorder,
                 )
             rag_items = [
                 RagSearchItem.model_validate(item)
@@ -843,18 +853,9 @@ class ReconciliationService:
                 fallback_level=audit_decision.fallback_level,
                 llm_tokens=llm_tokens,
             ))
-            trace_payloads.append((
-                result.flow_id,
-                {
-                    "task_id": task_id,
-                    "flow_id": result.flow_id,
-                    "user_id": user_id,
-                    "rule_hit": rule_hit,
-                    "rag_hit": rag_hit,
-                    "agent_output": agent_output,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                },
-            ))
+            trace_spans = self._finalize_recorder(recorder, audit_decision)
+            if trace_spans:
+                trace_snapshots.append((result.flow_id, recorder.trace_id or "", trace_spans))
             rows.append(LedgerRow(
                 id=0, task_id=task_id, flow_id=result.flow_id,
                 error_type=result.error_type or "",
@@ -872,7 +873,7 @@ class ReconciliationService:
             ledger_rows=rows,
             rag_log_rows=rag_log_rows,
             agent_log_rows=agent_log_rows,
-            trace_payloads=trace_payloads,
+            trace_snapshots=trace_snapshots,
             ai_processed_rows=ai_processed_rows,
             fallback_l2_rows=fallback_l2_rows,
             fallback_l3_rows=fallback_l3_rows,
@@ -901,6 +902,64 @@ class ReconciliationService:
                 error_type=type(exc).__name__,
             )
 
+    def _new_recorder(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        result: ReconciliationMatchResult,
+    ) -> TraceRecorder | NoOpRecorder:
+        try:
+            return TraceRecorder(
+                user_id=user_id,
+                task_id=task_id,
+                flow_id=result.flow_id,
+            )
+        except Exception as exc:
+            log.warning(
+                "trace_recorder_init_failed",
+                task_id=task_id,
+                flow_id=result.flow_id,
+                error_type=type(exc).__name__,
+            )
+            return NoOpRecorder()
+
+    def _finalize_recorder(
+        self,
+        recorder: TraceRecorder | NoOpRecorder,
+        audit_decision: AuditDecision,
+    ) -> list[TraceSpan]:
+        """Append terminal span, close the root and return an immutable snapshot.
+
+        A recorder self-fault only disables the current Trace; it never changes
+        business results. Returns an empty list when there is nothing to persist.
+        """
+        outcome = (
+            WorkflowOutcome.AUTO_FIXED
+            if audit_decision.decision == "AUTO_FIXED"
+            else WorkflowOutcome.PENDING_HUMAN
+        )
+        terminal_type = (
+            SpanType.FINAL
+            if audit_decision.decision == "AUTO_FIXED"
+            else SpanType.FALLBACK
+        )
+        try:
+            recorder.close_root(
+                status=SpanStatus.SUCCEEDED,
+                outcome=outcome,
+                terminal_type=terminal_type,
+            )
+            return list(recorder.snapshot())
+        except Exception as exc:
+            log.warning(
+                "trace_recorder_finalize_failed",
+                trace_id=recorder.trace_id,
+                error_type=type(exc).__name__,
+            )
+            recorder.disable()
+            return []
+
     def _run_workflow_for_result(
         self,
         *,
@@ -911,6 +970,7 @@ class ReconciliationService:
         rag_query: str,
         stream_seq_start: int = 0,
         emitter: StreamEmitter | None = None,
+        recorder: TraceRecorder | NoOpRecorder | None = None,
     ) -> ReconciliationState:
         bank_row = transaction_service.get_bank_row(
             user_id=user_id,
@@ -951,6 +1011,8 @@ class ReconciliationService:
             "t1_candidate": result.t1_candidate,
             "fuzzy_candidate": result.fuzzy_candidate,
         }
+        if recorder is not None:
+            state["recorder"] = recorder
         if emitter is None:
             return run_item(state)
         return run_item(state, emitter=emitter)
@@ -963,7 +1025,9 @@ class ReconciliationService:
         scenario_type: str,
         result: ReconciliationMatchResult,
         error: Exception,
+        recorder: TraceRecorder | NoOpRecorder | None = None,
     ) -> ReconciliationState:
+        del recorder
         reason = f"AI 处理异常，自动转人工：{type(error).__name__}"
         decision = AuditDecision(
             flow_id=result.flow_id,

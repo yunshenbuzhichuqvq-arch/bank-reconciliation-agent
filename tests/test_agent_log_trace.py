@@ -4,14 +4,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.main import app
 from bank_reconciliation_agent.services.agent_log import (
     agent_execution_log_table,
     agent_log_service,
 )
-from bank_reconciliation_agent.services.trace import trace_writer
+from bank_reconciliation_agent.services.trace import TraceService
 from scripts.generate_mock_excel import EXPECTED_BRANCHES, generate_mvp1_mock_excel
 from tests.auth_helpers import demo_bearer_headers
 
@@ -43,9 +42,7 @@ def _upload_task(tmp_path: Path) -> str:
     return response.json()["data"]["task_id"]
 
 
-def test_upload_writes_agent_logs_and_trace_files(tmp_path: Path) -> None:
-    settings.trace_dir = str(tmp_path / "traces")
-    trace_writer.trace_dir = Path(settings.trace_dir)
+def test_upload_writes_agent_logs_and_trace_spans(tmp_path: Path) -> None:
     task_id = _upload_task(tmp_path)
     expected_exceptions = {
         flow_id: expected
@@ -83,41 +80,43 @@ def test_upload_writes_agent_logs_and_trace_files(tmp_path: Path) -> None:
     assert isinstance(first_post_hooks["constraint_violated"], list)
     assert first_post_hooks["decision_route"] == "PENDING_HUMAN"
 
-    trace_dir = Path(settings.trace_dir) / task_id
-    trace_files = sorted(path.name for path in trace_dir.glob("*.json"))
-    assert trace_files == sorted(f"{flow_id}.json" for flow_id in expected_exceptions)
-    assert not (trace_dir / "F2001.json").exists()
-    assert not (trace_dir / "F2002.json").exists()
+    # Execution Trace is persisted to t_trace_span (DB), never local JSON files.
+    trace_service = TraceService()
+    runs = trace_service.list_runs(user_id="demo_user", task_id=task_id, flow_id="F2003")
+    assert len(runs) >= 1
+    assert trace_service.count_runs(user_id="demo_user", task_id=task_id, flow_id="F2001") == 0
+    assert trace_service.count_runs(user_id="demo_user", task_id=task_id, flow_id="F2002") == 0
 
-    trace = json.loads((trace_dir / "F2003.json").read_text(encoding="utf-8"))
-    assert trace["task_id"] == task_id
-    assert trace["flow_id"] == "F2003"
-    assert trace["user_id"] == "demo_user"
-    assert trace["rule_hit"] == {
-        "error_type": "AMOUNT_MISMATCH",
-        "exception_branch": "BE-R002",
-    }
-    assert trace["rag_hit"]["chunk_ids"]
-    assert trace["rag_hit"]["best_score"] is not None
-    assert trace["agent_output"]["decision"] == "PENDING_HUMAN"
-    assert trace["agent_output"]["risk_level"] == "MEDIUM"
-    assert trace["agent_output"]["ai_suggestion"] == "PENDING_HUMAN"
-    assert trace["agent_output"]["reason"]
-    assert trace["agent_output"]["confidence"] > 0
-    assert trace["created_at"]
+    spans = trace_service.get_spans(user_id="demo_user", task_id=task_id, flow_id="F2003")
+    assert spans, "F2003 should have a persisted Trace"
+    assert spans[0].span_type == "WORKFLOW"
+    assert spans[0].sequence_no == 1
+    assert [s.sequence_no for s in spans] == list(range(1, len(spans) + 1))
+    span_types = {s.span_type for s in spans}
+    assert "ROUTE" in span_types
+    assert "TOOL" in span_types
+    assert "AGENT" in span_types
+    # Exactly one terminal span, cross-user isolation.
+    terminals = [s for s in spans if s.span_type in {"FINAL", "FALLBACK"}]
+    assert len(terminals) == 1
+    assert trace_service.count_runs(user_id="other_user", task_id=task_id, flow_id="F2003") == 0
 
 
-def test_reupload_replaces_agent_logs_and_overwrites_trace_files(tmp_path: Path) -> None:
-    settings.trace_dir = str(tmp_path / "traces")
-    trace_writer.trace_dir = Path(settings.trace_dir)
+def test_reupload_appends_trace_runs_and_replaces_agent_logs(tmp_path: Path) -> None:
     task_id = _upload_task(tmp_path)
-    trace_file = Path(settings.trace_dir) / task_id / "F2003.json"
-    trace_file.write_text('{"stale": true}', encoding="utf-8")
+    trace_service = TraceService()
+    runs_before = trace_service.count_runs(
+        user_id="demo_user", task_id=task_id, flow_id="F2003"
+    )
+    assert runs_before >= 1
 
     reupload_task_id = _upload_task(tmp_path)
 
     assert reupload_task_id == task_id
+    # Agent logs use replace semantics.
     assert agent_log_service.count_rows(user_id="demo_user", task_id=task_id) == 6
-    trace = json.loads(trace_file.read_text(encoding="utf-8"))
-    assert trace["flow_id"] == "F2003"
-    assert "stale" not in trace
+    # Append-only Trace: re-running the same flow adds a new run, keeping history.
+    assert (
+        trace_service.count_runs(user_id="demo_user", task_id=task_id, flow_id="F2003")
+        == runs_before + 1
+    )

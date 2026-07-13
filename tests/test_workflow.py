@@ -207,7 +207,13 @@ def test_run_item_binds_trace_context(monkeypatch) -> None:
     )
 
     assert bound_contexts == [
-        {"trace_id": "TASK-WF-001", "user_id": "demo_user", "thread_id": "THREAD-WF-001"}
+        {
+            "trace_id": "TASK-WF-001",
+            "user_id": "demo_user",
+            "thread_id": "THREAD-WF-001",
+            "task_id": "TASK-WF-001",
+            "flow_id": "FLOW-BE-R002",
+        }
     ]
 
 
