@@ -1538,7 +1538,7 @@ def test_stage30_role_gate_fails_when_only_after_is_stage30() -> None:
 
     assert report["trust"]["trusted"] is False
     assert report["success"] is False
-    assert any("baseline lacks Stage 30" in r for r in report["trust"]["reasons"])
+    assert any("baseline missing" in r for r in report["trust"]["reasons"])
 
 
 def test_stage30_comparison_markdown_shows_enrichment_role_and_revision() -> None:
@@ -1679,3 +1679,98 @@ def test_stage30_all_non_target_equals_total_buckets_minus_one() -> None:
     assert report["trust"]["trusted"] is True
     total_buckets = len(_mode_buckets(baseline))
     assert len(report["side_effect_buckets"]["all_non_target"]) == total_buckets - 1
+
+
+# ---------------------------------------------------------------------------
+# TASK-30.11: Stage 30 intent detection and requested backend/mode trust
+# ---------------------------------------------------------------------------
+
+
+def test_stage30_intent_detected_when_both_drop_query_enrichment_but_keep_hashes() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(clearing_single_side_recall=0.60, clearing_single_side_miss_count=4)
+    del baseline["query_enrichment"]
+    del after["query_enrichment"]
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("query_enrichment metadata" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_requested_gate_fails_when_mode_not_in_top_level_modes() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(clearing_single_side_recall=0.60, clearing_single_side_miss_count=4)
+    baseline["modes"] = ["dense"]
+    after["modes"] = ["dense"]
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+        backend="bge_m3",
+        mode="hybrid",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("selected mode hybrid not in modes" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_requested_gate_fails_when_mode_lists_differ() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(clearing_single_side_recall=0.60, clearing_single_side_miss_count=4)
+    after["modes"] = ["dense", "hybrid"]
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("modes mismatch" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_requested_gate_fails_when_backend_lists_differ() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(clearing_single_side_recall=0.60, clearing_single_side_miss_count=4)
+    after["requested_backends"] = ["hash", "bge_m3"]
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("requested_backends mismatch" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_legacy_artifacts_without_intent_keys_use_legacy_reader() -> None:
+    baseline = _make_matrix(clearing_single_side_recall=0.40, clearing_single_side_miss_count=7)
+    after = _make_matrix(clearing_single_side_recall=0.35, clearing_single_side_miss_count=8)
+    del baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+        backend="bge_m3",
+        mode="hybrid",
+    )
+
+    assert report["trust"]["trusted"] is True
+    assert report["trust"]["bucket_metric_sources"]["baseline"] == "legacy_top_level_miss_buckets"

@@ -838,8 +838,16 @@ def _matrix_row_for_backend(matrix: dict[str, Any], backend: str) -> dict[str, A
     return matrix.get("rows", {}).get(backend, {})
 
 
+_STAGE30_INTENT_KEYS = (
+    "query_enrichment",
+    "eval_set_sha256",
+    "chunk_corpus_sha256",
+    "git_revision",
+)
+
+
 def _is_stage30_format(matrix: dict[str, Any]) -> bool:
-    return "query_enrichment" in matrix
+    return any(key in matrix for key in _STAGE30_INTENT_KEYS)
 
 
 def _global_metrics_for_mode(matrix: dict[str, Any], backend: str, mode: str) -> dict[str, float]:
@@ -975,18 +983,15 @@ def _validate_stage30_roles(
     after_matrix: dict[str, Any],
 ) -> list[str]:
     reasons: list[str] = []
-    if not _is_stage30_format(baseline_matrix):
-        reasons.append(
-            "baseline lacks Stage 30 query_enrichment metadata while after is Stage 30 format"
-        )
-    if not _is_stage30_format(after_matrix):
-        reasons.append(
-            "after lacks Stage 30 query_enrichment metadata while baseline is Stage 30 format"
-        )
     if not baseline_matrix.get("git_revision"):
         reasons.append("baseline missing git_revision")
     if not after_matrix.get("git_revision"):
         reasons.append("after missing git_revision")
+
+    if "query_enrichment" not in baseline_matrix:
+        reasons.append("baseline missing query_enrichment metadata")
+    if "query_enrichment" not in after_matrix:
+        reasons.append("after missing query_enrichment metadata")
 
     baseline_qe = baseline_matrix.get("query_enrichment") or {}
     if baseline_qe.get("enabled") is not False:
@@ -1009,6 +1014,45 @@ def _validate_stage30_roles(
         reasons.append("after query_enrichment missing profile_sha256")
     latency = after_qe.get("latency_ms")
     reasons.extend(_validate_after_latency(latency, after_matrix.get("case_count")))
+    return reasons
+
+
+def _validate_stage30_requested(
+    baseline_matrix: dict[str, Any],
+    after_matrix: dict[str, Any],
+    backend: str,
+    mode: str,
+) -> list[str]:
+    reasons: list[str] = []
+
+    baseline_backends = baseline_matrix.get("requested_backends")
+    after_backends = after_matrix.get("requested_backends")
+    if not isinstance(baseline_backends, list):
+        reasons.append("baseline requested_backends is missing or not a list")
+    if not isinstance(after_backends, list):
+        reasons.append("after requested_backends is missing or not a list")
+    if isinstance(baseline_backends, list) and isinstance(after_backends, list):
+        if baseline_backends != after_backends:
+            reasons.append(
+                f"requested_backends mismatch: baseline={baseline_backends}, after={after_backends}"
+            )
+        if backend not in baseline_backends:
+            reasons.append(
+                f"selected backend {backend} not in requested_backends {baseline_backends}"
+            )
+
+    baseline_modes = baseline_matrix.get("modes")
+    after_modes = after_matrix.get("modes")
+    if not isinstance(baseline_modes, list):
+        reasons.append("baseline modes is missing or not a list")
+    if not isinstance(after_modes, list):
+        reasons.append("after modes is missing or not a list")
+    if isinstance(baseline_modes, list) and isinstance(after_modes, list):
+        if baseline_modes != after_modes:
+            reasons.append(f"modes mismatch: baseline={baseline_modes}, after={after_modes}")
+        if mode not in baseline_modes:
+            reasons.append(f"selected mode {mode} not in modes {baseline_modes}")
+
     return reasons
 
 
@@ -1147,6 +1191,12 @@ def build_optimization_comparison_report(
         role_reasons = _validate_stage30_roles(baseline_matrix, after_matrix)
         if role_reasons:
             trust_reasons.extend(role_reasons)
+            trusted = False
+        requested_reasons = _validate_stage30_requested(
+            baseline_matrix, after_matrix, backend, mode
+        )
+        if requested_reasons:
+            trust_reasons.extend(requested_reasons)
             trusted = False
         for label, source in (("baseline", baseline_source), ("after", after_source)):
             if source["requested_backend"] != backend:
