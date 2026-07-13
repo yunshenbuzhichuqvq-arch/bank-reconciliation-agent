@@ -898,11 +898,21 @@ def _bucket_by_key(
     return {}
 
 
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _is_non_negative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _metric_delta(after: dict[str, Any], before: dict[str, Any]) -> dict[str, Any]:
     delta: dict[str, Any] = {}
     for key in ["miss_count", "hit_at_1", "recall_at_5", "mrr", "ndcg_at_5"]:
-        if key in after and key in before:
-            delta[key] = after[key] - before[key]
+        after_value = after.get(key)
+        before_value = before.get(key)
+        if _is_finite_number(after_value) and _is_finite_number(before_value):
+            delta[key] = after_value - before_value
     return delta
 
 
@@ -1058,6 +1068,7 @@ def _validate_stage30_requested(
 
 _BUCKET_INT_FIELDS = ("case_count", "miss_count")
 _BUCKET_FLOAT_FIELDS = ("hit_at_1", "recall_at_5", "mrr", "ndcg_at_5")
+STAGE30_TARGET_CASE_COUNT = 10
 
 
 def _bucket_key_counts(buckets: list[dict[str, Any]]) -> dict[tuple[Any, Any], int]:
@@ -1080,14 +1091,27 @@ def _validate_stage30_buckets(
     for label, buckets in (("baseline", baseline_buckets), ("after", after_buckets)):
         for bucket in buckets:
             key = (bucket.get("scenario_type"), bucket.get("error_type"))
+            for field in ("scenario_type", "error_type"):
+                value = bucket.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    reasons.append(f"{label} bucket {key} field {field} is missing or not a string")
             for field in _BUCKET_INT_FIELDS:
                 value = bucket.get(field)
-                if not isinstance(value, int) or isinstance(value, bool):
-                    reasons.append(f"{label} bucket {key} field {field} is missing or non-integer")
+                if not _is_non_negative_int(value):
+                    reasons.append(
+                        f"{label} bucket {key} field {field} is missing or not a non-negative int"
+                    )
+            case_count = bucket.get("case_count")
+            miss_count = bucket.get("miss_count")
+            if _is_non_negative_int(case_count) and _is_non_negative_int(miss_count):
+                if miss_count > case_count:
+                    reasons.append(
+                        f"{label} bucket {key} miss_count {miss_count} exceeds case_count {case_count}"
+                    )
             for field in _BUCKET_FLOAT_FIELDS:
                 value = bucket.get(field)
-                if not isinstance(value, (int, float)) or isinstance(value, bool):
-                    reasons.append(f"{label} bucket {key} field {field} is missing or non-numeric")
+                if not _is_finite_number(value):
+                    reasons.append(f"{label} bucket {key} field {field} is missing or not finite")
 
     baseline_counts = _bucket_key_counts(baseline_buckets)
     after_counts = _bucket_key_counts(after_buckets)
@@ -1110,21 +1134,23 @@ def _validate_stage30_buckets(
     for key in sorted(baseline_keys & after_keys, key=str):
         before_count = baseline_by_key[key].get("case_count")
         after_count = after_by_key[key].get("case_count")
-        if before_count != after_count:
-            reasons.append(
-                f"bucket {key} case_count mismatch: baseline={before_count}, after={after_count}"
-            )
+        if _is_non_negative_int(before_count) and _is_non_negative_int(after_count):
+            if before_count != after_count:
+                reasons.append(
+                    f"bucket {key} case_count mismatch: baseline={before_count}, after={after_count}"
+                )
 
-    baseline_sum = sum(b.get("case_count", 0) for b in baseline_buckets)
-    after_sum = sum(b.get("case_count", 0) for b in after_buckets)
-    if baseline_sum != baseline_case_count:
-        reasons.append(
-            f"baseline bucket case_count sum {baseline_sum} != matrix case_count {baseline_case_count}"
-        )
-    if after_sum != after_case_count:
-        reasons.append(
-            f"after bucket case_count sum {after_sum} != matrix case_count {after_case_count}"
-        )
+    for label, buckets, expected in (
+        ("baseline", baseline_buckets, baseline_case_count),
+        ("after", after_buckets, after_case_count),
+    ):
+        counts = [b.get("case_count") for b in buckets]
+        if all(_is_non_negative_int(c) for c in counts):
+            total = sum(counts)
+            if total != expected:
+                reasons.append(
+                    f"{label} bucket case_count sum {total} != matrix case_count {expected}"
+                )
 
     return reasons
 
@@ -1285,12 +1311,30 @@ def build_optimization_comparison_report(
             )
             trusted = False
             trust["trusted"] = False
+        for label, target in (("baseline", target_before), ("after", target_after)):
+            if target:
+                target_count = target.get("case_count")
+                if target_count != STAGE30_TARGET_CASE_COUNT:
+                    trust_reasons.append(
+                        f"{label} target bucket case_count {target_count!r} "
+                        f"!= required {STAGE30_TARGET_CASE_COUNT}"
+                    )
+                    trusted = False
+                    trust["trusted"] = False
 
     if target_before and target_after:
         target_delta = _metric_delta(target_after, target_before)
+        after_recall = target_after.get("recall_at_5")
+        before_recall = target_before.get("recall_at_5")
+        after_miss = target_after.get("miss_count")
+        before_miss = target_before.get("miss_count")
         target_improved = (
-            target_after.get("recall_at_5", 0) > target_before.get("recall_at_5", 0)
-            and target_after.get("miss_count", 0) < target_before.get("miss_count", 0)
+            _is_finite_number(after_recall)
+            and _is_finite_number(before_recall)
+            and _is_finite_number(after_miss)
+            and _is_finite_number(before_miss)
+            and after_recall > before_recall
+            and after_miss < before_miss
         )
     else:
         target_delta = {}

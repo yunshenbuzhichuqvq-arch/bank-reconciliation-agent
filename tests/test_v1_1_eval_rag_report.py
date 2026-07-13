@@ -1670,7 +1670,7 @@ def test_stage30_bucket_gate_fails_when_required_metric_field_missing() -> None:
     report = _run_stage30(baseline, after)
     assert report["trust"]["trusted"] is False
     assert report["success"] is False
-    assert any("ndcg_at_5" in r and "non-numeric" in r for r in report["trust"]["reasons"])
+    assert any("ndcg_at_5" in r and "not finite" in r for r in report["trust"]["reasons"])
 
 
 def test_stage30_all_non_target_equals_total_buckets_minus_one() -> None:
@@ -1774,3 +1774,76 @@ def test_stage30_legacy_artifacts_without_intent_keys_use_legacy_reader() -> Non
 
     assert report["trust"]["trusted"] is True
     assert report["trust"]["bucket_metric_sources"]["baseline"] == "legacy_top_level_miss_buckets"
+
+
+# ---------------------------------------------------------------------------
+# TASK-30.12: exception-free bucket schema validation and target 10-case lock
+# ---------------------------------------------------------------------------
+
+
+def test_stage30_bucket_gate_no_exception_on_string_case_count() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after)[0]["case_count"] = "70"
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("case_count" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_no_exception_on_string_metric() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after)[0]["ndcg_at_5"] = "high"
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("ndcg_at_5" in r and "not finite" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_fails_on_empty_identity() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after)[0]["error_type"] = ""
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("error_type is missing or not a string" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_fails_on_negative_count() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after)[0]["miss_count"] = -1
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any(
+        "miss_count is missing or not a non-negative int" in r for r in report["trust"]["reasons"]
+    )
+
+
+def test_stage30_bucket_gate_fails_when_miss_count_exceeds_case_count() -> None:
+    baseline, after = _stage30_pair()
+    bucket = _mode_buckets(after)[0]
+    bucket["miss_count"] = bucket["case_count"] + 1
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("exceeds case_count" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_target_locked_to_10_even_when_synchronized_to_9() -> None:
+    baseline, after = _stage30_pair()
+    for matrix in (baseline, after):
+        for bucket in _mode_buckets(matrix):
+            if bucket["error_type"] == "SINGLE_SIDE_MISSING":
+                bucket["case_count"] = 9
+            elif bucket["error_type"] == "TIMING_DIFFERENCE":
+                bucket["case_count"] = 41  # keep total 120
+
+    report = _run_stage30(baseline, after)  # must not raise
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("target bucket case_count" in r for r in report["trust"]["reasons"])
