@@ -6,6 +6,7 @@ import LoginPage from "../pages/LoginPage.vue";
 import MetricsPage from "../pages/MetricsPage.vue";
 import ReportPage from "../pages/ReportPage.vue";
 import ReviewPage from "../pages/ReviewPage.vue";
+import TraceReplayPage from "../pages/TraceReplayPage.vue";
 import UploadPage from "../pages/UploadPage.vue";
 import WorkbenchPage from "../pages/WorkbenchPage.vue";
 import { isAuthenticated } from "../composables/useAuth";
@@ -24,6 +25,7 @@ export const router = createRouter({
     { path: "/reports", component: ReportPage },
     { path: "/ledger", component: LedgerPage },
     { path: "/review", component: ReviewPage },
+    { path: "/traces/:taskId/:flowId", component: TraceReplayPage },
   ],
 });
 

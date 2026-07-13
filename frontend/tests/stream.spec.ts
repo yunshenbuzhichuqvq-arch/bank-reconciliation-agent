@@ -22,7 +22,7 @@ function createStorage(): Storage {
 
 function event(event_type: AgentStreamEvent["event_type"], seq: number): AgentStreamEvent {
   return {
-    schema_version: "1.1",
+    schema_version: "1.2",
     event_type,
     seq,
     task_id: event_type === "task_done" ? "TASK-1" : "PENDING",

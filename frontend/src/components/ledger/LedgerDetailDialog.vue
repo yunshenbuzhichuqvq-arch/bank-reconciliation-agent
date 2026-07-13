@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useRouter } from "vue-router";
 import type { LedgerRow } from "../../types/api";
 import { ERROR_TYPE_LABEL } from "../../constants/enums";
 import StatusBadge from "../ui/StatusBadge.vue";
+
+const router = useRouter();
 
 const props = defineProps<{
   modelValue: boolean;
@@ -17,6 +20,15 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit("update:modelValue", value),
 });
+
+function goToTrace() {
+  if (!props.row) return;
+  const tid = encodeURIComponent(props.row.task_id);
+  const fid = encodeURIComponent(props.row.flow_id);
+  // Close dialog, then navigate so the route replaces cleanly.
+  emit("update:modelValue", false);
+  router.push(`/traces/${tid}/${fid}`);
+}
 
 const ragSources = computed(() => {
   if (!props.row?.rag_source) {
@@ -36,6 +48,10 @@ function valueOrDash(value: string | number | null) {
 <template>
   <ElDialog v-model="visible" title="差错详情" width="720px" destroy-on-close>
     <div v-if="row" class="ledger-detail">
+      <div class="ledger-detail__actions">
+        <button class="btn-trace" @click="goToTrace">查看执行轨迹 →</button>
+      </div>
+
       <section class="ledger-detail__section">
         <h3>基本信息</h3>
         <dl class="ledger-detail__grid">
@@ -101,6 +117,29 @@ function valueOrDash(value: string | number | null) {
 </template>
 
 <style scoped>
+.btn-trace {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-trace:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.ledger-detail__actions {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-soft);
+  margin-bottom: var(--space-2);
+}
+
 .ledger-detail {
   display: grid;
   gap: var(--space-6);
