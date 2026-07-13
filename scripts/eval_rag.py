@@ -949,6 +949,69 @@ def _bucket_deltas(
     return deltas
 
 
+def _validate_after_latency(latency: Any, case_count: Any) -> list[str]:
+    if not isinstance(latency, dict):
+        return ["after query_enrichment missing latency summary"]
+    reasons: list[str] = []
+    required = ("count", "p50", "p95", "max")
+    missing = [key for key in required if key not in latency]
+    if missing:
+        return [f"after latency summary missing {key}" for key in missing]
+    count, p50, p95, mx = (latency["count"], latency["p50"], latency["p95"], latency["max"])
+    numbers = (count, p50, p95, mx)
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in numbers):
+        return ["after latency summary has non-numeric values"]
+    if count != case_count:
+        reasons.append(f"after latency count {count} != case_count {case_count}")
+    if any(v < 0 for v in (p50, p95, mx)):
+        reasons.append("after latency summary has negative values")
+    if not (p50 <= p95 <= mx):
+        reasons.append(f"after latency ordering invalid (p50={p50}, p95={p95}, max={mx})")
+    return reasons
+
+
+def _validate_stage30_roles(
+    baseline_matrix: dict[str, Any],
+    after_matrix: dict[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    if not _is_stage30_format(baseline_matrix):
+        reasons.append(
+            "baseline lacks Stage 30 query_enrichment metadata while after is Stage 30 format"
+        )
+    if not _is_stage30_format(after_matrix):
+        reasons.append(
+            "after lacks Stage 30 query_enrichment metadata while baseline is Stage 30 format"
+        )
+    if not baseline_matrix.get("git_revision"):
+        reasons.append("baseline missing git_revision")
+    if not after_matrix.get("git_revision"):
+        reasons.append("after missing git_revision")
+
+    baseline_qe = baseline_matrix.get("query_enrichment") or {}
+    if baseline_qe.get("enabled") is not False:
+        reasons.append(
+            f"baseline query_enrichment must be disabled (enabled={baseline_qe.get('enabled')!r})"
+        )
+    if baseline_qe.get("profile") is not None:
+        reasons.append(
+            f"baseline query_enrichment profile must be null (profile={baseline_qe.get('profile')!r})"
+        )
+
+    after_qe = after_matrix.get("query_enrichment") or {}
+    if after_qe.get("enabled") is not True:
+        reasons.append(
+            f"after query_enrichment must be enabled (enabled={after_qe.get('enabled')!r})"
+        )
+    if not after_qe.get("profile"):
+        reasons.append("after query_enrichment missing profile")
+    if not after_qe.get("profile_sha256"):
+        reasons.append("after query_enrichment missing profile_sha256")
+    latency = after_qe.get("latency_ms")
+    reasons.extend(_validate_after_latency(latency, after_matrix.get("case_count")))
+    return reasons
+
+
 def build_optimization_comparison_report(
     baseline_matrix: dict[str, Any],
     after_matrix: dict[str, Any],
@@ -962,7 +1025,7 @@ def build_optimization_comparison_report(
     baseline_row = _matrix_row_for_backend(baseline_matrix, backend)
     after_row = _matrix_row_for_backend(after_matrix, backend)
 
-    stage30 = _is_stage30_format(baseline_matrix) and _is_stage30_format(after_matrix)
+    stage30 = _is_stage30_format(baseline_matrix) or _is_stage30_format(after_matrix)
     allow_legacy_fallback = not stage30
 
     baseline_source = {
@@ -975,6 +1038,8 @@ def build_optimization_comparison_report(
         "mode": mode,
         "eval_set_sha256": baseline_matrix.get("eval_set_sha256"),
         "chunk_corpus_sha256": baseline_matrix.get("chunk_corpus_sha256"),
+        "git_revision": baseline_matrix.get("git_revision"),
+        "query_enrichment": baseline_matrix.get("query_enrichment"),
     }
     after_source = {
         "case_count": after_matrix.get("case_count"),
@@ -986,6 +1051,8 @@ def build_optimization_comparison_report(
         "mode": mode,
         "eval_set_sha256": after_matrix.get("eval_set_sha256"),
         "chunk_corpus_sha256": after_matrix.get("chunk_corpus_sha256"),
+        "git_revision": after_matrix.get("git_revision"),
+        "query_enrichment": after_matrix.get("query_enrichment"),
     }
 
     trust_reasons: list[str] = []
@@ -1004,6 +1071,10 @@ def build_optimization_comparison_report(
         trusted = False
 
     if stage30:
+        role_reasons = _validate_stage30_roles(baseline_matrix, after_matrix)
+        if role_reasons:
+            trust_reasons.extend(role_reasons)
+            trusted = False
         for label, source in (("baseline", baseline_source), ("after", after_source)):
             if source["requested_backend"] != backend:
                 trust_reasons.append(
@@ -1220,6 +1291,28 @@ def write_optimization_comparison_json(
     )
 
 
+def _format_enrichment_source_lines(label: str, enrichment: Any) -> list[str]:
+    if not isinstance(enrichment, dict):
+        return [f"- query_enrichment ({label}): missing"]
+    lines = [
+        f"- query_enrichment.enabled ({label}): {enrichment.get('enabled')}",
+        f"- query_enrichment.profile ({label}): {enrichment.get('profile')}",
+    ]
+    if enrichment.get("enabled"):
+        sha = enrichment.get("profile_sha256")
+        lines.append(f"- query_enrichment.profile_sha256 ({label}): `{sha}`")
+        latency = enrichment.get("latency_ms")
+        if isinstance(latency, dict):
+            lines.append(
+                f"- query_enrichment.latency_ms ({label}): "
+                f"count={latency.get('count')}, p50={latency.get('p50')}, "
+                f"p95={latency.get('p95')}, max={latency.get('max')}"
+            )
+        else:
+            lines.append(f"- query_enrichment.latency_ms ({label}): missing")
+    return lines
+
+
 def _format_optimization_comparison_markdown(report: dict[str, Any]) -> str:
     target = report["target"]
     lines = [
@@ -1253,8 +1346,10 @@ def _format_optimization_comparison_markdown(report: dict[str, Any]) -> str:
         f"- status: {baseline.get('status')}",
         f"- effective_backend: `{baseline.get('effective_backend')}`",
         f"- real_backend_policy: {baseline.get('real_backend_policy')}",
+        f"- git_revision: `{baseline.get('git_revision')}`",
         f"- eval_set_sha256: `{baseline.get('eval_set_sha256')}`",
         f"- chunk_corpus_sha256: `{baseline.get('chunk_corpus_sha256')}`",
+        *_format_enrichment_source_lines("baseline", baseline.get("query_enrichment")),
         "",
         "## After Source",
         "",
@@ -1263,8 +1358,10 @@ def _format_optimization_comparison_markdown(report: dict[str, Any]) -> str:
         f"- status: {after.get('status')}",
         f"- effective_backend: `{after.get('effective_backend')}`",
         f"- real_backend_policy: {after.get('real_backend_policy')}",
+        f"- git_revision: `{after.get('git_revision')}`",
         f"- eval_set_sha256: `{after.get('eval_set_sha256')}`",
         f"- chunk_corpus_sha256: `{after.get('chunk_corpus_sha256')}`",
+        *_format_enrichment_source_lines("after", after.get("query_enrichment")),
         "",
         "## Target Bucket",
         "",

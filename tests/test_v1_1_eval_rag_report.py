@@ -1107,28 +1107,57 @@ def test_build_optimization_comparison_rejects_legacy_mode_mismatch() -> None:
 
 
 def _make_stage30_matrix(
+    role: str,
     *,
     eval_set_sha256: str | None = "eval-hash-abc",
     chunk_corpus_sha256: str | None = "chunk-hash-xyz",
+    git_revision: str | None = "role-rev",
     query_enrichment: dict | None = None,
     **kwargs,
 ) -> dict:
     matrix = _make_matrix(**kwargs)
     matrix["eval_set_sha256"] = eval_set_sha256
     matrix["chunk_corpus_sha256"] = chunk_corpus_sha256
-    matrix["git_revision"] = "deadbeef"
-    matrix["query_enrichment"] = query_enrichment or {"enabled": False, "profile": None}
+    matrix["git_revision"] = git_revision
+    if query_enrichment is None:
+        if role == "baseline":
+            query_enrichment = {"enabled": False, "profile": None}
+        else:
+            query_enrichment = {
+                "enabled": True,
+                "profile": "bank-clearing-single-side-missing",
+                "profile_sha256": "profile-hash",
+                "latency_ms": {
+                    "count": matrix["case_count"],
+                    "p50": 0.1,
+                    "p95": 0.2,
+                    "max": 0.3,
+                },
+            }
+    matrix["query_enrichment"] = query_enrichment
     return matrix
 
 
+def _stage30_baseline(**kwargs) -> dict:
+    return _make_stage30_matrix("baseline", **kwargs)
+
+
+def _stage30_after(**kwargs) -> dict:
+    return _make_stage30_matrix("after", **kwargs)
+
+
 def test_stage30_comparison_trusted_when_hashes_match() -> None:
-    baseline = _make_stage30_matrix(
-        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
-        global_mrr=0.66, global_ndcg=0.65,
+    baseline = _stage30_baseline(
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
+        global_mrr=0.66,
+        global_ndcg=0.65,
     )
-    after = _make_stage30_matrix(
-        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
-        global_mrr=0.67, global_ndcg=0.66,
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+        global_mrr=0.67,
+        global_ndcg=0.66,
     )
 
     report = eval_rag.build_optimization_comparison_report(
@@ -1143,8 +1172,8 @@ def test_stage30_comparison_trusted_when_hashes_match() -> None:
 
 
 def test_stage30_comparison_trust_fails_when_eval_set_hash_mismatch() -> None:
-    baseline = _make_stage30_matrix(eval_set_sha256="hash-a")
-    after = _make_stage30_matrix(
+    baseline = _stage30_baseline(eval_set_sha256="hash-a")
+    after = _stage30_after(
         eval_set_sha256="hash-b",
         clearing_single_side_recall=0.60,
         clearing_single_side_miss_count=4,
@@ -1163,8 +1192,8 @@ def test_stage30_comparison_trust_fails_when_eval_set_hash_mismatch() -> None:
 
 
 def test_stage30_comparison_trust_fails_when_chunk_corpus_hash_mismatch() -> None:
-    baseline = _make_stage30_matrix(chunk_corpus_sha256="chunk-a")
-    after = _make_stage30_matrix(
+    baseline = _stage30_baseline(chunk_corpus_sha256="chunk-a")
+    after = _stage30_after(
         chunk_corpus_sha256="chunk-b",
         clearing_single_side_recall=0.60,
         clearing_single_side_miss_count=4,
@@ -1183,8 +1212,8 @@ def test_stage30_comparison_trust_fails_when_chunk_corpus_hash_mismatch() -> Non
 
 
 def test_stage30_comparison_trust_fails_when_hash_missing() -> None:
-    baseline = _make_stage30_matrix(eval_set_sha256=None)
-    after = _make_stage30_matrix(
+    baseline = _stage30_baseline(eval_set_sha256=None)
+    after = _stage30_after(
         clearing_single_side_recall=0.60,
         clearing_single_side_miss_count=4,
     )
@@ -1201,13 +1230,15 @@ def test_stage30_comparison_trust_fails_when_hash_missing() -> None:
 
 
 def test_stage30_comparison_does_not_use_legacy_bucket_fallback() -> None:
-    baseline = _make_stage30_matrix(
-        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+    baseline = _stage30_baseline(
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
     )
     del baseline["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
 
-    after = _make_stage30_matrix(
-        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
     )
 
     report = eval_rag.build_optimization_comparison_report(
@@ -1225,12 +1256,16 @@ def test_stage30_comparison_does_not_use_legacy_bucket_fallback() -> None:
 
 def test_build_optimization_comparison_success_false_when_global_mrr_regresses() -> None:
     baseline = _make_matrix(
-        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
-        global_mrr=0.66, global_ndcg=0.65,
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
+        global_mrr=0.66,
+        global_ndcg=0.65,
     )
     after = _make_matrix(
-        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
-        global_mrr=0.60, global_ndcg=0.65,
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+        global_mrr=0.60,
+        global_ndcg=0.65,
     )
 
     report = eval_rag.build_optimization_comparison_report(
@@ -1246,11 +1281,13 @@ def test_build_optimization_comparison_success_false_when_global_mrr_regresses()
 
 
 def test_comparison_json_includes_all_non_target_buckets() -> None:
-    baseline = _make_stage30_matrix(
-        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+    baseline = _stage30_baseline(
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
     )
-    after = _make_stage30_matrix(
-        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
     )
 
     report = eval_rag.build_optimization_comparison_report(
@@ -1273,11 +1310,13 @@ def test_comparison_json_includes_all_non_target_buckets() -> None:
 
 
 def test_comparison_markdown_shows_full_side_effect_data() -> None:
-    baseline = _make_stage30_matrix(
-        clearing_single_side_recall=0.40, clearing_single_side_miss_count=7,
+    baseline = _stage30_baseline(
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
     )
-    after = _make_stage30_matrix(
-        clearing_single_side_recall=0.60, clearing_single_side_miss_count=4,
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
     )
 
     report = eval_rag.build_optimization_comparison_report(
@@ -1290,3 +1329,237 @@ def test_comparison_markdown_shows_full_side_effect_data() -> None:
     md = eval_rag._format_optimization_comparison_markdown(report)
     assert "TIMING_DIFFERENCE" in md
     assert "AMOUNT_MISMATCH" in md
+
+
+# ---------------------------------------------------------------------------
+# TASK-30.7: artifact role and enrichment metadata fail-closed
+# ---------------------------------------------------------------------------
+
+
+def test_stage30_role_gate_fails_when_after_missing_query_enrichment() -> None:
+    baseline = _stage30_baseline()
+    after = _make_matrix(clearing_single_side_recall=0.60, clearing_single_side_miss_count=4)
+    after["eval_set_sha256"] = "eval-hash-abc"
+    after["chunk_corpus_sha256"] = "chunk-hash-xyz"
+    after["git_revision"] = "candidate-rev"
+    # deliberately no query_enrichment key on after
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("query_enrichment" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_fails_when_after_disabled() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(
+        query_enrichment={"enabled": False, "profile": None},
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("after query_enrichment must be enabled" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_fails_when_baseline_enabled() -> None:
+    baseline = _stage30_baseline(
+        query_enrichment={
+            "enabled": True,
+            "profile": "bank-clearing-single-side-missing",
+            "profile_sha256": "x",
+            "latency_ms": {"count": 120, "p50": 0.1, "p95": 0.2, "max": 0.3},
+        },
+    )
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any(
+        "baseline query_enrichment must be disabled" in r for r in report["trust"]["reasons"]
+    )
+
+
+def test_stage30_role_gate_fails_when_after_profile_hash_missing() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(
+        query_enrichment={
+            "enabled": True,
+            "profile": "bank-clearing-single-side-missing",
+            "profile_sha256": "",
+            "latency_ms": {"count": 120, "p50": 0.1, "p95": 0.2, "max": 0.3},
+        },
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("profile_sha256" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_fails_when_git_revision_missing() -> None:
+    baseline = _stage30_baseline(git_revision=None)
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("git_revision" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_fails_when_after_latency_missing() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(
+        query_enrichment={
+            "enabled": True,
+            "profile": "bank-clearing-single-side-missing",
+            "profile_sha256": "x",
+        },
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("latency" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_fails_when_latency_count_mismatch() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(
+        query_enrichment={
+            "enabled": True,
+            "profile": "bank-clearing-single-side-missing",
+            "profile_sha256": "x",
+            "latency_ms": {"count": 5, "p50": 0.1, "p95": 0.2, "max": 0.3},
+        },
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("latency count" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_fails_when_latency_order_invalid() -> None:
+    baseline = _stage30_baseline()
+    after = _stage30_after(
+        query_enrichment={
+            "enabled": True,
+            "profile": "bank-clearing-single-side-missing",
+            "profile_sha256": "x",
+            "latency_ms": {"count": 120, "p50": 0.5, "p95": 0.2, "max": 0.3},
+        },
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("ordering invalid" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_role_gate_fails_when_only_after_is_stage30() -> None:
+    baseline = _make_matrix(clearing_single_side_recall=0.40, clearing_single_side_miss_count=7)
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("baseline lacks Stage 30" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_comparison_markdown_shows_enrichment_role_and_revision() -> None:
+    baseline = _stage30_baseline(
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
+    )
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+    )
+
+    report = eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+    md = eval_rag._format_optimization_comparison_markdown(report)
+    assert "git_revision" in md
+    assert "query_enrichment.enabled" in md
+    assert "bank-clearing-single-side-missing" in md
+    assert "latency_ms" in md
