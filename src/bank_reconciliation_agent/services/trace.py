@@ -23,6 +23,7 @@ import structlog
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Index,
@@ -32,6 +33,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    TIMESTAMP,
     UniqueConstraint,
     func,
     insert,
@@ -83,10 +85,10 @@ t_trace_span = Table(
     Column("outcome", String(32), nullable=True),
     # Optional safe observation fields
     Column("attempt", Integer, nullable=False, server_default="1"),
-    Column("retry_recovered", Integer, nullable=False, server_default="0"),
+    Column("retry_recovered", Boolean, nullable=False, server_default="0"),
     Column("recovered_error_type", String(64), nullable=True),
-    Column("structured_repair_attempted", Integer, nullable=True),
-    Column("structured_repair_succeeded", Integer, nullable=True),
+    Column("structured_repair_attempted", Boolean, nullable=True),
+    Column("structured_repair_succeeded", Boolean, nullable=True),
     Column("model_name", String(128), nullable=True),
     Column("prompt_tokens", Integer, nullable=True),
     Column("completion_tokens", Integer, nullable=True),
@@ -101,7 +103,7 @@ t_trace_span = Table(
         server_default="[]",
     ),
     Column("schema_version", String(8), nullable=False, server_default="1.0"),
-    Column("created_at", DateTime, server_default=func.now()),
+    Column("created_at", TIMESTAMP, server_default=func.current_timestamp()),
     # Unique constraints
     UniqueConstraint("trace_id", "span_id", name="uq_trace_span_id"),
     UniqueConstraint("trace_id", "sequence_no", name="uq_trace_sequence"),
@@ -144,11 +146,15 @@ class TraceService:
         passed schema and structural validation **before** calling
         this method.
 
+        Raises ``ValueError`` if spans contain mismatched identity
+        fields or do not match the supplied *user_id*.
+
         Raises on duplicate ``span_id`` or ``sequence_no`` within the
         same ``trace_id`` (enforced by DB unique constraints).
         """
         if not spans:
             return
+        self._validate_caller_identity(user_id, spans)
         self._ensure_initialized()
         rows = [self._span_to_row(user_id, s) for s in spans]
         with self._engine.begin() as conn:
@@ -164,11 +170,12 @@ class TraceService:
     ) -> bool:
         """Best-effort persist a flow snapshot with full failure isolation.
 
-        Validates structural invariants and writes the whole batch inside a
-        single transaction. Any validation or write failure is swallowed after
-        recording a process-local counter and a sanitized warning; it never
-        raises, so business results stay unchanged. Returns ``True`` on
-        success, ``False`` on isolated failure or empty snapshot.
+        Validates structural invariants, caller identity parameters, and
+        writes the whole batch inside a single transaction. Any validation
+        or write failure is swallowed after recording a process-local
+        counter and a sanitized warning; it never raises, so business
+        results stay unchanged. Returns ``True`` on success, ``False`` on
+        isolated failure or empty snapshot.
         """
         span_list = list(spans)
         if not span_list:
@@ -176,6 +183,13 @@ class TraceService:
 
         trace_id = span_list[0].trace_id
         try:
+            # Validate caller params match span identity fields.
+            if span_list[0].user_id != user_id:
+                raise ValueError(f"user_id mismatch: caller={user_id} span={span_list[0].user_id}")
+            if span_list[0].task_id != task_id:
+                raise ValueError(f"task_id mismatch: caller={task_id} span={span_list[0].task_id}")
+            if span_list[0].flow_id != flow_id:
+                raise ValueError(f"flow_id mismatch: caller={flow_id} span={span_list[0].flow_id}")
             validate_trace_snapshot(span_list)
             self.save_trace(user_id=user_id, spans=span_list)
         except Exception as exc:
@@ -245,7 +259,7 @@ class TraceService:
                 t_trace_span.c.flow_id == flow_id,
                 t_trace_span.c.sequence_no == 1,
             )
-            .order_by(t_trace_span.c.started_at.desc())
+            .order_by(t_trace_span.c.started_at.desc(), t_trace_span.c.id.desc())
         )
         with self._engine.connect() as conn:
             rows = conn.execute(stmt).mappings().all()
@@ -316,8 +330,39 @@ class TraceService:
     def _ensure_initialized(self) -> None:
         if self._initialized:
             return
-        metadata.create_all(self._engine, tables=[t_trace_span])
+        if self._engine.dialect.name == "sqlite":
+            metadata.create_all(self._engine, tables=[t_trace_span])
         self._initialized = True
+
+    @staticmethod
+    def _validate_caller_identity(user_id: str, spans: list[TraceSpan]) -> None:
+        """Validate all spans share consistent identity and match caller user_id.
+
+        Raises ``ValueError`` on any mismatch.  The entire batch is rejected —
+        span tenant identity is never rewritten silently.
+        """
+        if not spans:
+            return
+        first = spans[0]
+        for i, s in enumerate(spans):
+            if s.user_id != first.user_id:
+                raise ValueError(
+                    f"span[{i}] user_id={s.user_id!r} != first user_id={first.user_id!r}"
+                )
+            if s.task_id != first.task_id:
+                raise ValueError(
+                    f"span[{i}] task_id={s.task_id!r} != first task_id={first.task_id!r}"
+                )
+            if s.flow_id != first.flow_id:
+                raise ValueError(
+                    f"span[{i}] flow_id={s.flow_id!r} != first flow_id={first.flow_id!r}"
+                )
+            if s.trace_id != first.trace_id:
+                raise ValueError(
+                    f"span[{i}] trace_id={s.trace_id!r} != first trace_id={first.trace_id!r}"
+                )
+        if first.user_id != user_id:
+            raise ValueError(f"user_id mismatch: caller={user_id!r} span={first.user_id!r}")
 
     def _span_to_row(self, user_id: str, span: TraceSpan) -> dict[str, object]:
         """Convert a validated ``TraceSpan`` to a DB insert dict."""
@@ -499,6 +544,12 @@ def validate_trace_snapshot(spans: list[TraceSpan] | tuple[TraceSpan, ...]) -> N
     trace_ids = {s.trace_id for s in span_list}
     if len(trace_ids) != 1:
         raise ValueError(f"All spans must share the same trace_id, found {trace_ids}")
+
+    # 6. All spans must share the same user_id, task_id, flow_id
+    for field_name in ("user_id", "task_id", "flow_id"):
+        values = {getattr(s, field_name) for s in span_list}
+        if len(values) != 1:
+            raise ValueError(f"All spans must share the same {field_name}, found {values}")
 
 
 # ---------------------------------------------------------------------------

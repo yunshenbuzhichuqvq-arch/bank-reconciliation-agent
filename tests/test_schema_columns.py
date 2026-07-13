@@ -125,9 +125,7 @@ def test_task_2a13_schema_sql_contains_runtime_columns() -> None:
 def test_task_101_branch_indexes_are_present() -> None:
     engine = create_engine("sqlite:///:memory:")
 
-    reconciliation_queue_table.metadata.create_all(
-        engine, tables=[reconciliation_queue_table]
-    )
+    reconciliation_queue_table.metadata.create_all(engine, tables=[reconciliation_queue_table])
     error_ledger_table.metadata.create_all(engine, tables=[error_ledger_table])
 
     inspector = inspect(engine)
@@ -252,9 +250,130 @@ def test_stage_28_bank_t1_reference_columns_in_schema_sql() -> None:
         assert fragment in schema_sql, f"Missing in schema.sql: {fragment}"
 
 
+def test_stage_29_trace_span_columns_in_table_definition() -> None:
+    from sqlalchemy import (
+        Boolean,
+        JSON,
+        String,
+        TIMESTAMP,
+        inspect as sa_inspect,
+    )
+    from sqlalchemy.sql import sqltypes
+
+    from bank_reconciliation_agent.services.trace import t_trace_span
+
+    engine = create_engine("sqlite:///:memory:")
+    t_trace_span.metadata.create_all(engine, tables=[t_trace_span])
+    inspector = sa_inspect(engine)
+
+    assert_columns(
+        inspector,
+        "t_trace_span",
+        {
+            "trace_id",
+            "span_id",
+            "parent_span_id",
+            "user_id",
+            "task_id",
+            "flow_id",
+            "sequence_no",
+            "span_type",
+            "name",
+            "started_at",
+            "ended_at",
+            "duration_ms",
+            "status",
+            "outcome",
+            "attempt",
+            "retry_recovered",
+            "recovered_error_type",
+            "structured_repair_attempted",
+            "structured_repair_succeeded",
+            "model_name",
+            "prompt_tokens",
+            "completion_tokens",
+            "cached_calls",
+            "result_count",
+            "error_type",
+            "fallback_reason",
+            "evidence_ids",
+            "schema_version",
+            "created_at",
+        },
+    )
+
+    # Boolean columns (DDL parity: BOOLEAN)
+    assert isinstance(t_trace_span.c.retry_recovered.type, Boolean)
+    assert t_trace_span.c.retry_recovered.nullable is False
+    assert t_trace_span.c.retry_recovered.server_default is not None
+
+    assert isinstance(t_trace_span.c.structured_repair_attempted.type, Boolean)
+    assert t_trace_span.c.structured_repair_attempted.nullable is True
+
+    assert isinstance(t_trace_span.c.structured_repair_succeeded.type, Boolean)
+    assert t_trace_span.c.structured_repair_succeeded.nullable is True
+
+    # created_at uses TIMESTAMP (DDL parity)
+    assert isinstance(t_trace_span.c.created_at.type, TIMESTAMP)
+    assert t_trace_span.c.created_at.server_default is not None
+
+    # evidence_ids uses JSON
+    assert isinstance(t_trace_span.c.evidence_ids.type, (JSON, sqltypes.JSON))
+    assert t_trace_span.c.evidence_ids.nullable is False
+
+    # schema_version: VARCHAR(8), not nullable
+    assert isinstance(t_trace_span.c.schema_version.type, String)
+    assert t_trace_span.c.schema_version.type.length == 8
+    assert t_trace_span.c.schema_version.nullable is False
+
+    # Identity columns: VARCHAR(64), not nullable
+    for col_name in ("trace_id", "span_id", "user_id", "task_id", "flow_id"):
+        col = t_trace_span.c[col_name]
+        assert isinstance(col.type, String)
+        assert col.type.length == 64
+        assert col.nullable is False
+
+    # Status: VARCHAR(32), not nullable
+    assert isinstance(t_trace_span.c.status.type, String)
+    assert t_trace_span.c.status.type.length == 32
+    assert t_trace_span.c.status.nullable is False
+
+    # Unique constraints (DDL parity)
+    from sqlalchemy import UniqueConstraint
+
+    uq_names = {c.name for c in t_trace_span.constraints if isinstance(c, UniqueConstraint)}
+    assert "uq_trace_span_id" in uq_names
+    assert "uq_trace_sequence" in uq_names
+
+    # Index (DDL parity)
+    from sqlalchemy import Index
+
+    index_names = {i.name for i in t_trace_span.indexes if isinstance(i, Index)}
+    assert "idx_trace_tenant_replay" in index_names
+
+
+def test_stage_29_trace_span_schema_sql_fragments() -> None:
+    schema_sql = read_schema_sql()
+
+    expected_fragments = [
+        "retry_recovered BOOLEAN NOT NULL DEFAULT 0",
+        "structured_repair_attempted BOOLEAN DEFAULT NULL",
+        "structured_repair_succeeded BOOLEAN DEFAULT NULL",
+        "evidence_ids JSON NOT NULL DEFAULT ('[]')",
+        "schema_version VARCHAR(8) NOT NULL DEFAULT '1.0'",
+        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "uq_trace_span_id",
+        "uq_trace_sequence",
+        "idx_trace_tenant_replay",
+    ]
+    for fragment in expected_fragments:
+        assert fragment in schema_sql, f"Missing in schema.sql: {fragment}"
+
+
 def assert_columns(inspector, table_name: str, expected_columns: set[str]) -> None:
     actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
     assert expected_columns <= actual_columns
+
 
 def index_names(inspector, table_name: str) -> set[str]:
     return {index["name"] for index in inspector.get_indexes(table_name)}

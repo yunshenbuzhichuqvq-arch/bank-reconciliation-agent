@@ -420,3 +420,259 @@ class TestNonexistentData:
     def test_list_runs_no_data(self, svc: TraceService) -> None:
         runs = svc.list_runs(user_id="user_1", task_id="task_x", flow_id="flow_x")
         assert runs == []
+
+
+# ---------------------------------------------------------------------------
+# Identity validation — reject mismatched spans / caller params
+# ---------------------------------------------------------------------------
+
+
+class TestIdentityValidation:
+    """save_trace / persist_snapshot reject spans with inconsistent identity."""
+
+    def test_save_trace_rejects_cross_user_spans(self, svc: TraceService) -> None:
+        trace_id = str(uuid.uuid4())
+        spans = _make_full_trace(trace_id, user_id="user_A")
+        spans.append(
+            _make_span(
+                trace_id,
+                user_id="user_B",
+                task_id="task_1",
+                flow_id="flow_1",
+                sequence_no=999,
+                span_type=SpanType.TOOL,
+                name="intruder_tool",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError, match="user_id"):
+            svc.save_trace(user_id="user_A", spans=spans)
+
+    def test_save_trace_rejects_cross_task_spans(self, svc: TraceService) -> None:
+        trace_id = str(uuid.uuid4())
+        spans = _make_full_trace(trace_id, task_id="task_A")
+        spans.append(
+            _make_span(
+                trace_id,
+                user_id="user_1",
+                task_id="task_B",
+                flow_id="flow_1",
+                sequence_no=999,
+                span_type=SpanType.TOOL,
+                name="intruder_tool",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError, match="task_id"):
+            svc.save_trace(user_id="user_1", spans=spans)
+
+    def test_save_trace_rejects_cross_flow_spans(self, svc: TraceService) -> None:
+        trace_id = str(uuid.uuid4())
+        spans = _make_full_trace(trace_id, flow_id="flow_A")
+        spans.append(
+            _make_span(
+                trace_id,
+                user_id="user_1",
+                task_id="task_1",
+                flow_id="flow_B",
+                sequence_no=999,
+                span_type=SpanType.TOOL,
+                name="intruder_tool",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError, match="flow_id"):
+            svc.save_trace(user_id="user_1", spans=spans)
+
+    def test_save_trace_rejects_cross_trace_id_spans(self, svc: TraceService) -> None:
+        trace_id_a = str(uuid.uuid4())
+        trace_id_b = str(uuid.uuid4())
+        spans = _make_full_trace(trace_id_a)
+        spans.append(
+            _make_span(
+                trace_id_b,
+                user_id="user_1",
+                task_id="task_1",
+                flow_id="flow_1",
+                sequence_no=999,
+                span_type=SpanType.TOOL,
+                name="intruder_tool",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError, match="trace_id"):
+            svc.save_trace(user_id="user_1", spans=spans)
+
+    def test_save_trace_rejects_caller_user_id_mismatch(self, svc: TraceService) -> None:
+        trace_id = str(uuid.uuid4())
+        spans = _make_full_trace(trace_id, user_id="user_A")
+        with pytest.raises(ValueError, match="user_id mismatch"):
+            svc.save_trace(user_id="user_B", spans=spans)
+
+    def test_validate_trace_snapshot_rejects_cross_user(self) -> None:
+        from bank_reconciliation_agent.services.trace import validate_trace_snapshot
+
+        trace_id = str(uuid.uuid4())
+        spans = list(_make_full_trace(trace_id, user_id="user_A"))
+        spans[0] = _make_span(
+            trace_id,
+            span_id=spans[0].span_id,
+            user_id="user_A",
+            task_id="task_1",
+            flow_id="flow_1",
+            sequence_no=1,
+            span_type=SpanType.WORKFLOW,
+            name="reconciliation_workflow",
+            outcome=WorkflowOutcome.AUTO_FIXED,
+        )
+        spans.append(
+            _make_span(
+                trace_id,
+                user_id="user_B",
+                task_id="task_1",
+                flow_id="flow_1",
+                sequence_no=5,
+                span_type=SpanType.TOOL,
+                name="bad",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError, match="user_id"):
+            validate_trace_snapshot(spans)
+
+    def test_validate_trace_snapshot_rejects_cross_task(self) -> None:
+        from bank_reconciliation_agent.services.trace import validate_trace_snapshot
+
+        trace_id = str(uuid.uuid4())
+        spans = list(_make_full_trace(trace_id, task_id="task_A"))
+        spans.append(
+            _make_span(
+                trace_id,
+                user_id="user_1",
+                task_id="task_B",
+                flow_id="flow_1",
+                sequence_no=5,
+                span_type=SpanType.TOOL,
+                name="bad",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError, match="task_id"):
+            validate_trace_snapshot(spans)
+
+    def test_validate_trace_snapshot_rejects_cross_flow(self) -> None:
+        from bank_reconciliation_agent.services.trace import validate_trace_snapshot
+
+        trace_id = str(uuid.uuid4())
+        spans = list(_make_full_trace(trace_id, flow_id="flow_A"))
+        spans.append(
+            _make_span(
+                trace_id,
+                user_id="user_1",
+                task_id="task_1",
+                flow_id="flow_B",
+                sequence_no=5,
+                span_type=SpanType.TOOL,
+                name="bad",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError, match="flow_id"):
+            validate_trace_snapshot(spans)
+
+    def test_mismatched_save_leaves_no_rows(self, svc: TraceService) -> None:
+        trace_id = str(uuid.uuid4())
+        spans = _make_full_trace(trace_id, user_id="user_A")
+        spans.append(
+            _make_span(
+                trace_id,
+                user_id="user_B",
+                task_id="task_1",
+                flow_id="flow_1",
+                sequence_no=999,
+                span_type=SpanType.TOOL,
+                name="intruder",
+                outcome=ToolOutcome.EMPTY,
+            )
+        )
+        with pytest.raises(ValueError):
+            svc.save_trace(user_id="user_A", spans=spans)
+        assert svc.count_runs(user_id="user_A", task_id="task_1", flow_id="flow_1") == 0
+
+    def test_persist_snapshot_task_id_mismatch_returns_false(self, svc: TraceService) -> None:
+        trace_id = str(uuid.uuid4())
+        spans = tuple(_make_full_trace(trace_id, task_id="task_A"))
+        result = svc.persist_snapshot(
+            user_id="user_1", task_id="task_B", flow_id="flow_1", spans=spans
+        )
+        assert result is False
+        assert svc.count_runs(user_id="user_1", task_id="task_A", flow_id="flow_1") == 0
+
+    def test_persist_snapshot_flow_id_mismatch_returns_false(self, svc: TraceService) -> None:
+        trace_id = str(uuid.uuid4())
+        spans = tuple(_make_full_trace(trace_id, flow_id="flow_A"))
+        result = svc.persist_snapshot(
+            user_id="user_1", task_id="task_1", flow_id="flow_B", spans=spans
+        )
+        assert result is False
+        assert svc.count_runs(user_id="user_1", task_id="task_1", flow_id="flow_A") == 0
+
+
+# ---------------------------------------------------------------------------
+# Latest-run tie-breaker — stable ordering when started_at is identical
+# ---------------------------------------------------------------------------
+
+
+class TestLatestRunTieBreak:
+    """When multiple runs share the same started_at, id.desc() breaks the tie."""
+
+    def test_list_runs_same_started_at_returns_insertion_order_stable(
+        self, svc: TraceService
+    ) -> None:
+        same_start = datetime(2026, 7, 13, 0, 0, 0, tzinfo=timezone.utc)
+        t1 = str(uuid.uuid4())
+        t2 = str(uuid.uuid4())
+        svc.save_trace(user_id="user_1", spans=_make_full_trace(t1, started_at=same_start))
+        svc.save_trace(user_id="user_1", spans=_make_full_trace(t2, started_at=same_start))
+
+        runs = svc.list_runs(user_id="user_1", task_id="task_1", flow_id="flow_1")
+        assert len(runs) == 2
+        assert runs[0]["trace_id"] == t2
+        assert runs[1]["trace_id"] == t1
+
+    def test_get_spans_default_selects_latest_by_id_when_same_started_at(
+        self, svc: TraceService
+    ) -> None:
+        same_start = datetime(2026, 7, 13, 0, 0, 0, tzinfo=timezone.utc)
+        t1 = str(uuid.uuid4())
+        t2 = str(uuid.uuid4())
+        svc.save_trace(user_id="user_1", spans=_make_full_trace(t1, started_at=same_start))
+        svc.save_trace(user_id="user_1", spans=_make_full_trace(t2, started_at=same_start))
+
+        result = svc.get_spans(user_id="user_1", task_id="task_1", flow_id="flow_1")
+        assert all(s.trace_id == t2 for s in result)
+
+
+# ---------------------------------------------------------------------------
+# Provisioning boundary — only SQLite gets auto-create
+# ---------------------------------------------------------------------------
+
+
+class TestProvisioningBoundary:
+    """_ensure_initialized only calls create_all for SQLite engines."""
+
+    def test_sqlite_engine_creates_table(self, svc: TraceService) -> None:
+        svc._ensure_initialized()
+        from sqlalchemy import inspect as sa_inspect
+
+        inspector = sa_inspect(svc._engine)
+        assert "t_trace_span" in inspector.get_table_names()
+
+    def test_non_sqlite_engine_skips_create_all(self) -> None:
+        from unittest.mock import MagicMock
+
+        eng = MagicMock()
+        eng.dialect.name = "mysql"
+        svc = TraceService(engine=eng)
+        svc._ensure_initialized()
+        assert svc._initialized is True

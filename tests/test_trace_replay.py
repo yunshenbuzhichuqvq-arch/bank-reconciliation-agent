@@ -265,3 +265,121 @@ def test_replay_other_users_trace_id_returns_trace_not_found() -> None:
 def test_replay_requires_bearer_token() -> None:
     resp = client.get(_url("TASK_ANY", "FLOW_ANY"))
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Latest-run tie-breaker via replay endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_replay_latest_tie_break_when_same_started_at() -> None:
+    """When two runs share the same started_at, the later-inserted (higher id)
+    run wins the default selection."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from bank_reconciliation_agent.schemas.trace import (
+        SpanStatus,
+        SpanType,
+        ToolOutcome,
+        TraceSpan,
+        WorkflowOutcome,
+    )
+    from bank_reconciliation_agent.services.trace import trace_service as svc_local
+
+    user_id, task_id, flow_id = "replay_tie", "TASK_TIE_BREAK", "FLOW_TIE"
+    _seed_task(user_id, task_id)
+    _seed_queue(user_id, task_id, flow_id)
+
+    same_start = datetime(2026, 7, 13, 0, 0, 0, tzinfo=timezone.utc)
+    ended = datetime(2026, 7, 13, 0, 0, 1, tzinfo=timezone.utc)
+
+    def _build_span(
+        trace_id: str,
+        span_id: str,
+        sequence_no: int,
+        span_type: SpanType,
+        name: str,
+        outcome: str | None = None,
+        parent_span_id: str | None = None,
+    ) -> TraceSpan:
+        return TraceSpan(
+            trace_id=trace_id,
+            span_id=span_id,
+            parent_span_id=parent_span_id,
+            user_id=user_id,
+            task_id=task_id,
+            flow_id=flow_id,
+            sequence_no=sequence_no,
+            span_type=span_type,
+            name=name,
+            started_at=same_start,
+            ended_at=ended,
+            duration_ms=1000,
+            status=SpanStatus.SUCCEEDED,
+            outcome=outcome,
+        )
+
+    t1 = str(uuid.uuid4())
+    root1_id = str(uuid.uuid4())
+    final1_id = str(uuid.uuid4())
+    trace1_spans = [
+        _build_span(t1, root1_id, 1, SpanType.WORKFLOW, "workflow", WorkflowOutcome.AUTO_FIXED),
+        _build_span(t1, str(uuid.uuid4()), 2, SpanType.ROUTE, "route", parent_span_id=root1_id),
+        _build_span(
+            t1,
+            str(uuid.uuid4()),
+            3,
+            SpanType.TOOL,
+            "tool",
+            ToolOutcome.RESULT,
+            parent_span_id=root1_id,
+        ),
+        _build_span(
+            t1,
+            final1_id,
+            4,
+            SpanType.FINAL,
+            "final",
+            WorkflowOutcome.AUTO_FIXED,
+            parent_span_id=root1_id,
+        ),
+    ]
+
+    t2 = str(uuid.uuid4())
+    root2_id = str(uuid.uuid4())
+    final2_id = str(uuid.uuid4())
+    trace2_spans = [
+        _build_span(t2, root2_id, 1, SpanType.WORKFLOW, "workflow", WorkflowOutcome.AUTO_FIXED),
+        _build_span(t2, str(uuid.uuid4()), 2, SpanType.ROUTE, "route", parent_span_id=root2_id),
+        _build_span(
+            t2,
+            str(uuid.uuid4()),
+            3,
+            SpanType.TOOL,
+            "tool",
+            ToolOutcome.RESULT,
+            parent_span_id=root2_id,
+        ),
+        _build_span(
+            t2,
+            final2_id,
+            4,
+            SpanType.FINAL,
+            "final",
+            WorkflowOutcome.AUTO_FIXED,
+            parent_span_id=root2_id,
+        ),
+    ]
+
+    svc_local.save_trace(user_id=user_id, spans=trace1_spans)
+    svc_local.save_trace(user_id=user_id, spans=trace2_spans)
+
+    resp = client.get(_url(task_id, flow_id), headers=_headers(user_id))
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    assert data["execution_count"] == 2
+    assert data["selected_trace_id"] == t2
+    assert data["runs"][0]["trace_id"] == t2
+    assert data["runs"][1]["trace_id"] == t1
