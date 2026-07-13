@@ -513,3 +513,524 @@ git status --short
 - Risks/Follow-up
 - Commit：`docs: record stage 30 verification`，body 包含 `Refs: TASK-30.6`
 
+---
+
+## Review Follow-up（2026-07-13）
+
+首次 Codex review 复现出 Stage 30 comparison 的 fail-closed contract 仍有缺口：artifact 角色 metadata
+缺失或失真时仍可能得到 `trust.trusted=true`，非目标 bucket 缺失时也会被静默跳过。以下任务只修复
+可信度判定、重建派生 comparison，并更新最终验证；不得重跑真实 embedding 实验、改变指标或恢复
+已拒绝的 candidate。
+
+依赖顺序：
+
+```text
+TASK-30.7 Artifact role trust gate
+  → TASK-30.8 Bucket completeness trust gate
+    → TASK-30.9 Regenerate comparison artifacts
+      → TASK-30.10 Re-run final verification
+```
+
+## TASK-30.7 — 对 Stage 30 artifact 角色与 enrichment metadata fail closed
+
+**Status**: ready
+**Spec Ref**: `Matrix Artifact`、`Comparison Artifact`、`Trust and Reporting`
+**ADR Ref**: `ADR-30.1` Decision 7–10
+
+### Goal
+
+修复 Stage 30 comparison 对新格式 artifact 的识别和角色校验：只要任一输入体现 Stage 30 新格式，
+另一输入缺失新格式字段就必须 fail closed；baseline 必须是 disabled，after 必须携带可复现的 candidate
+profile、revision 和 latency metadata。本 task 不改变任何指标计算或 tracked report。
+
+### Files to Modify
+
+- Modify: `scripts/eval_rag.py`
+- Modify: `tests/test_v1_1_eval_rag_report.py`
+
+### Do Not Touch
+
+- `src/`、`rules/`、`data/`、`reports/`
+- `tests/test_mvp2b3_eval_rag.py` 和其他 tests
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- query enrichment helper/runtime/eval candidate 恢复。
+- 真实 `bge_m3` baseline/after 重跑、指标调整或第三次 candidate。
+- Stage 22 legacy artifact 的 guarded compatibility 删除。
+- 公共 API、retriever、Tool、Trace 或数据库 contract 变化。
+
+### Acceptance Criteria
+
+- Stage 30 intent 不得依赖“两个输入都含 `query_enrichment`”才成立；任一输入带有 Stage 30 metadata
+  而另一输入缺失时，comparison 返回 `trust.trusted=false`、`success=false` 和稳定原因。
+- baseline 的 `query_enrichment` 必须为 disabled 且 profile 为空；after 必须为 enabled，并包含非空
+  profile、`profile_sha256`、`git_revision` 和 latency summary。
+- after latency summary 至少校验 `count/P50/P95/max`（允许现有小写 JSON key），count 必须等于 case count，
+  数值必须非负且满足 `P50 <= P95 <= max`。
+- baseline 也必须包含非空 `git_revision`；缺失 revision、profile hash 或 latency 任一项均 fail closed。
+- requested backend、effective backend、status、mode、case count、top-k 与两个 corpus hash 的现有门禁继续
+  生效；不得放宽 legacy compatibility gate。
+- comparison JSON/Markdown 的 source/trust evidence 能直接审查 baseline/after revision、enrichment role、
+  after profile/hash 和 latency，不再只能回查 matrix artifact。
+- 新增负向测试至少覆盖：after 缺 `query_enrichment`、after disabled、profile/hash 缺失、revision 缺失、
+  latency 缺失或 count/顺序非法；每例都断言 `trusted=false` 与 `success=false`。
+- 当前真实 Stage 30 baseline/after artifacts 仍能通过新的 role metadata trust gate。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_v1_1_eval_rag_report.py -q
+uv run ruff check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Reproduced Failures：逐项说明修复前为何错误得到 `trusted=true`
+- Trust Contract Summary：Stage 30 intent、baseline/after 角色与 latency/revision 校验
+- Legacy Compatibility：说明未放宽 Stage 22 guarded reader
+- Tests Run：逐条命令与真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-30.7`
+
+---
+
+## TASK-30.8 — 对 bucket 集合、唯一性与 case count fail closed
+
+**Status**: pending
+**Spec Ref**: `Comparison Artifact`、`Trust and Reporting`
+**ADR Ref**: `ADR-30.1` Decision 8–9
+
+### Goal
+
+阻止 comparison 在 baseline/after bucket 缺失、重复或 case count 不一致时静默生成不完整副作用表；
+可信 Stage 30 comparison 必须证明目标和全部非目标 bucket 一一对应。本 task 不修改 tracked report。
+
+### Files to Modify
+
+- Modify: `scripts/eval_rag.py`
+- Modify: `tests/test_v1_1_eval_rag_report.py`
+
+### Do Not Touch
+
+- `src/`、`rules/`、`data/`、`reports/`
+- `tests/test_mvp2b3_eval_rag.py` 和其他 tests
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 修改 metric 公式、success threshold、target bucket 或 legacy top-level fallback 规则。
+- 重跑 baseline/after、恢复 candidate 或调整 enrichment terms。
+- 将缺失 bucket 当作零值补齐或继续输出可信 verdict。
+
+### Acceptance Criteria
+
+- Stage 30 baseline/after 的 mode-specific bucket key 集合必须完全相同；任一侧缺失或新增 key 均
+  `trust.trusted=false`、`success=false`，原因列出具体 key。
+- 每侧 `(scenario_type, error_type)` 必须唯一；重复 key fail closed，不得由 dict 覆盖。
+- 同一 bucket 的 `case_count` 必须在 before/after 相等；每侧 bucket case count 总和必须等于 matrix
+  `case_count`；目标 bucket 必须保持 10 cases。
+- bucket 的必需指标字段缺失或类型非法时 fail closed，不得在 Markdown 中用默认 0 掩盖。
+- `_bucket_deltas` 或等价逻辑不得对 after 缺失项执行 `continue` 后仍生成可信结果。
+- trust 通过时，`all_non_target` 数量必须等于完整 bucket 总数减 1；当前 Stage 30 artifact 应为
+  `11 - 1 = 10`，且 10 个副作用 delta 均为 0。
+- 新增负向测试至少覆盖：after 删除一个非目标 bucket、增加额外 bucket、重复 bucket、bucket case count
+  不同、case count 总和不等；每例都断言 fail closed。
+- 现有 target Recall/miss、global MRR/NDCG success gate 和 legacy compatibility tests 保持通过。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_v1_1_eval_rag_report.py -q
+uv run ruff check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Bucket Integrity Contract：集合、唯一性、case count 与必需字段
+- Reproduced Failures：至少列出删除非目标 bucket 的修复前/后 trust 差异
+- Legacy Compatibility
+- Tests Run：逐条命令与真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-30.8`
+
+---
+
+## TASK-30.9 — 用加固后的 contract 重建 comparison artifacts
+
+**Status**: pending
+**Spec Ref**: `Comparison Artifact`、`Verdict`
+**ADR Ref**: `ADR-30.1` Decision 7–10
+
+### Goal
+
+只使用已提交的 Stage 30 baseline/after JSON，通过 TASK-30.7–30.8 的最终 comparison 代码重建
+Markdown/JSON，证明真实 artifact 仍可信且实验结论仍为 `success=false`。本 task 不重跑 embedding。
+
+### Files to Modify
+
+- Modify: `reports/rag_optimization_comparison.md`
+- Modify: `reports/rag_optimization_comparison.json`
+
+### Do Not Touch
+
+- `src/`、`scripts/`、`tests/`、`rules/`、`data/`
+- `reports/rag_quality_matrix_stage30_baseline.*`
+- `reports/rag_quality_matrix_stage30_after.*`
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 真实 `bge_m3` baseline/after 重跑。
+- 修改 matrix JSON、metric、profile hash、candidate revision 或 failure reasons 迁就 gate。
+- 恢复 candidate、修改 query terms 或尝试第二个 enrichment 方案。
+
+### Acceptance Criteria
+
+- 使用 tasks 中既有 comparison 命令重建两个 tracked artifact，命令输入只读现有 baseline/after JSON。
+- comparison 保持 `trust.trusted=true`、`success=false`，唯一实验结论仍为 `experiment rejected`。
+- target/global before、after、delta 与现有 matrix artifacts 一致，不允许手工编辑数值。
+- source/trust evidence 包含 baseline revision `b015add...`、candidate revision `51b48ef...`、profile
+  `bank-clearing-single-side-missing`、非空 profile SHA-256 和 latency summary。
+- 完整副作用表恰好包含 10 个非目标 bucket，全部 delta 为 0；不得再声称 14 个。
+- JSON 与 Markdown 同口径，重复运行到 `/tmp` 后与 tracked artifact 字节一致。
+- 不修改 baseline/after、代码、测试、数据或 rollback 后运行时行为。
+
+### Verification Commands
+
+```bash
+uv run python -m scripts.eval_rag \
+  --optimization-baseline-json reports/rag_quality_matrix_stage30_baseline.json \
+  --optimization-after-json reports/rag_quality_matrix_stage30_after.json \
+  --optimization-backend bge_m3 \
+  --optimization-mode dense \
+  --optimization-target-scenario BANK_CLEARING \
+  --optimization-target-error-type SINGLE_SIDE_MISSING \
+  --optimization-report reports/rag_optimization_comparison.md \
+  --optimization-json reports/rag_optimization_comparison.json
+
+jq -e '
+  .trust.trusted == true and
+  .success == false and
+  (.side_effect_buckets.all_non_target | length == 10) and
+  ([.side_effect_buckets.all_non_target[].delta |
+    select(.miss_count != 0 or .hit_at_1 != 0 or .recall_at_5 != 0 or
+           .mrr != 0 or .ndcg_at_5 != 0)] | length == 0)
+' reports/rag_optimization_comparison.json
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Exact Commands and Exit Codes
+- Source Metadata：baseline/candidate revision、profile/hash、latency
+- Target/Global/Side-effect Metrics
+- Verdict：`experiment rejected`
+- Reproducibility Check
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-30.9`
+
+---
+
+## TASK-30.10 — 复跑修复后的 Stage/PR 门禁并纠正 verification
+
+**Status**: pending
+**Spec Ref**: `Regression`、`Observability and Honesty`、全部 Acceptance Criteria
+**ADR Ref**: `ADR-30.1`
+
+### Goal
+
+在 TASK-30.7–30.9 完成后复跑最终门禁，更新 `verification.md` 中的 HEAD、task evidence、diff 统计、
+副作用数量和真实 gate 状态。本 task 只记录事实，不修复代码或改变实验 verdict。
+
+### Files to Modify
+
+- Modify: `docs/stages/stage-30-rag-query-optimization/verification.md`
+
+### Do Not Touch
+
+- `src/`、`scripts/`、`tests/`、`rules/`、`data/`、`reports/`
+- spec、tasks、ADR、README、架构/PRD 和 frontend
+
+### Out of Scope
+
+- 修复实现、修改 comparison 数值、重跑真实 embedding 或恢复 candidate。
+- 为使 repo-wide format gate 通过而格式化无关文件。
+- 把失败/未运行的命令标为 passed，或自行批准 inherited gate exception。
+- push、PR、merge 或 stage closeout。
+
+### Acceptance Criteria
+
+- `verification.md` 的 HEAD、日期、task-level evidence 与最终提交链一致，包含 TASK-30.7–30.9。
+- artifact 摘要准确记录 11 个总 bucket、10 个非目标 bucket；删除原“14 个非目标 bucket”错误。
+- `git diff --stat main...HEAD` 的文件数和增删行与命令输出一致，不沿用旧快照。
+- `git diff --check main...HEAD` 必须通过；若仍失败，verification 明确 failed 且 Stage 不得完成。
+- 完整运行并记录 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .` 的退出码。
+- 若 repo-wide format 仍是 main 已存在的 baseline failure，必须同时记录：当前失败文件数、Stage 30
+  改动 Python 文件的定向结果、main 对应文件的对照结果；不得把失败写成 passed，也不得擅自扩大格式化。
+- 明确区分“实验结论 `experiment rejected`”与“Stage/PR gate 是否通过”；前者不能掩盖后者失败。
+- scope/secret/large-file 检查使用最终 diff，且 `git status --short` 无意外文件。
+- 本 task 不改代码、报告、accepted spec/ADR 或 tasks 状态。
+
+### Verification Commands
+
+```bash
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+git diff --check main...HEAD
+git diff --stat main...HEAD
+git status --short
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Final Experiment State
+- Stage/PR Gate State
+- Full Gate Results：逐条命令、退出码、passed/failed
+- Artifact and Metrics Summary
+- Scope/Secret/Large-file Check
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：`docs: correct stage 30 verification after review fixes`，body 包含 `Refs: TASK-30.10`
+
+---
+
+## Second Review Follow-up（2026-07-13）
+
+第二次 Codex review 证明 TASK-30.7–30.8 已修复单侧 metadata 缺失和 bucket 集合缺失，但仍存在
+三类 fail-closed 缺口：两侧同时删除 `query_enrichment` 会退回 legacy 路径；top-level requested mode
+可与实际比较 mode 矛盾；非法 bucket 类型会在记录 trust reason 后继续参与算术并抛异常，且 target
+case count 可从 10 被同步篡改为 9 后仍保持 trusted。以下任务不得改变真实 Stage 30 指标或恢复 candidate。
+
+依赖顺序：
+
+```text
+TASK-30.11 Stage 30 intent and requested-mode trust
+  → TASK-30.12 Total bucket-schema and target-count fail closed
+    → TASK-30.13 Final evidence re-verification
+```
+
+执行 TASK-30.11 前，plan owner 必须先提交当前 `tasks.md` 规划更新；opencode 不得把规划文件混入
+实现 commit。
+
+## TASK-30.11 — 完整识别 Stage 30 intent 并校验 requested backend/mode
+
+**Status**: ready
+**Spec Ref**: `Matrix Artifact`、`Comparison Artifact`、`Trust and Reporting`
+**ADR Ref**: `ADR-30.1` Decision 7–10
+
+### Goal
+
+防止 baseline/after 同时缺少 `query_enrichment` 时被误判为 legacy artifact，并让 comparison 校验
+matrix top-level requested backend/mode 与实际选择的 backend/mode 一致。本 task 不修改 bucket 计算或报告。
+
+### Files to Modify
+
+- Modify: `scripts/eval_rag.py`
+- Modify: `tests/test_v1_1_eval_rag_report.py`
+
+### Do Not Touch
+
+- `src/`、`rules/`、`data/`、`reports/`
+- `tests/test_mvp2b3_eval_rag.py` 和其他 tests
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 修改 Stage 22 legacy artifact 内容或删除 guarded legacy compatibility。
+- bucket schema/count 修复；由 TASK-30.12 负责。
+- 重跑真实 embedding、恢复 candidate、修改指标或 profile。
+- 公共 API、retriever、Tool、Trace 或数据库 contract 变化。
+
+### Acceptance Criteria
+
+- Stage 30 intent 必须由任一 Stage 30-only metadata 明确识别，至少覆盖
+  `query_enrichment/eval_set_sha256/chunk_corpus_sha256/git_revision`；不得只检查
+  `query_enrichment` key。
+- baseline/after 同时删除 `query_enrichment`、但仍含 Stage 30 hash/revision 时，comparison 返回
+  `trust.trusted=false`、`success=false` 和明确缺失原因，不得退回 legacy 路径。
+- 只要任一输入表达 Stage 30 intent，两个输入都必须通过完整 Stage 30 role/hash/bucket gate。
+- baseline/after top-level `requested_backends` 必须彼此一致并包含 comparison 选择的 backend；top-level
+  `modes` 必须彼此一致并包含 comparison 选择的 mode。缺失、类型非法或矛盾均 fail closed。
+- row-level requested/effective backend、status 和 mode-specific metrics 的现有门禁继续生效。
+- 旧 artifact 在完全不含 Stage 30-only metadata 时继续走现有 guarded legacy reader，不得扩大 fallback。
+- 新增负向测试至少覆盖：两侧同时缺 `query_enrichment`、两侧 top-level mode 均与 requested mode 矛盾、
+  baseline/after mode 列表不一致、requested backend 列表矛盾。
+- 当前真实 Stage 30 baseline/after 仍为 `trust.trusted=true`、`success=false`，comparison 指标不变。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_v1_1_eval_rag_report.py -q
+uv run ruff check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Reproduced Failures：两侧缺 metadata 与 mode contradiction 的修复前/后结果
+- Stage 30 Intent Contract
+- Requested Backend/Mode Contract
+- Legacy Compatibility
+- Tests Run：逐条命令与真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-30.11`
+
+---
+
+## TASK-30.12 — 使 bucket schema 校验全程无异常并锁定 target 10 cases
+
+**Status**: pending
+**Spec Ref**: `Comparison Artifact`、`Trust and Reporting`
+**ADR Ref**: `ADR-30.1` Decision 8–9
+
+### Goal
+
+保证非法 bucket artifact 总是生成 `trusted=false/success=false` 的可审查报告，而不是在收集 trust reason
+后继续执行不安全算术；同时显式锁定 Stage 30 target bucket 的 10-case contract。
+
+### Files to Modify
+
+- Modify: `scripts/eval_rag.py`
+- Modify: `tests/test_v1_1_eval_rag_report.py`
+
+### Do Not Touch
+
+- `src/`、`rules/`、`data/`、`reports/`
+- `tests/test_mvp2b3_eval_rag.py` 和其他 tests
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 修改 metric 公式、success threshold、target identity 或 legacy fallback 规则。
+- 重跑 baseline/after、恢复 candidate 或调整 query terms。
+- 用默认零值修补非法 artifact 后继续给出可信 verdict。
+
+### Acceptance Criteria
+
+- bucket identity 的 `scenario_type/error_type` 必须为非空字符串；非法 identity fail closed。
+- `case_count/miss_count` 必须为非 bool 的非负整数，且 `miss_count <= case_count`。
+- `hit_at_1/recall_at_5/mrr/ndcg_at_5` 必须为有限数值；非法类型不得进入减法、排序或 Markdown
+  格式化路径。
+- 任一 schema/type 错误都必须返回结构化 comparison，包含稳定 trust/failure reason；不得抛
+  `TypeError/KeyError/ValueError`。
+- case count 求和只对通过类型校验的值执行；不得在记录类型错误后对字符串等非法值调用 `sum`。
+- Stage 30 target `BANK_CLEARING/SINGLE_SIDE_MISSING` 在 baseline 和 after 都必须恰好为 10 cases；即使
+  两侧同步改为 9 并在其他 bucket 补回总数，也必须 `trusted=false`、`success=false`。
+- 现有 bucket key 集合、唯一性、before/after count equality、总和等于 matrix case count 的门禁保持。
+- 新增负向测试至少覆盖：字符串 `case_count`、字符串 metric、空 bucket identity、负 count、
+  `miss_count > case_count`、target 两侧同步为 9 且总数仍为 120；每例断言不抛异常且 fail closed。
+- 当前真实 Stage 30 comparison 仍为 trusted rejection，10 个非目标 bucket delta 均为 0。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_v1_1_eval_rag_report.py -q
+uv run ruff check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Schema Validation Contract
+- No-Exception Evidence：列出原 `TypeError` case 的修复后报告结果
+- Target Count Evidence：同步 9-case 篡改的修复前/后 trust 结果
+- Tests Run：逐条命令与真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-30.12`
+
+---
+
+## TASK-30.13 — 复验最终 comparison 与 Stage/PR evidence
+
+**Status**: pending
+**Spec Ref**: `Regression`、`Observability and Honesty`、全部 Acceptance Criteria
+**ADR Ref**: `ADR-30.1`
+
+### Goal
+
+在 TASK-30.11–30.12 完成后，用已有 baseline/after artifact 复验 comparison 字节可复现性，并更新
+最终 `verification.md`。本 task 不修改代码、指标或实验结论。
+
+### Precondition
+
+- `tasks.md` 的 TASK-30.7–30.13 规划必须已由 plan owner 单独提交。
+- `git status --short` 不得显示未提交的 `tasks.md`；否则停止并报告，不得把规划混入本 task commit。
+
+### Files to Modify
+
+- Modify: `docs/stages/stage-30-rag-query-optimization/verification.md`
+
+### Do Not Touch
+
+- `src/`、`scripts/`、`tests/`、`rules/`、`data/`、`reports/`
+- spec、tasks、ADR、README、架构/PRD 和 frontend
+
+### Out of Scope
+
+- 覆盖 tracked comparison 来掩盖不可复现差异；若 `/tmp` 输出不同，停止并报告。
+- 重跑真实 embedding、改变 report 数值、恢复 candidate 或修改实现。
+- 格式化无关 repo 文件、自行批准 inherited format exception。
+- push、PR、merge 或 stage closeout。
+
+### Acceptance Criteria
+
+- 使用已有 baseline/after JSON 将 comparison 重建到 `/tmp`，JSON 与 Markdown 分别和 tracked artifact
+  字节一致；若不一致，本 task 失败且不覆盖 tracked report。
+- comparison 保持 `trust.trusted=true`、`success=false`、target 10 cases、10 个非目标 bucket 全部 delta=0。
+- `verification.md` 增加 TASK-30.11–30.12 evidence，并删除对不完整 OR-only detection 的过度声明。
+- 完整运行并记录 `uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`、
+  `git diff --check main...HEAD`、diff scope 和 `git status --short`。
+- `git diff --check main...HEAD` 必须通过；planning 文件已提交且工作区无意外改动。
+- repo-wide format baseline 若仍失败，必须如实保留 failed 状态及 main 对照，不得写成 passed。
+- 明确区分最终实验状态 `experiment rejected` 与 Stage/PR gate 状态。
+- 不修改 comparison、baseline/after、代码、测试、accepted spec/ADR 或 tasks 状态。
+
+### Verification Commands
+
+```bash
+uv run python -m scripts.eval_rag \
+  --optimization-baseline-json reports/rag_quality_matrix_stage30_baseline.json \
+  --optimization-after-json reports/rag_quality_matrix_stage30_after.json \
+  --optimization-backend bge_m3 \
+  --optimization-mode dense \
+  --optimization-target-scenario BANK_CLEARING \
+  --optimization-target-error-type SINGLE_SIDE_MISSING \
+  --optimization-report /tmp/stage30-comparison-review.md \
+  --optimization-json /tmp/stage30-comparison-review.json
+
+cmp -s reports/rag_optimization_comparison.json /tmp/stage30-comparison-review.json
+cmp -s reports/rag_optimization_comparison.md /tmp/stage30-comparison-review.md
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+git diff --check main...HEAD
+git diff --stat main...HEAD
+git status --short
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Comparison Reproducibility
+- Final Experiment State
+- Stage/PR Gate State
+- Full Gate Results：逐条命令、退出码、passed/failed
+- Scope/Secret/Large-file Check
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：`docs: record second stage 30 review verification`，body 包含 `Refs: TASK-30.13`
