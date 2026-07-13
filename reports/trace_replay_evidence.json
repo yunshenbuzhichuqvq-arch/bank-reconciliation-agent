@@ -1,0 +1,123 @@
+{
+  "environment": "offline",
+  "provider": "fake",
+  "embedding": "hash",
+  "database": "sqlite_in_memory",
+  "claim": {
+    "offline": true,
+    "local_latency_only": true,
+    "not_production_sla": true
+  },
+  "scenarios": [
+    {
+      "scenario": "complete_success",
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "AGENT",
+        "GUARD",
+        "FINAL"
+      ],
+      "terminal_type": "FINAL",
+      "span_count": 6
+    },
+    {
+      "scenario": "tool_failed_fallback",
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "FALLBACK"
+      ],
+      "terminal_type": "FALLBACK",
+      "span_count": 4
+    },
+    {
+      "scenario": "agent_repair_failure_fallback",
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "FALLBACK"
+      ],
+      "terminal_type": "FALLBACK",
+      "span_count": 4
+    },
+    {
+      "scenario": "guard_blocked_fallback",
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "AGENT",
+        "GUARD",
+        "FALLBACK"
+      ],
+      "terminal_type": "FALLBACK",
+      "span_count": 6
+    },
+    {
+      "scenario": "cross_tenant_replay_rejection",
+      "span_sequence": [],
+      "terminal_type": null,
+      "span_count": 0
+    },
+    {
+      "scenario": "trace_write_failure_isolation",
+      "span_sequence": [],
+      "terminal_type": null,
+      "span_count": 0
+    }
+  ],
+  "metrics": {
+    "trace_completeness_rate": 1.0,
+    "numerator": 4,
+    "denominator": 4,
+    "duration_p50_p95_by_type": {
+      "WORKFLOW": {
+        "p50": 0,
+        "p95": 0
+      },
+      "ROUTE": {
+        "p50": 0,
+        "p95": 0
+      },
+      "TOOL": {
+        "p50": 10,
+        "p95": 10
+      },
+      "AGENT": {
+        "p50": 0,
+        "p95": 0
+      },
+      "GUARD": {
+        "p50": 0,
+        "p95": 0
+      },
+      "FINAL": {
+        "p50": 0,
+        "p95": 0
+      },
+      "FALLBACK": {
+        "p50": 0,
+        "p95": 0
+      }
+    },
+    "error_distribution": {
+      "TOOL.CIRCUIT_OPEN": 1
+    },
+    "fallback_distribution": {
+      "RAG_CIRCUIT_OPEN": 1
+    },
+    "token_by_agent": {
+      "AuditAgent": {
+        "prompt": 0,
+        "completion": 0
+      }
+    },
+    "trace_write_success_count": 1,
+    "trace_write_failure_count": 1,
+    "source": "runtime_memory"
+  }
+}
