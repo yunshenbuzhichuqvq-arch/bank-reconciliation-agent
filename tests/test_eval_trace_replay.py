@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts import eval_trace_replay
 
 
@@ -307,6 +309,23 @@ def test_runner_refuses_non_hash_embedding(tmp_path: Path):
     )
     assert proc.returncode != 0
     # Failed before loading any embedding model or writing reports.
+    assert json_path.read_text("utf-8") == "OLD-JSON-CONTENT"
+    assert md_path.read_text("utf-8") == "OLD-MD-CONTENT"
+
+
+@pytest.mark.parametrize("truthy_value", ["1", "yes", "on"])
+def test_runner_refuses_truthy_rag_flags(tmp_path: Path, truthy_value: str):
+    reports = tmp_path / "reports"
+    json_path, md_path = _seed_old_reports(reports)
+    proc = _run_runner_subprocess(
+        {
+            "MYSQL_DSN": f"sqlite:///{tmp_path / 'eval.sqlite'}",
+            "EMBEDDING_BACKEND": "hash",
+            "ENABLE_RAG_HYBRID": truthy_value,
+        },
+        reports,
+    )
+    assert proc.returncode != 0
     assert json_path.read_text("utf-8") == "OLD-JSON-CONTENT"
     assert md_path.read_text("utf-8") == "OLD-MD-CONTENT"
 

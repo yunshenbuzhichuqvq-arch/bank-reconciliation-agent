@@ -58,11 +58,12 @@ def _lock_offline_environment() -> None:
             f"(got {embedding!r}). No reports were written.\n"
         )
         raise SystemExit(2)
+    false_values = {"false", "0", "no", "off"}
     for flag in ("ENABLE_RAG_RERANKER", "ENABLE_RAG_HYBRID", "ENABLE_RAG_REWRITE"):
         value = os.environ.get(flag)
-        if value is not None and value.strip().lower() == "true":
+        if value is not None and value.strip().lower() not in false_values:
             sys.stderr.write(
-                f"eval_trace_replay refuses to run: {flag} must be disabled. "
+                f"eval_trace_replay refuses to run: {flag} must be explicitly disabled. "
                 "No reports were written.\n"
             )
             raise SystemExit(2)
