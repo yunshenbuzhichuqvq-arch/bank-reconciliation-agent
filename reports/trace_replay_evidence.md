@@ -13,35 +13,41 @@
 ### complete_success
 - Terminal: FINAL
 - Span count: 6
+- Persisted: True
 - Sequence: `WORKFLOW → ROUTE → TOOL → AGENT → GUARD → FINAL`
 
 ### tool_failed_fallback
 - Terminal: FALLBACK
 - Span count: 4
+- Persisted: True
 - Sequence: `WORKFLOW → ROUTE → TOOL → FALLBACK`
 
 ### agent_repair_failure_fallback
 - Terminal: FALLBACK
-- Span count: 4
-- Sequence: `WORKFLOW → ROUTE → TOOL → FALLBACK`
+- Span count: 10
+- Persisted: True
+- Sequence: `WORKFLOW → ROUTE → TOOL → AGENT → TOOL → AGENT → AGENT → AGENT → GUARD → FALLBACK`
 
 ### guard_blocked_fallback
 - Terminal: FALLBACK
 - Span count: 6
+- Persisted: True
 - Sequence: `WORKFLOW → ROUTE → TOOL → AGENT → GUARD → FALLBACK`
 
 ### cross_tenant_replay_rejection
 - Terminal: None
 - Span count: 0
+- Persisted: True
 - Sequence: ``
 
 ### trace_write_failure_isolation
 - Terminal: None
 - Span count: 0
+- Persisted: False
 - Sequence: ``
 
 ## Duration (P50 / P95)
-- **WORKFLOW**: P50=0ms  P95=0ms
+- **WORKFLOW**: P50=0ms  P95=1ms
 - **ROUTE**: P50=0ms  P95=0ms
 - **TOOL**: P50=10ms  P95=10ms
 - **AGENT**: P50=0ms  P95=0ms
@@ -51,14 +57,17 @@
 
 ## Error Distribution
 - `TOOL.CIRCUIT_OPEN`: 1
+- `AGENT.schema_invalid`: 3
 
 ## Fallback Distribution
 - `RAG_CIRCUIT_OPEN`: 1
+- `structured_output_invalid`: 3
 
 ## Token by Agent
-- **AuditAgent**: prompt=0, completion=0
+- **AuditAgent**: prompt=300, completion=60, total=360
+- **TraceAgent**: prompt=0, completion=0, total=0
 
 ## Write Counters
-- Success: 1
+- Success: 5
 - Failure: 1
 - Source: `runtime_memory`
