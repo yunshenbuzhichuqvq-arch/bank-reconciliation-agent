@@ -16,6 +16,7 @@ const EVENT_LABEL: Record<AgentStreamEvent["event_type"], string> = {
   fallback: "Fallback",
   item_done: "单项完成",
   task_done: "任务完成",
+  trace_span: "Trace Span",
 };
 
 const payload = computed(() => props.event.payload);
@@ -72,6 +73,26 @@ const chunkIds = computed(() => {
     </header>
 
     <dl class="event-card__details">
+      <template v-if="event.event_type === 'trace_span'">
+        <div>
+          <dt>Span</dt>
+          <dd>{{ stringField('span_type') }} / {{ stringField('name') }}</dd>
+        </div>
+        <div v-if="stringField('status')">
+          <dt>状态</dt>
+          <dd>{{ stringField('status') }}</dd>
+        </div>
+        <div v-if="numberField('duration_ms') !== null">
+          <dt>耗时</dt>
+          <dd>{{ numberField('duration_ms') }}ms</dd>
+        </div>
+        <div v-if="stringField('error_type')">
+          <dt>错误</dt>
+          <dd>{{ stringField('error_type') }}</dd>
+        </div>
+      </template>
+
+      <template v-else>
       <div v-if="stringField('scenario_type')">
         <dt>场景</dt>
         <dd>{{ stringField("scenario_type") }}</dd>
@@ -120,6 +141,7 @@ const chunkIds = computed(() => {
         <dt>风险</dt>
         <dd><RiskBadge :level="stringField('risk_level')" /></dd>
       </div>
+      </template>
     </dl>
   </article>
 </template>

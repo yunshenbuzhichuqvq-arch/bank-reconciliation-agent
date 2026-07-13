@@ -14,6 +14,7 @@ class StreamEventType(StrEnum):
     FALLBACK = "fallback"
     ITEM_DONE = "item_done"
     TASK_DONE = "task_done"
+    TRACE_SPAN = "trace_span"
 
 
 class AgentStreamEvent(BaseModel):
@@ -29,9 +30,11 @@ class AgentStreamEvent(BaseModel):
     - fallback: agent_name, fallback_level, reason, next_action
     - item_done: flow_id, status, decision, confidence
     - task_done: status, ai_processed_rows, fallback_l2_rows, fallback_l3_rows
+    - trace_span: canonical TraceSpan safe projection (identity, type, status, outcome,
+      metrics, evidence IDs)
     """
 
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
     event_type: StreamEventType
     seq: int
     task_id: str

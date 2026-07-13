@@ -21,7 +21,7 @@ export interface ReportNarrative{ risk_summary:string; review_advice:string; fol
 export interface TaskReport{ task_id:string; generated_at:string; llm_used:boolean; metrics:TaskReportMetrics; narrative:ReportNarrative; markdown:string }
 
 // Keep aligned with backend schemas/stream.py and services/stream_emitter.py.
-export type StreamEventType = "task_started" | "task_progress" | "hook" | "rag_retrieved" | "agent_decision" | "fallback" | "item_done" | "task_done"
+export type StreamEventType = "task_started" | "task_progress" | "hook" | "rag_retrieved" | "agent_decision" | "fallback" | "item_done" | "task_done" | "trace_span"
 export interface TaskStartedPayload{ scenario_type:string; total_rows?:number }
 export interface TaskProgressPayload{ processed:number; total:number; auto_fixed:number; pending_ai:number; pending_human:number; unresolved:number; exception_dist:Record<string, number> }
 export interface HookPayload{ hook_name?:string; agent_name?:string; status?:string; step?:string; [key:string]:unknown }
@@ -30,5 +30,5 @@ export interface AgentDecisionPayload{ agent_name?:string; decision?:string; con
 export interface FallbackPayload{ agent_name?:string; fallback_level:number; reason?:string; next_action?:string; [key:string]:unknown }
 export interface ItemDonePayload{ flow_id?:string; status:string; decision?:string; confidence?:number; [key:string]:unknown }
 export interface TaskDonePayload{ status:string; total_bank_rows?:number; total_clear_rows?:number; auto_fixed_rows?:number; pending_ai_rows?:number; pending_human_rows?:number; ai_processed_rows?:number; fallback_l2_rows?:number; fallback_l3_rows?:number; error_message?:string }
-export type StreamPayload = TaskStartedPayload | TaskProgressPayload | HookPayload | RagRetrievedPayload | AgentDecisionPayload | FallbackPayload | ItemDonePayload | TaskDonePayload
+export type StreamPayload = TaskStartedPayload | TaskProgressPayload | HookPayload | RagRetrievedPayload | AgentDecisionPayload | FallbackPayload | ItemDonePayload | TaskDonePayload | Record<string,unknown>
 export interface AgentStreamEvent{ schema_version:string; event_type:StreamEventType; seq:number; task_id:string; flow_id:string|null; ts:string; payload:StreamPayload }

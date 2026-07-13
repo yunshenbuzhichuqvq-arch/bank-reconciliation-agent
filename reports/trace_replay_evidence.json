@@ -1,0 +1,206 @@
+{
+  "environment": "offline",
+  "provider": "fake",
+  "embedding": "hash",
+  "database": "sqlite_local",
+  "claim": {
+    "offline": true,
+    "fake_provider": true,
+    "hash_embedding": true,
+    "local_sqlite": true,
+    "local_latency_only": true,
+    "not_production_sla": true
+  },
+  "scenario_pass_count": 6,
+  "scenario_total": 6,
+  "scenarios": [
+    {
+      "scenario": "complete_success",
+      "eligible_execution": true,
+      "expected_persistence": true,
+      "trace_persisted": true,
+      "scenario_passed": true,
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "AGENT",
+        "GUARD",
+        "FINAL"
+      ],
+      "terminal_type": "FINAL",
+      "span_count": 6,
+      "facts": {
+        "decision": "AUTO_FIXED"
+      }
+    },
+    {
+      "scenario": "tool_failed_fallback",
+      "eligible_execution": true,
+      "expected_persistence": true,
+      "trace_persisted": true,
+      "scenario_passed": true,
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "FALLBACK"
+      ],
+      "terminal_type": "FALLBACK",
+      "span_count": 4,
+      "facts": {
+        "decision": "PENDING_HUMAN"
+      }
+    },
+    {
+      "scenario": "agent_repair_failure_fallback",
+      "eligible_execution": true,
+      "expected_persistence": true,
+      "trace_persisted": true,
+      "scenario_passed": true,
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "AGENT",
+        "TOOL",
+        "AGENT",
+        "AGENT",
+        "AGENT",
+        "GUARD",
+        "FALLBACK"
+      ],
+      "terminal_type": "FALLBACK",
+      "span_count": 10,
+      "facts": {
+        "failed_agent_spans": 3,
+        "structured_repair_attempted": true,
+        "structured_repair_succeeded": false,
+        "error_type": "schema_invalid",
+        "fallback_reason": "structured_output_invalid",
+        "non_cached_agent_tokens": 360,
+        "decision": "PENDING_HUMAN"
+      }
+    },
+    {
+      "scenario": "guard_blocked_fallback",
+      "eligible_execution": true,
+      "expected_persistence": true,
+      "trace_persisted": true,
+      "scenario_passed": true,
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "AGENT",
+        "GUARD",
+        "FALLBACK"
+      ],
+      "terminal_type": "FALLBACK",
+      "span_count": 6,
+      "facts": {
+        "guard_outcome": "BLOCKED"
+      }
+    },
+    {
+      "scenario": "cross_tenant_replay_rejection",
+      "eligible_execution": true,
+      "expected_persistence": true,
+      "trace_persisted": true,
+      "scenario_passed": true,
+      "span_sequence": [
+        "WORKFLOW",
+        "ROUTE",
+        "TOOL",
+        "AGENT",
+        "GUARD",
+        "FINAL"
+      ],
+      "terminal_type": "FINAL",
+      "span_count": 6,
+      "facts": {
+        "owner_http_status": 200,
+        "owner_replay_status": "AVAILABLE",
+        "non_owner_http_status": 404,
+        "non_owner_error_code": "TASK_NOT_FOUND",
+        "non_owner_payload_leaked": false,
+        "storage_empty_read": true
+      }
+    },
+    {
+      "scenario": "trace_write_failure_isolation",
+      "eligible_execution": true,
+      "expected_persistence": false,
+      "trace_persisted": false,
+      "scenario_passed": true,
+      "span_sequence": [],
+      "terminal_type": null,
+      "span_count": 0,
+      "facts": {
+        "business_call_succeeded": true,
+        "ledger_committed": true,
+        "queue_committed": true,
+        "task_stats_committed": true,
+        "final_decision": "PENDING_HUMAN",
+        "trace_rows": 0,
+        "failure_counter_incremented": true
+      }
+    }
+  ],
+  "metrics": {
+    "trace_completeness_rate": 0.8333333333333334,
+    "numerator": 5,
+    "denominator": 6,
+    "duration_p50_p95_by_type": {
+      "WORKFLOW": {
+        "p50": 0,
+        "p95": 23
+      },
+      "ROUTE": {
+        "p50": 0,
+        "p95": 0
+      },
+      "TOOL": {
+        "p50": 0,
+        "p95": 0
+      },
+      "AGENT": {
+        "p50": 0,
+        "p95": 0
+      },
+      "GUARD": {
+        "p50": 0,
+        "p95": 0
+      },
+      "FINAL": {
+        "p50": 0,
+        "p95": 0
+      },
+      "FALLBACK": {
+        "p50": 0,
+        "p95": 0
+      }
+    },
+    "error_distribution": {
+      "AGENT.schema_invalid": 3,
+      "TOOL.CIRCUIT_OPEN": 1
+    },
+    "fallback_distribution": {
+      "RAG_CIRCUIT_OPEN": 1,
+      "structured_output_invalid": 3
+    },
+    "token_by_agent": {
+      "AuditAgent": {
+        "prompt": 300,
+        "completion": 60
+      },
+      "TraceAgent": {
+        "prompt": 0,
+        "completion": 0
+      }
+    },
+    "trace_write_success_count": 5,
+    "trace_write_failure_count": 1,
+    "source": "runtime_memory"
+  }
+}

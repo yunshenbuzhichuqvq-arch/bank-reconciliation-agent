@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     mysql_dsn: str = "mysql+pymysql://root:password@127.0.0.1:3306/AI_agent"
     chroma_path: str = "./chroma_data"
     upload_dir: str = "./uploads"
-    trace_dir: str = "./data/traces"
     checkpoint_enabled: bool = False
     checkpoint_sqlite_path: str = "./data/checkpoint.sqlite"
     redis_dsn: str = "redis://127.0.0.1:6379/0"

@@ -1,7 +1,7 @@
 import { getDefaultHeaders } from "./client";
 import type { AgentStreamEvent } from "../types/api";
 
-const SUPPORTED_STREAM_SCHEMA_VERSIONS = new Set(["1.0", "1.1"]);
+const SUPPORTED_STREAM_SCHEMA_VERSIONS = new Set(["1.0", "1.1", "1.2"]);
 
 export interface StreamHandlers {
   onEvent: (event: AgentStreamEvent) => void;

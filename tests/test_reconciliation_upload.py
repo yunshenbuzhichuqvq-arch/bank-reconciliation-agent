@@ -718,7 +718,7 @@ def test_write_ledger_entries_does_not_directly_touch_other_service_privates(
             ledger_rows=[],
             rag_log_rows=[],
             agent_log_rows=[],
-            trace_payloads=[],
+            trace_snapshots=[],
             ai_processed_rows=0,
             fallback_l2_rows=0,
             fallback_l3_rows=0,

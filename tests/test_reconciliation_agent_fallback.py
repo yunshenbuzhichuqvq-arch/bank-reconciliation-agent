@@ -28,8 +28,8 @@ def test_write_ledger_entries_falls_back_per_row_and_continues(monkeypatch) -> N
         pending_human_rows=2,
     )
 
-    def fake_run_workflow(*, user_id, task_id, scenario_type, result, rag_query):
-        del user_id, scenario_type, rag_query
+    def fake_run_workflow(*, user_id, task_id, scenario_type, result, rag_query, recorder=None):
+        del user_id, scenario_type, rag_query, recorder
         if result.flow_id == "FLOW-BAD":
             raise ExtractionAgentError("invalid LLM JSON for ExtractionAgent")
         return _workflow_state(task_id=task_id, result=result)
@@ -71,8 +71,8 @@ def test_write_ledger_entries_falls_back_per_row_and_continues(monkeypatch) -> N
 def test_write_ledger_entries_does_not_swallow_infrastructure_errors(monkeypatch) -> None:
     service = ReconciliationService()
 
-    def fake_run_workflow(*, user_id, task_id, scenario_type, result, rag_query):
-        del user_id, task_id, scenario_type, result, rag_query
+    def fake_run_workflow(*, user_id, task_id, scenario_type, result, rag_query, recorder=None):
+        del user_id, task_id, scenario_type, result, rag_query, recorder
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(service, "_run_workflow_for_result", fake_run_workflow)

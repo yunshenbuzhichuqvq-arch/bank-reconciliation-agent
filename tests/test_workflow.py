@@ -58,9 +58,7 @@ def test_llm_usage_cache_hit_adds_zero_new_tokens() -> None:
 
 def test_llm_usage_prefers_summary_for_initial_plus_correction_tokens() -> None:
     class SummaryAgent:
-        last_llm_result = LLMResult(
-            text="{}", prompt_tokens=8, completion_tokens=4, model="fake"
-        )
+        last_llm_result = LLMResult(text="{}", prompt_tokens=8, completion_tokens=4, model="fake")
         last_llm_summary = LLMCallSummary(
             transport_attempts=2,
             retry_recovered=False,
@@ -207,7 +205,13 @@ def test_run_item_binds_trace_context(monkeypatch) -> None:
     )
 
     assert bound_contexts == [
-        {"trace_id": "TASK-WF-001", "user_id": "demo_user", "thread_id": "THREAD-WF-001"}
+        {
+            "trace_id": "TASK-WF-001",
+            "user_id": "demo_user",
+            "thread_id": "THREAD-WF-001",
+            "task_id": "TASK-WF-001",
+            "flow_id": "FLOW-BE-R002",
+        }
     ]
 
 
@@ -236,15 +240,15 @@ def test_run_item_rag_circuit_open_short_circuits_to_human() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        tool_executor=_ToolExecutor({"search_rules": [_failed("search_rules", "CIRCUIT_OPEN", "RAG_CIRCUIT_OPEN")]}),
+        tool_executor=_ToolExecutor(
+            {"search_rules": [_failed("search_rules", "CIRCUIT_OPEN", "RAG_CIRCUIT_OPEN")]}
+        ),
     )
 
     assert result["rag_context"] == []
     assert result["fallback_path"] == "HUMAN"
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
-    tool_log = next(
-        row for row in result["agent_logs"] if row["agent_name"] == "ToolExecutor"
-    )
+    tool_log = next(row for row in result["agent_logs"] if row["agent_name"] == "ToolExecutor")
     assert tool_log["status"] == "FAILED"
     assert tool_log["error_type"] == "CIRCUIT_OPEN"
 
@@ -255,7 +259,9 @@ def test_run_item_rag_recovered_success_continues_after_prior_failure() -> None:
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
-        tool_executor=_ToolExecutor({"search_rules": [_failed("search_rules", "CIRCUIT_OPEN", "RAG_CIRCUIT_OPEN")]}),
+        tool_executor=_ToolExecutor(
+            {"search_rules": [_failed("search_rules", "CIRCUIT_OPEN", "RAG_CIRCUIT_OPEN")]}
+        ),
     )
     assert failed_result["next_action"] == "PENDING_HUMAN"
 
@@ -524,6 +530,7 @@ class PlaceholderReasonAuditAgent:
 
 class UnsafeHighRiskProvider:
     """Provider that returns unsafe AUTO_FIXED/LOW for any request."""
+
     def complete(
         self,
         messages: list[dict[str, str]],
@@ -661,10 +668,12 @@ def _audit_log(result):
 
 
 def test_workflow_uses_llm_summary_for_initial_plus_correction_tokens() -> None:
-    provider = AuditSequenceProvider([
-        LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
-        LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
-    ])
+    provider = AuditSequenceProvider(
+        [
+            LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
+            LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
+        ]
+    )
 
     result = run_item(
         _state("BE-R002"),
@@ -682,15 +691,17 @@ def test_workflow_uses_llm_summary_for_initial_plus_correction_tokens() -> None:
 
 
 def test_workflow_cache_hit_adds_zero_llm_tokens() -> None:
-    provider = AuditSequenceProvider([
-        LLMResult(
-            text=_VALID_AUDIT,
-            prompt_tokens=99,
-            completion_tokens=99,
-            model="x",
-            cached=True,
-        ),
-    ])
+    provider = AuditSequenceProvider(
+        [
+            LLMResult(
+                text=_VALID_AUDIT,
+                prompt_tokens=99,
+                completion_tokens=99,
+                model="x",
+                cached=True,
+            ),
+        ]
+    )
 
     result = run_item(
         _state("BE-R002"),
@@ -706,10 +717,12 @@ def test_workflow_cache_hit_adds_zero_llm_tokens() -> None:
 
 
 def test_workflow_agent_log_contains_retry_and_repair_summary() -> None:
-    provider = AuditSequenceProvider([
-        LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
-        LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
-    ])
+    provider = AuditSequenceProvider(
+        [
+            LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
+            LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
+        ]
+    )
 
     result = run_item(
         _state("BE-R002"),
@@ -727,10 +740,12 @@ def test_workflow_agent_log_contains_retry_and_repair_summary() -> None:
 
 
 def test_stream_payload_projects_safe_llm_governance_fields() -> None:
-    provider = AuditSequenceProvider([
-        LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
-        LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
-    ])
+    provider = AuditSequenceProvider(
+        [
+            LLMResult(text=_INVALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x"),
+            LLMResult(text=_VALID_AUDIT, prompt_tokens=8, completion_tokens=4, model="x"),
+        ]
+    )
     emitter = QueueEmitter()
 
     run_item(
@@ -795,9 +810,7 @@ def test_final_llm_failure_records_stable_failure_and_fallback_reason() -> None:
         tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
-    trace_log = next(
-        row for row in result["agent_logs"] if row["agent_name"] == "TraceAgent"
-    )
+    trace_log = next(row for row in result["agent_logs"] if row["agent_name"] == "TraceAgent")
     assert trace_log["final_failure_type"] == "provider_5xx"
     assert trace_log["fallback_reason"] is not None
     assert result["fallback_path"] == "AI_ERROR->HUMAN"
