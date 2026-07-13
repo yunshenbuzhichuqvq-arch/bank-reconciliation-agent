@@ -43,7 +43,7 @@ TASK-30.2 是硬入口门禁。只有其 baseline 为可信 `bge_m3/dense`，TAS
 
 ## TASK-30.1 — 加固 matrix 与 comparison 的可信证据 contract
 
-**Status**: ready
+**Status**: done
 **Spec Ref**: `Matrix Artifact`、`Comparison Artifact`、`Trust and Reporting`
 **ADR Ref**: `ADR-30.1` Decision 7–10
 
@@ -114,7 +114,7 @@ uv run ruff format --check scripts/eval_rag.py tests/test_mvp2b3_eval_rag.py tes
 
 ## TASK-30.2 — 冻结可信 `bge_m3/dense` Stage 30 baseline
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Baseline Entry Gate`、`Determinism and Reproducibility`
 **ADR Ref**: `ADR-30.1` Decision 7、10
 
@@ -201,7 +201,7 @@ jq -e '
 
 ## TASK-30.3 — 实现单一 target query enrichment helper 与 profile
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Query Enrichment`、`Query Behavior`
 **ADR Ref**: `ADR-30.1` Decision 1–6
 
@@ -266,7 +266,7 @@ uv run ruff format --check src/bank_reconciliation_agent/rag/query_enrichment.py
 
 ## TASK-30.4 — 将同一 helper 接入 runtime 与 eval candidate 路径
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Main Flow` 4–6、`Query Enrichment`、`Matrix Artifact`
 **ADR Ref**: `ADR-30.1` Decision 2–7
 
@@ -342,7 +342,7 @@ uv run ruff format --check src/bank_reconciliation_agent/services/reconciliation
 
 ## TASK-30.5 — 生成 after/comparison 并强制执行 accept/reject verdict
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Main Flow` 6–9、`Comparison Artifact`、`Verdict`
 **ADR Ref**: `ADR-30.1` Decision 7–10
 
@@ -454,7 +454,7 @@ uv run ruff format --check scripts/eval_rag.py src/bank_reconciliation_agent/ser
 
 ## TASK-30.6 — 运行 Stage/PR 全量门禁并记录 verification
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Regression`、`Observability and Honesty`、全部 Acceptance Criteria
 **ADR Ref**: `ADR-30.1`
 
@@ -533,7 +533,7 @@ TASK-30.7 Artifact role trust gate
 
 ## TASK-30.7 — 对 Stage 30 artifact 角色与 enrichment metadata fail closed
 
-**Status**: ready
+**Status**: done
 **Spec Ref**: `Matrix Artifact`、`Comparison Artifact`、`Trust and Reporting`
 **ADR Ref**: `ADR-30.1` Decision 7–10
 
@@ -601,7 +601,7 @@ uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.p
 
 ## TASK-30.8 — 对 bucket 集合、唯一性与 case count fail closed
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Comparison Artifact`、`Trust and Reporting`
 **ADR Ref**: `ADR-30.1` Decision 8–9
 
@@ -665,7 +665,7 @@ uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.p
 
 ## TASK-30.9 — 用加固后的 contract 重建 comparison artifacts
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Comparison Artifact`、`Verdict`
 **ADR Ref**: `ADR-30.1` Decision 7–10
 
@@ -742,7 +742,7 @@ jq -e '
 
 ## TASK-30.10 — 复跑修复后的 Stage/PR 门禁并纠正 verification
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Regression`、`Observability and Honesty`、全部 Acceptance Criteria
 **ADR Ref**: `ADR-30.1`
 
@@ -825,7 +825,7 @@ TASK-30.11 Stage 30 intent and requested-mode trust
 
 ## TASK-30.11 — 完整识别 Stage 30 intent 并校验 requested backend/mode
 
-**Status**: ready
+**Status**: done
 **Spec Ref**: `Matrix Artifact`、`Comparison Artifact`、`Trust and Reporting`
 **ADR Ref**: `ADR-30.1` Decision 7–10
 
@@ -892,7 +892,7 @@ uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.p
 
 ## TASK-30.12 — 使 bucket schema 校验全程无异常并锁定 target 10 cases
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Comparison Artifact`、`Trust and Reporting`
 **ADR Ref**: `ADR-30.1` Decision 8–9
 
@@ -957,7 +957,7 @@ uv run ruff format --check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.p
 
 ## TASK-30.13 — 复验最终 comparison 与 Stage/PR evidence
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Regression`、`Observability and Honesty`、全部 Acceptance Criteria
 **ADR Ref**: `ADR-30.1`
 
@@ -1034,3 +1034,68 @@ git status --short
 - Deviations From Spec
 - Risks/Follow-up
 - Commit：`docs: record second stage 30 review verification`，body 包含 `Refs: TASK-30.13`
+
+---
+
+## TASK-30.14 — 修复最终 review 发现的 Stage 30 trust fail-open
+
+**Status**: done
+**Spec Ref**: `Trust and Reporting`、`Verdict`、`Regression`
+**ADR Ref**: `ADR-30.1` Decision 7–10
+
+### Goal
+
+修复 TASK-30.11–30.13 完成后的最终 Codex review 所发现的 fail-open：非法 bucket 结构仍可能在
+记录 trust reason 后抛异常；双方同步缺失或篡改 top-k、总 case count、hash 或全局指标时仍可能
+得到可信 verdict。保持真实 Stage 30 comparison 与实验结论不变。
+
+### Files to Modify
+
+- Modify: `scripts/eval_rag.py`
+- Modify: `tests/test_v1_1_eval_rag_report.py`
+
+### Do Not Touch
+
+- `src/`、`rules/`、`data/`、`reports/`
+- spec、ADR、README、架构/PRD 和 frontend
+
+### Out of Scope
+
+- 修改真实 baseline/after/comparison 指标或恢复 candidate。
+- 修改 legacy artifact 的 guarded compatibility。
+- 格式化无关 repo 文件或修复继承的 repo-wide format baseline。
+- commit、push、PR 或 merge。
+
+### Acceptance Criteria
+
+- 缺失或不可哈希 bucket identity、非对象 bucket、非 list bucket collection 均返回结构化
+  `trusted=false/success=false`，不得抛异常。
+- 非对象 `query_enrichment` metadata fail closed。
+- Stage 30 comparison 明确要求 `case_count=120`、`top_k=5`。
+- eval/chunk hash、Git revision、profile identity/hash 必须为非空字符串。
+- enrichment latency count 必须为非 bool 非负整数，P50/P95/max 必须为有限数值并保持顺序。
+- 全局 Hit@1、Recall@5、MRR、NDCG@5 必须完整且为有限数值；缺失或非法时不得把
+  `within_regression_limit` 标为 true。
+- 新增负向测试覆盖上述 fail-open；真实 comparison 仍为 `trusted=true/success=false` 且报告字节一致。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_v1_1_eval_rag_report.py -q
+uv run ruff check scripts/eval_rag.py tests/test_v1_1_eval_rag_report.py
+uv run pytest
+uv run ruff check .
+git diff --check
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Reproduced Fail-open Cases
+- Final Trust Contract
+- Comparison Reproducibility
+- Tests Run：逐条命令与真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：由实现 owner 后续创建，建议 `fix: close remaining stage 30 trust fail-open`，body 包含
+  `Refs: TASK-30.14`

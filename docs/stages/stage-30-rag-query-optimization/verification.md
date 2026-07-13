@@ -1,11 +1,12 @@
 # Stage 30 Verification
 
 - **Branch**: `stage-30-rag-query-optimization`
-- **HEAD**: `b963496ce0b2efa6200f0689db963a3240a2d789` (code/artifact state under verification; this verification commit becomes the new HEAD)
-- **Date**: 2026-07-13T12:16:28Z
+- **Base HEAD**: `d4e2e57222035d2f716f6468e7297756eb5408fa`
+- **Verified Worktree**: Base HEAD plus the uncommitted TASK-30.14 repair and this closeout record
+- **Date**: 2026-07-13T13:03:48Z
 - **Environment**: Darwin 25.5.0 arm64 / Apple M5 / Python 3.11.15 / torch 2.12.1 / sentence_transformers 5.6.0
 - **Final Experiment State**: `experiment rejected`
-- **Stage/PR Gate State**: `pytest`, `ruff check .`, and `git diff --check main...HEAD` pass. `ruff format --check .` remains an inherited repo-wide baseline failure (identical on `main` for the Stage 30 changed files). The experiment conclusion (`experiment rejected`) is a separate axis from gate status and does not override it.
+- **Stage/PR Gate State**: Current worktree passes `pytest`, `ruff check .`, comparison reproducibility, and both committed/local `git diff --check`. `ruff format --check .` remains an inherited repo-wide baseline failure. Local verification is complete; commit and remote publication remain pending under the repository role boundary.
 
 ## Task-Level Evidence Summary
 
@@ -24,6 +25,7 @@
 | TASK-30.11 | done | `scripts/eval_rag.py` + `tests/test_v1_1_eval_rag_report.py`: Stage 30 intent detected by ANY of `query_enrichment/eval_set_sha256/chunk_corpus_sha256/git_revision` (both-sides-drop-query_enrichment no longer falls back to legacy); top-level `requested_backends`/`modes` must be consistent across sides and contain the selected backend/mode; legacy artifacts without any intent key still use the guarded legacy reader; 5 new tests |
 | TASK-30.12 | done | `scripts/eval_rag.py` + `tests/test_v1_1_eval_rag_report.py`: exception-free bucket schema validation (non-empty string identity; non-bool non-negative int counts with `miss<=case`; finite metric values; guarded sum), illegal artifacts return structured `trusted=false/success=false` without raising; Stage 30 target locked to exactly 10 cases both sides (`STAGE30_TARGET_CASE_COUNT`); 6 new tests |
 | TASK-30.13 | done | This final verification record |
+| TASK-30.14 | done | Final review repair: malformed bucket/metadata paths are exception-free; Stage 30 locks 120 cases and top-k 5; hash/revision/profile/latency/global metric schema fail closed; 10 new negative tests |
 
 ## Comparison Reproducibility
 
@@ -37,7 +39,7 @@
 ```bash
 uv run pytest
 ```
-- **Exit code**: 0 — `1150 passed, 1 skipped, 6 warnings`
+- **Exit code**: 0 — `1160 passed, 1 skipped, 6 warnings`
 
 ```bash
 uv run ruff check .
@@ -59,16 +61,22 @@ git diff --check main...HEAD
 - **Exit code**: 0 — **PASS** (the earlier `tasks.md` trailing-blank-line issue was resolved when the plan owner committed the plan update `d3d79e2`)
 
 ```bash
-git diff --stat main...HEAD
+git diff --check
 ```
-- **Result**: `13 files changed, 5022 insertions(+), 142 deletions(-)`
+- **Exit code**: 0 — **PASS** for the uncommitted TASK-30.14 repair
+
+```bash
+git diff --stat main
+```
+- **Result**: `13 files changed, 5299 insertions(+), 154 deletions(-)`
 - Files: ADR-30.1, spec.md, tasks.md, verification.md, `reports/rag_optimization_comparison.{json,md}`, `reports/rag_quality_matrix_stage30_after.{json,md}`, `reports/rag_quality_matrix_stage30_baseline.{json,md}`, `scripts/eval_rag.py`, `tests/test_mvp2b3_eval_rag.py`, `tests/test_v1_1_eval_rag_report.py`
 - Note: this commit updates `verification.md`, so its line count in the final diff will increase relative to the snapshot above.
 
 ```bash
 git status --short
 ```
-- **Result**: clean (no uncommitted `tasks.md`, no unexpected code/data/cache/build artifacts)
+- **Result**: only the expected local closeout files are modified: `scripts/eval_rag.py`,
+  `tests/test_v1_1_eval_rag_report.py`, `tasks.md`, and `verification.md`; no unexpected code/data/cache/build artifacts.
 
 ## Artifact and Metrics Summary
 
@@ -87,7 +95,7 @@ git status --short
 - Global: Hit@1 0.6250 / Recall@5 0.8167 / MRR 0.7244 / NDCG@5 0.7110
 - Target: 10 cases, Recall@5 **0.2500** / miss **9** (regressed)
 
-### Comparison (regenerated TASK-30.9, hardened by TASK-30.7/30.8/30.11/30.12)
+### Comparison (regenerated TASK-30.9, hardened through TASK-30.14)
 - `reports/rag_optimization_comparison.{json,md}`
 - trust `trusted=true`, `success=false`
 - Target delta: Recall@5 -0.1000, miss_count +1, MRR -0.1300, NDCG@5 -0.1193
@@ -97,7 +105,7 @@ git status --short
 
 ## Scope / Secret / Large-file Check
 
-- `git diff --stat main...HEAD`: 13 files, all within Stage 30 scope (ADR, spec, tasks, verification, reports, eval script, tests)
+- `git diff --stat main`: 13 files, all within Stage 30 scope (ADR, spec, tasks, verification, reports, eval script, tests)
 - No `.env`, `.pkl`, `.bin`, `.pt`, model files, `chroma/`, `__pycache__`, `*.log`, archives, or `node_modules` in the diff
 - Largest added files are JSON/MD reports and test files; no large binaries
 - No secrets, credentials, or user data in any committed file
@@ -105,9 +113,11 @@ git status --short
 ## Deviations From Spec / Open Gate Items
 
 1. `ruff format --check .` — inherited repo-wide baseline failure (94 files), identical on `main` for the Stage 30 changed files; not introduced by Stage 30. Requires separate repo-wide governance.
-2. All other gates (`pytest`, `ruff check .`, `git diff --check main...HEAD`) pass.
+2. TASK-30.14 and this closeout record are locally verified but uncommitted; commit/push/PR remain with the implementation owner/user.
+3. All other gates (`pytest`, `ruff check .`, comparison byte reproducibility, committed/local `git diff --check`) pass.
 
 ## Risks / Follow-up
 
 - Repo-wide `ruff format` baseline still needs separate governance before the whole repo can pass `ruff format --check .`.
 - Experiment learning: appending category-level terms for BANK_CLEARING / SINGLE_SIDE_MISSING reduced target Recall@5 (0.35→0.25); a future attempt would need a different enrichment direction rather than plain category-term appending.
+- Local closeout is not remote publication: the verified TASK-30.14 repair and closeout docs still require an implementation-owner commit before the user pushes the branch.
