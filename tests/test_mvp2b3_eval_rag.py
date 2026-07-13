@@ -910,3 +910,198 @@ def test_mode_with_zero_only_deltas_keeps_dense() -> None:
     }
     selected, _ = eval_rag._select_best_mode(modes, deltas, mode_reports)
     assert selected == "dense"
+
+
+# ---------------------------------------------------------------------------
+# TASK-30.1: Stage 30 reproducible trust metadata on the matrix artifact
+# ---------------------------------------------------------------------------
+
+
+def _eval_set_file(tmp_path: Path) -> Path:
+    path = tmp_path / "eval_set.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "m30-1",
+                    "scenario_type": "BANK_ENTERPRISE",
+                    "error_type": "AMOUNT_MISMATCH",
+                    "query": "q1",
+                    "expected_chunk_ids": ["c1"],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _chunk_corpus_files(tmp_path: Path) -> list[Path]:
+    enterprise = tmp_path / "rule_chunks_bank_enterprise.jsonl"
+    clearing = tmp_path / "rule_chunks_bank_clearing.jsonl"
+    enterprise.write_text('{"chunk_id": "c1"}\n', encoding="utf-8")
+    clearing.write_text('{"chunk_id": "c2"}\n', encoding="utf-8")
+    return [enterprise, clearing]
+
+
+def _stage30_cases() -> list[eval_rag.EvalCase]:
+    return [
+        eval_rag.EvalCase(
+            id="m30-1",
+            scenario_type="BANK_ENTERPRISE",
+            error_type="AMOUNT_MISMATCH",
+            query="q1",
+            expected_chunk_ids=["c1"],
+        ),
+        eval_rag.EvalCase(
+            id="m30-2",
+            scenario_type="BANK_CLEARING",
+            error_type="SINGLE_SIDE_MISSING",
+            query="q2",
+            expected_chunk_ids=["c2"],
+        ),
+    ]
+
+
+def test_matrix_includes_stage30_trust_metadata(tmp_path: Path) -> None:
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"], "q2": ["x"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        _stage30_cases(),
+        requested_backends=["hash"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+        eval_set_path=_eval_set_file(tmp_path),
+        chunk_corpus_paths=_chunk_corpus_files(tmp_path),
+    )
+
+    assert isinstance(report["eval_set_sha256"], str) and report["eval_set_sha256"]
+    assert isinstance(report["chunk_corpus_sha256"], str) and report["chunk_corpus_sha256"]
+    assert "git_revision" in report
+    assert report["query_enrichment"]["enabled"] is False
+    assert report["query_enrichment"]["profile"] is None
+
+
+def test_matrix_query_enrichment_defaults_disabled(tmp_path: Path) -> None:
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"], "q2": ["x"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        _stage30_cases(),
+        requested_backends=["hash"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+    )
+
+    assert report["query_enrichment"]["enabled"] is False
+    assert report["query_enrichment"]["profile"] is None
+    assert report["eval_set_sha256"] is None
+    assert report["chunk_corpus_sha256"] is None
+
+
+def test_matrix_hashes_reflect_actual_bytes(tmp_path: Path) -> None:
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"], "q2": ["x"]}, embedding_backend=backend)
+
+    eval_set_path = _eval_set_file(tmp_path)
+    chunk_paths = _chunk_corpus_files(tmp_path)
+
+    def run() -> dict:
+        return eval_rag.evaluate_backend_mode_matrix(
+            _stage30_cases(),
+            requested_backends=["hash"],
+            modes=["dense"],
+            real_backend_policy="auto",
+            retriever_factory=factory,
+            eval_set_path=eval_set_path,
+            chunk_corpus_paths=chunk_paths,
+        )
+
+    first = run()
+    second = run()
+    assert first["eval_set_sha256"] == second["eval_set_sha256"]
+    assert first["chunk_corpus_sha256"] == second["chunk_corpus_sha256"]
+
+    chunk_paths[0].write_text('{"chunk_id": "c1-changed"}\n', encoding="utf-8")
+    third = run()
+    assert third["chunk_corpus_sha256"] != first["chunk_corpus_sha256"]
+    assert third["eval_set_sha256"] == first["eval_set_sha256"]
+
+
+def test_matrix_chunk_corpus_hash_is_stable_regardless_of_path_order(tmp_path: Path) -> None:
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"], "q2": ["x"]}, embedding_backend=backend)
+
+    chunk_paths = _chunk_corpus_files(tmp_path)
+
+    forward = eval_rag.evaluate_backend_mode_matrix(
+        _stage30_cases(),
+        requested_backends=["hash"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+        chunk_corpus_paths=chunk_paths,
+    )
+    reverse = eval_rag.evaluate_backend_mode_matrix(
+        _stage30_cases(),
+        requested_backends=["hash"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+        chunk_corpus_paths=list(reversed(chunk_paths)),
+    )
+    assert forward["chunk_corpus_sha256"] == reverse["chunk_corpus_sha256"]
+
+
+def test_matrix_measured_mode_keeps_mode_specific_bucket_metrics(tmp_path: Path) -> None:
+    def factory(backend: str) -> _StubRetrieverWithStore:
+        return _StubRetrieverWithStore({"q1": ["c1"], "q2": ["x"]}, embedding_backend=backend)
+
+    report = eval_rag.evaluate_backend_mode_matrix(
+        _stage30_cases(),
+        requested_backends=["hash"],
+        modes=["dense"],
+        real_backend_policy="auto",
+        retriever_factory=factory,
+        eval_set_path=_eval_set_file(tmp_path),
+        chunk_corpus_paths=_chunk_corpus_files(tmp_path),
+    )
+
+    bucket_metrics = report["rows"]["hash"]["modes"]["dense"]["bucket_metrics"]
+    keys = {(b["scenario_type"], b["error_type"]) for b in bucket_metrics}
+    assert ("BANK_CLEARING", "SINGLE_SIDE_MISSING") in keys
+    assert ("BANK_ENTERPRISE", "AMOUNT_MISMATCH") in keys
+
+
+def test_matrix_cli_writes_non_empty_hashes(tmp_path: Path) -> None:
+    matrix_json_path = tmp_path / "rag_quality_matrix.json"
+    eval_rag.main(
+        [
+            "--eval-set",
+            str(PROJECT_ROOT / "data/rag_eval_set.json"),
+            "--chroma",
+            str(tmp_path / "chroma"),
+            "--top-k",
+            "5",
+            "--matrix-backends",
+            "hash",
+            "--matrix-modes",
+            "dense",
+            "--real-backend-policy",
+            "auto",
+            "--matrix-report",
+            str(tmp_path / "rag_quality_matrix.md"),
+            "--matrix-json",
+            str(matrix_json_path),
+        ]
+    )
+
+    payload = json.loads(matrix_json_path.read_text(encoding="utf-8"))
+    assert isinstance(payload["eval_set_sha256"], str) and payload["eval_set_sha256"]
+    assert isinstance(payload["chunk_corpus_sha256"], str) and payload["chunk_corpus_sha256"]
+    assert payload["query_enrichment"]["enabled"] is False
+    assert payload["query_enrichment"]["profile"] is None

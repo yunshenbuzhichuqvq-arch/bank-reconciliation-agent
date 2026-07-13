@@ -3,7 +3,7 @@
     "scenario_type": "BANK_CLEARING",
     "error_type": "SINGLE_SIDE_MISSING",
     "backend": "bge_m3",
-    "mode": "hybrid"
+    "mode": "dense"
   },
   "baseline_source": {
     "case_count": 120,
@@ -12,7 +12,14 @@
     "requested_backend": "bge_m3",
     "effective_backend": "bge_m3",
     "status": "measured",
-    "mode": "hybrid"
+    "mode": "dense",
+    "eval_set_sha256": "71fd0db2e02faeccca15bf177e1582b9db0518af9208dc5025ae6481699929c2",
+    "chunk_corpus_sha256": "b71d67f6a9954a7ee1a3ab0ad40f80ceaf7de0b14fa00dfd7978f14ed2f78018",
+    "git_revision": "b015add4b674a2fe7e595d8a5594ae47d0d614a1",
+    "query_enrichment": {
+      "enabled": false,
+      "profile": null
+    }
   },
   "after_source": {
     "case_count": 120,
@@ -21,66 +28,80 @@
     "requested_backend": "bge_m3",
     "effective_backend": "bge_m3",
     "status": "measured",
-    "mode": "hybrid"
+    "mode": "dense",
+    "eval_set_sha256": "71fd0db2e02faeccca15bf177e1582b9db0518af9208dc5025ae6481699929c2",
+    "chunk_corpus_sha256": "b71d67f6a9954a7ee1a3ab0ad40f80ceaf7de0b14fa00dfd7978f14ed2f78018",
+    "git_revision": "51b48efbb717a03cab3d2add16dc216bd127db19",
+    "query_enrichment": {
+      "enabled": true,
+      "profile": "bank-clearing-single-side-missing",
+      "profile_sha256": "40dce1eb42546d416f3717f3c8027d761f62fa08671fd667dc86645e95ac6b7f",
+      "latency_ms": {
+        "count": 120,
+        "p50": 0.0019590079318732023,
+        "p95": 0.003369417390786109,
+        "max": 0.013874989235773683
+      }
+    }
   },
   "trust": {
     "trusted": true,
     "reasons": [],
     "bucket_metric_sources": {
-      "baseline": "legacy_top_level_miss_buckets",
+      "baseline": "mode_bucket_metrics",
       "after": "mode_bucket_metrics"
     }
   },
   "target_bucket": {
     "before": {
       "case_count": 10,
-      "miss_count": 7,
-      "hit_at_1": 0.1,
-      "recall_at_5": 0.4,
-      "mrr": 0.2833333333333333,
-      "ndcg_at_5": 0.2937503349954187
+      "miss_count": 8,
+      "hit_at_1": 0.3,
+      "recall_at_5": 0.35,
+      "mrr": 0.38333333333333336,
+      "ndcg_at_5": 0.31131471927654586
     },
     "after": {
       "case_count": 10,
-      "miss_count": 7,
-      "hit_at_1": 0.3,
-      "recall_at_5": 0.45,
-      "mrr": 0.395,
-      "ndcg_at_5": 0.3528136245145182
+      "miss_count": 9,
+      "hit_at_1": 0.2,
+      "recall_at_5": 0.25,
+      "mrr": 0.2533333333333333,
+      "ndcg_at_5": 0.19197207891481877
     },
     "delta": {
-      "miss_count": 0,
-      "hit_at_1": 0.19999999999999998,
-      "recall_at_5": 0.04999999999999999,
-      "mrr": 0.11166666666666669,
-      "ndcg_at_5": 0.059063289519099504
+      "miss_count": 1,
+      "hit_at_1": -0.09999999999999998,
+      "recall_at_5": -0.09999999999999998,
+      "mrr": -0.13000000000000006,
+      "ndcg_at_5": -0.11934264036172709
     },
     "improved": false
   },
   "global": {
     "before": {
-      "hit_at_1": 0.5583333333333333,
-      "recall_at_5": 0.7541666666666667,
-      "mrr": 0.6675,
-      "ndcg_at_5": 0.6551831198479162
+      "hit_at_1": 0.6333333333333333,
+      "recall_at_5": 0.825,
+      "mrr": 0.7352777777777778,
+      "ndcg_at_5": 0.7209402917441399
     },
     "after": {
-      "hit_at_1": 0.6166666666666667,
-      "recall_at_5": 0.7875,
-      "mrr": 0.7220833333333334,
-      "ndcg_at_5": 0.7007177543097192
+      "hit_at_1": 0.625,
+      "recall_at_5": 0.8166666666666667,
+      "mrr": 0.7244444444444444,
+      "ndcg_at_5": 0.7109950717139959
     },
     "delta": {
-      "hit_at_1": 0.05833333333333335,
-      "recall_at_5": 0.033333333333333326,
-      "mrr": 0.05458333333333343,
-      "ndcg_at_5": 0.04553463446180295
+      "hit_at_1": -0.008333333333333304,
+      "recall_at_5": -0.008333333333333304,
+      "mrr": -0.010833333333333361,
+      "ndcg_at_5": -0.009945220030143975
     },
     "within_regression_limit": true,
     "max_global_regression": 0.02
   },
   "side_effect_buckets": {
-    "largest_regressions": [
+    "all_non_target": [
       {
         "scenario_type": "BANK_CLEARING",
         "error_type": "AMOUNT_MISMATCH",
@@ -88,53 +109,132 @@
           "case_count": 10,
           "miss_count": 2,
           "hit_at_1": 0.5,
-          "recall_at_5": 0.85,
-          "mrr": 0.6533333333333333,
-          "ndcg_at_5": 0.6718472371875508
+          "recall_at_5": 0.9,
+          "mrr": 0.6733333333333335,
+          "ndcg_at_5": 0.7019048396147887
         },
         "after": {
           "case_count": 10,
-          "miss_count": 4,
+          "miss_count": 2,
           "hit_at_1": 0.5,
-          "recall_at_5": 0.75,
-          "mrr": 0.6666666666666667,
-          "ndcg_at_5": 0.6357224139102374
+          "recall_at_5": 0.9,
+          "mrr": 0.6733333333333335,
+          "ndcg_at_5": 0.7019048396147887
         },
         "delta": {
-          "miss_count": 2,
+          "miss_count": 0,
           "hit_at_1": 0.0,
-          "recall_at_5": -0.09999999999999998,
-          "mrr": 0.01333333333333342,
-          "ndcg_at_5": -0.03612482327731337
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
         }
-      }
-    ],
-    "largest_improvements": [
+      },
       {
         "scenario_type": "BANK_CLEARING",
         "error_type": "CLEARING_FILE_EXCEPTION",
         "before": {
           "case_count": 10,
-          "miss_count": 4,
-          "hit_at_1": 0.5,
-          "recall_at_5": 0.7,
-          "mrr": 0.6083333333333334,
-          "ndcg_at_5": 0.6121292261674965
+          "miss_count": 3,
+          "hit_at_1": 0.6,
+          "recall_at_5": 0.8,
+          "mrr": 0.7083333333333333,
+          "ndcg_at_5": 0.7070641718955321
+        },
+        "after": {
+          "case_count": 10,
+          "miss_count": 3,
+          "hit_at_1": 0.6,
+          "recall_at_5": 0.8,
+          "mrr": 0.7083333333333333,
+          "ndcg_at_5": 0.7070641718955321
+        },
+        "delta": {
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
+        }
+      },
+      {
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "CUTOFF_T1",
+        "before": {
+          "case_count": 10,
+          "miss_count": 2,
+          "hit_at_1": 0.6,
+          "recall_at_5": 0.9,
+          "mrr": 0.7166666666666666,
+          "ndcg_at_5": 0.7384531164477114
         },
         "after": {
           "case_count": 10,
           "miss_count": 2,
           "hit_at_1": 0.6,
-          "recall_at_5": 0.85,
-          "mrr": 0.6916666666666667,
-          "ndcg_at_5": 0.7281021463608147
+          "recall_at_5": 0.9,
+          "mrr": 0.7166666666666666,
+          "ndcg_at_5": 0.7384531164477114
         },
         "delta": {
-          "miss_count": -2,
-          "hit_at_1": 0.09999999999999998,
-          "recall_at_5": 0.15000000000000002,
-          "mrr": 0.08333333333333326,
-          "ndcg_at_5": 0.11597292019331817
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
+        }
+      },
+      {
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "QUERY_REPLY",
+        "before": {
+          "case_count": 10,
+          "miss_count": 0,
+          "hit_at_1": 0.5,
+          "recall_at_5": 1.0,
+          "mrr": 0.6833333333333333,
+          "ndcg_at_5": 0.759100839213192
+        },
+        "after": {
+          "case_count": 10,
+          "miss_count": 0,
+          "hit_at_1": 0.5,
+          "recall_at_5": 1.0,
+          "mrr": 0.6833333333333333,
+          "ndcg_at_5": 0.759100839213192
+        },
+        "delta": {
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
+        }
+      },
+      {
+        "scenario_type": "BANK_CLEARING",
+        "error_type": "REFERENCE_MATCH",
+        "before": {
+          "case_count": 10,
+          "miss_count": 1,
+          "hit_at_1": 0.6,
+          "recall_at_5": 0.95,
+          "mrr": 0.7583333333333333,
+          "ndcg_at_5": 0.8019048396147888
+        },
+        "after": {
+          "case_count": 10,
+          "miss_count": 1,
+          "hit_at_1": 0.6,
+          "recall_at_5": 0.95,
+          "mrr": 0.7583333333333333,
+          "ndcg_at_5": 0.8019048396147888
+        },
+        "delta": {
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
         }
       },
       {
@@ -142,26 +242,26 @@
         "error_type": "AMOUNT_MISMATCH",
         "before": {
           "case_count": 12,
-          "miss_count": 6,
-          "hit_at_1": 0.5833333333333334,
-          "recall_at_5": 0.625,
-          "mrr": 0.6527777777777778,
-          "ndcg_at_5": 0.5669111397163823
+          "miss_count": 3,
+          "hit_at_1": 0.6666666666666666,
+          "recall_at_5": 0.8333333333333334,
+          "mrr": 0.7777777777777777,
+          "ndcg_at_5": 0.7372988872671568
         },
         "after": {
           "case_count": 12,
-          "miss_count": 5,
+          "miss_count": 3,
           "hit_at_1": 0.6666666666666666,
-          "recall_at_5": 0.7083333333333334,
-          "mrr": 0.7361111111111112,
-          "ndcg_at_5": 0.6669366094817898
+          "recall_at_5": 0.8333333333333334,
+          "mrr": 0.7777777777777777,
+          "ndcg_at_5": 0.7372988872671568
         },
         "delta": {
-          "miss_count": -1,
-          "hit_at_1": 0.08333333333333326,
-          "recall_at_5": 0.08333333333333337,
-          "mrr": 0.08333333333333337,
-          "ndcg_at_5": 0.1000254697654075
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
         }
       },
       {
@@ -169,32 +269,115 @@
         "error_type": "BANK_UNARRIVED",
         "before": {
           "case_count": 12,
-          "miss_count": 5,
-          "hit_at_1": 0.5833333333333334,
-          "recall_at_5": 0.7083333333333334,
-          "mrr": 0.6597222222222222,
-          "ndcg_at_5": 0.6117299879437573
+          "miss_count": 3,
+          "hit_at_1": 0.8333333333333334,
+          "recall_at_5": 0.875,
+          "mrr": 0.8958333333333334,
+          "ndcg_at_5": 0.8259457610494652
         },
         "after": {
           "case_count": 12,
-          "miss_count": 4,
-          "hit_at_1": 0.5833333333333334,
-          "recall_at_5": 0.75,
-          "mrr": 0.7083333333333334,
-          "ndcg_at_5": 0.6851302207302044
+          "miss_count": 3,
+          "hit_at_1": 0.8333333333333334,
+          "recall_at_5": 0.875,
+          "mrr": 0.8958333333333334,
+          "ndcg_at_5": 0.8259457610494652
         },
         "delta": {
-          "miss_count": -1,
+          "miss_count": 0,
           "hit_at_1": 0.0,
-          "recall_at_5": 0.04166666666666663,
-          "mrr": 0.04861111111111116,
-          "ndcg_at_5": 0.07340023278644703
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
+        }
+      },
+      {
+        "scenario_type": "BANK_ENTERPRISE",
+        "error_type": "BOOK_UNRECORDED",
+        "before": {
+          "case_count": 12,
+          "miss_count": 3,
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.875,
+          "mrr": 1.0,
+          "ndcg_at_5": 0.893054741136202
+        },
+        "after": {
+          "case_count": 12,
+          "miss_count": 3,
+          "hit_at_1": 1.0,
+          "recall_at_5": 0.875,
+          "mrr": 1.0,
+          "ndcg_at_5": 0.893054741136202
+        },
+        "delta": {
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
+        }
+      },
+      {
+        "scenario_type": "BANK_ENTERPRISE",
+        "error_type": "DUPLICATE_BOOKING",
+        "before": {
+          "case_count": 12,
+          "miss_count": 0,
+          "hit_at_1": 0.8333333333333334,
+          "recall_at_5": 1.0,
+          "mrr": 0.8819444444444443,
+          "ndcg_at_5": 0.9043052652136224
+        },
+        "after": {
+          "case_count": 12,
+          "miss_count": 0,
+          "hit_at_1": 0.8333333333333334,
+          "recall_at_5": 1.0,
+          "mrr": 0.8819444444444443,
+          "ndcg_at_5": 0.9043052652136224
+        },
+        "delta": {
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
+        }
+      },
+      {
+        "scenario_type": "BANK_ENTERPRISE",
+        "error_type": "NARRATIVE_NAME_MISMATCH",
+        "before": {
+          "case_count": 12,
+          "miss_count": 6,
+          "hit_at_1": 0.4166666666666667,
+          "recall_at_5": 0.5833333333333334,
+          "mrr": 0.5277777777777778,
+          "ndcg_at_5": 0.499012824389486
+        },
+        "after": {
+          "case_count": 12,
+          "miss_count": 6,
+          "hit_at_1": 0.4166666666666667,
+          "recall_at_5": 0.5833333333333334,
+          "mrr": 0.5277777777777778,
+          "ndcg_at_5": 0.499012824389486
+        },
+        "delta": {
+          "miss_count": 0,
+          "hit_at_1": 0.0,
+          "recall_at_5": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_5": 0.0
         }
       }
-    ]
+    ],
+    "largest_regressions": [],
+    "largest_improvements": []
   },
   "success": false,
   "failure_reasons": [
-    "target bucket BANK_CLEARING/SINGLE_SIDE_MISSING did not improve (recall: 0.4 -> 0.45, miss_count: 7 -> 7)"
+    "target bucket BANK_CLEARING/SINGLE_SIDE_MISSING did not improve (recall: 0.35 -> 0.25, miss_count: 8 -> 9)"
   ]
 }
