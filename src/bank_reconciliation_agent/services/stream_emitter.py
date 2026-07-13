@@ -5,6 +5,7 @@ from queue import Empty, Queue
 from typing import Any, Protocol
 
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
+from bank_reconciliation_agent.schemas.trace import TraceSpanView
 
 
 class StreamEmitter(Protocol):
@@ -110,3 +111,23 @@ def _payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
     if "input_payload" in row and isinstance(row["input_payload"], dict):
         payload["input"] = row["input_payload"]
     return payload
+
+
+def to_trace_span_event(
+    span_view: TraceSpanView,
+    *,
+    seq: int,
+) -> AgentStreamEvent:
+    """Build a ``trace_span`` SSE event from a canonical safe projection.
+
+    The event reuses the same ``trace_id`` / ``span_id`` / ``sequence_no`` as the
+    persisted Trace, so consumers can join real-time and replay data.
+    """
+    return AgentStreamEvent(
+        event_type=StreamEventType.TRACE_SPAN,
+        seq=seq,
+        task_id=span_view.task_id,
+        flow_id=span_view.flow_id,
+        ts=datetime.now(timezone.utc),
+        payload=span_view.model_dump(mode="json"),
+    )

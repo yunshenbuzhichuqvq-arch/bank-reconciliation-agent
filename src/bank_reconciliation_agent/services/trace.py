@@ -841,6 +841,16 @@ class TraceRecorder:
         self._snapshot = spans
         return spans
 
+    def last_completed_span(self) -> TraceSpan | None:
+        """Return the most recently completed span or ``None``.
+
+        Used by SSE emitters to construct a ``trace_span`` event at each
+        span boundary without accessing internal builder state.
+        """
+        if self._disabled or not self._spans:
+            return None
+        return self._spans[-1].to_span()
+
     def disable(self) -> None:
         """Disable this recorder.
 
@@ -917,6 +927,9 @@ class NoOpRecorder:
 
     def snapshot(self) -> tuple[()]:
         return ()
+
+    def last_completed_span(self) -> None:
+        return None
 
     def disable(self) -> None:
         pass

@@ -99,6 +99,32 @@ def _recorder(state: ReconciliationState) -> Recorder:
     return state.get("recorder") or _NOOP_RECORDER
 
 
+def _emit_trace_span(
+    state: ReconciliationState,
+    recorder: Recorder,
+    emitter: StreamEmitter | None,
+) -> None:
+    """Emit a ``trace_span`` SSE event for the most recently completed span."""
+    if emitter is None:
+        return
+    span = recorder.last_completed_span()
+    if span is None:
+        return
+    from bank_reconciliation_agent.schemas.trace import TraceSpanView
+
+    view = TraceSpanView.from_span(span)
+    stream_seq = int(state.get("stream_seq", 0)) + 1
+    state["stream_seq"] = stream_seq
+    emitter.emit(
+        to_stream_event(
+            view.model_dump(mode="json"),
+            seq=stream_seq,
+            task_id=state["task_id"],
+            event_type=StreamEventType.TRACE_SPAN,
+        )
+    )
+
+
 _TOOL_STATUS_MAP: dict[str, tuple[SpanStatus, str | None]] = {
     "SUCCEEDED": (SpanStatus.SUCCEEDED, "RESULT"),
     "EMPTY": (SpanStatus.SUCCEEDED, "EMPTY"),
@@ -110,6 +136,8 @@ def _record_tool_span(
     state: ReconciliationState,
     result: ToolCallResult,
     projection: dict[str, Any],
+    *,
+    emitter: StreamEmitter | None = None,
 ) -> None:
     recorder = _recorder(state)
     status, outcome = _TOOL_STATUS_MAP.get(
@@ -134,6 +162,7 @@ def _record_tool_span(
         error_type=projection.get("error_type"),
         fallback_reason=projection.get("fallback_reason"),
     )
+    _emit_trace_span(state, recorder, emitter)
 
 
 def _record_agent_span(
@@ -143,6 +172,7 @@ def _record_agent_span(
     agent: Any,
     duration_ms: float,
     status: SpanStatus | None = None,
+    emitter: StreamEmitter | None = None,
 ) -> None:
     recorder = _recorder(state)
     usage = _llm_usage(agent)
@@ -168,6 +198,7 @@ def _record_agent_span(
         error_type=usage.get("final_failure_type"),
         fallback_reason=usage.get("fallback_reason"),
     )
+    _emit_trace_span(state, recorder, emitter)
 
 
 def run_item(
@@ -199,6 +230,7 @@ def run_item(
     if exception_branch:
         with recorder.span(SpanType.ROUTE, str(exception_branch)):
             pass
+        _emit_trace_span(state, recorder, emitter)
     summary = _combined_text(state, "summary")
     remark = _combined_text(state, "remark") or None
     math_result = state.get("math_result", {})
@@ -219,6 +251,7 @@ def run_item(
                 agent=extraction_agent,
                 duration_ms=(time.monotonic() - _extract_start) * 1000,
                 status=SpanStatus.FAILED,
+                emitter=emitter,
             )
             return _fail_closed_item(
                 state,
@@ -234,6 +267,7 @@ def run_item(
             agent=extraction_agent,
             duration_ms=(time.monotonic() - _extract_start) * 1000,
             status=SpanStatus.SUCCEEDED,
+            emitter=emitter,
         )
         state["extraction_result"] = _model_or_mapping_dump(extraction_result)
         _append_agent_log(state, {
@@ -286,6 +320,7 @@ def run_item(
                 agent=trace_agent,
                 duration_ms=(time.monotonic() - _trace_start) * 1000,
                 status=SpanStatus.FAILED,
+                emitter=emitter,
             )
             return _fail_closed_item(
                 state,
@@ -301,6 +336,7 @@ def run_item(
             agent=trace_agent,
             duration_ms=(time.monotonic() - _trace_start) * 1000,
             status=SpanStatus.SUCCEEDED,
+            emitter=emitter,
         )
         trace_payload = _model_or_mapping_dump(trace_result)
         _append_agent_log(state, {
@@ -481,6 +517,7 @@ def run_item(
                     agent=trace_agent,
                     duration_ms=(time.monotonic() - _l3_trace_start) * 1000,
                     status=SpanStatus.FAILED,
+                    emitter=emitter,
                 )
                 return _fail_closed_item(
                     state,
@@ -496,6 +533,7 @@ def run_item(
                 agent=trace_agent,
                 duration_ms=(time.monotonic() - _l3_trace_start) * 1000,
                 status=SpanStatus.SUCCEEDED,
+                emitter=emitter,
             )
             trace_payload = _model_or_mapping_dump(trace_result)
             _append_agent_log(state, {
@@ -760,6 +798,7 @@ def _audit_decision_once(
             agent=audit_agent,
             duration_ms=(time.monotonic() - _agent_start) * 1000,
             status=SpanStatus.FAILED,
+            emitter=emitter,
         )
         log.warning(
             "schema_hook_failed",
@@ -793,6 +832,7 @@ def _audit_decision_once(
         name="AuditAgent",
         agent=audit_agent,
         duration_ms=(time.monotonic() - _agent_start) * 1000,
+        emitter=emitter,
     )
     return decision
 
@@ -824,7 +864,7 @@ def _execute_tool(
     context = _build_tool_context(state, fallback_level=fallback_level)
     result = tool_executor.execute(name, args, context)
     projection = safe_tool_projection(result)
-    _record_tool_span(state, result, projection)
+    _record_tool_span(state, result, projection, emitter=emitter)
     _append_agent_log(state, {
         "agent_name": "ToolExecutor",
         "step": "tool_call",
@@ -895,6 +935,7 @@ def _apply_post_hooks(
     guard_outcome = GuardOutcome.PASSED if constraint.ok else GuardOutcome.BLOCKED
     with _recorder(state).span(SpanType.GUARD, "ConstraintGuard", outcome=guard_outcome):
         pass
+    _emit_trace_span(state, _recorder(state), emitter)
     if not constraint.ok:
         violated_suffix = f"；违反约束: {', '.join(constraint.violated)}"
         audit_decision.reason = f"{audit_decision.reason}{violated_suffix}" if audit_decision.reason else (

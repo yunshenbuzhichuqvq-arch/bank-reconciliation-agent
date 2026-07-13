@@ -1,9 +1,10 @@
 from decimal import Decimal
 
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
+from bank_reconciliation_agent.schemas.trace import TraceSpanView, SpanType, SpanStatus
 from bank_reconciliation_agent.services.exception_router import BranchResult
 from bank_reconciliation_agent.services.reconciliation import ReconciliationService
-from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
+from bank_reconciliation_agent.services.stream_emitter import QueueEmitter, to_trace_span_event
 from bank_reconciliation_agent.services.workflow import run_item
 
 from tests.test_workflow import SpyAuditAgent, SpyExtractionAgent, SpyTraceAgent, StaticRetriever, _state
@@ -77,3 +78,40 @@ def test_reconciliation_service_passes_emitter_to_workflow(monkeypatch) -> None:
     )
 
     assert captured_emitters == [emitter]
+
+
+def test_to_trace_span_event_uses_same_identity_as_persistence() -> None:
+    from datetime import datetime, timezone
+
+    view = TraceSpanView(
+        trace_id="trace-abc",
+        span_id="span-123",
+        parent_span_id=None,
+        task_id="TASK-SSE",
+        flow_id="FLOW-SSE",
+        sequence_no=2,
+        span_type=SpanType.TOOL,
+        name="search_rules",
+        started_at=datetime.now(timezone.utc),
+        ended_at=datetime.now(timezone.utc),
+        duration_ms=15,
+        status=SpanStatus.SUCCEEDED,
+        outcome="RESULT",
+        attempt=1,
+        result_count=3,
+        evidence_ids=["chunk-1"],
+    )
+    event = to_trace_span_event(view, seq=42)
+
+    assert event.schema_version == "1.2"
+    assert event.event_type == StreamEventType.TRACE_SPAN
+    assert event.task_id == "TASK-SSE"
+    assert event.flow_id == "FLOW-SSE"
+    assert event.seq == 42
+    assert event.payload["trace_id"] == "trace-abc"
+    assert event.payload["span_id"] == "span-123"
+    assert event.payload["sequence_no"] == 2
+    assert event.payload["span_type"] == "TOOL"
+    assert event.payload["name"] == "search_rules"
+    assert event.payload["duration_ms"] == 15
+    assert "user_id" not in event.payload

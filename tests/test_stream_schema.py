@@ -22,11 +22,11 @@ def test_agent_stream_event_serializes_versioned_contract() -> None:
     dumped = event.model_dump()
     json_payload = event.model_dump_json()
 
-    assert dumped["schema_version"] == "1.1"
+    assert dumped["schema_version"] == "1.2"
     assert dumped["event_type"] == StreamEventType.AGENT_DECISION
     assert dumped["seq"] == 3
     assert '"event_type":"agent_decision"' in json_payload
-    assert '"schema_version":"1.1"' in json_payload
+    assert '"schema_version":"1.2"' in json_payload
 
 
 def test_stream_event_contract_documents_emitted_rag_payload_and_no_dead_item_started() -> None:
@@ -77,7 +77,42 @@ def test_task_progress_event_schema_validates_task_level_payload() -> None:
         },
     )
 
-    assert event.schema_version == "1.1"
+    assert event.schema_version == "1.2"
     assert event.event_type == StreamEventType.TASK_PROGRESS
     assert event.payload["processed"] == 6
     assert event.payload["exception_dist"] == {"AMOUNT_MISMATCH": 2}
+
+
+def test_trace_span_event_serializes_canonical_safe_fields() -> None:
+    event = AgentStreamEvent(
+        event_type=StreamEventType.TRACE_SPAN,
+        seq=5,
+        task_id="TASK-TRACE-SSE",
+        flow_id="FLOW-001",
+        ts=datetime(2026, 6, 15, 10, 30, tzinfo=UTC),
+        payload={
+            "schema_version": "1.0",
+            "trace_id": "trace-uuid",
+            "span_id": "span-uuid",
+            "span_type": "TOOL",
+            "name": "search_rules",
+            "sequence_no": 3,
+            "status": "SUCCEEDED",
+            "outcome": "RESULT",
+            "duration_ms": 12,
+            "attempt": 1,
+            "retry_recovered": False,
+            "result_count": 1,
+            "evidence_ids": ["rule-001"],
+        },
+    )
+
+    dumped = event.model_dump()
+    assert dumped["schema_version"] == "1.2"
+    assert dumped["event_type"] == StreamEventType.TRACE_SPAN
+    # user_id must not leak into SSE payload.
+    assert "user_id" not in dumped["payload"]
+    # Canonical identity fields are present in the safe projection.
+    assert dumped["payload"]["trace_id"] == "trace-uuid"
+    assert dumped["payload"]["span_id"] == "span-uuid"
+    assert dumped["payload"]["sequence_no"] == 3
