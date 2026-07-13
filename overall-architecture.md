@@ -309,14 +309,14 @@ MySQL 主要业务表:对账任务、主账源流水 `t_source_a_transaction`、
 
 本层同时承载运行可观测性和离线 Evaluation Harness。评测路径不进入线上对账请求,只读取固定输入、评测集或已有报告,输出可复跑的 Markdown + JSON 证据。
 
-- **结构化日志**:`structlog` 输出 JSON,每条携带 `trace_id`、`agent_name`、`step`、`prompt_version`。
-- **可回放 trace**:`logs/*.jsonl` 能回放单笔异常的规则命中、RAG 命中、Agent 输出和落库结果。
+- **结构化日志**:`structlog` 输出 JSON,每条携带 `trace_id`、`task_id`、`agent_name`、`step`、`prompt_version`。
+- **可回放 Trace**:每个 eligible flow 执行生成 `t_trace_span` 持久化 spans(append-only),通过 `TraceRecorder` 在 workflow 节点边界采集 ROUTE/TOOL/AGENT/GUARD 节点。完成后按 flow 批量写入；Replay API(`GET /api/v1/traces/{task_id}/flows/{flow_id}`)和前端 `/traces/:taskId/:flowId` 提供只读 observation replay,不重新执行 Tool/LLM/Guard。SSE v1.2 `trace_span` 事件复用同一 canonical `TraceSpan` 安全投影。
+- **Business `TraceAgent` 与 Execution Trace 不同**:`TraceAgent` 是可选 LLM 业务 agent(Fallback L3 跨期追溯)；Execution Trace 是 `TraceRecorder` 采集的只读执行证据,不调用 LLM。
 - **token 成本统计**:每次 LLM 调用的 token 消耗与按模型定价折算的成本。
 - **Prompt 版本管理**:Prompt 以独立文件纳入版本控制,`t_agent_execution_log.prompt_version` 让每次决策可追溯到具体版本。
 - **三层离线评测**:System Eval、RAG Eval、Agent Eval 分别定位端到端结果、检索质量和 Agent 决策问题。
 - **Combined Harness**:聚合三层结果,生成 baseline、after、comparison 和确定性安全门禁。
 - **Gate Summary**:把现有报告分类为 CI、manual diagnostic、release 三层,统一输出 trust 和 claim boundary。
-- **LangFuse**:可选,作为 trace 可视化增强,不作为必需依赖。
 
 #### 2.7.1 Evaluation Harness 组件
 
@@ -701,7 +701,7 @@ Reranker 默认使用轻量 token-overlap/scoring；需要更高中文精度时�
 - AuditAgent 真实 LLM 调用:结构化 JSON 输出 + Schema 校验 + 有界重试 + 兜底转人工。
 - 基础 RAG:Markdown 规则 + ChromaDB Top-K + 相似度阈值。
 - MySQL 任务 / 流水 / 队列 / 台账落库;Vue 上传 / 看板 / 台账 / 复核页。
-- 能打出一条完整本地 trace。
+- TraceRecorder 按 flow 采集执行节点,生成 `t_trace_span` tenant-scoped 持久化 Trace,通过 Replay API 和前端 `TraceReplayPage` 提供只读 observation replay。
 
 ### 阶段二 · Agent 工程做深  🔶 大部分完成
 

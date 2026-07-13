@@ -168,6 +168,7 @@ uv run python -m scripts.smoke_demo --summary-json artifacts/smoke-run-2.json
 两条路径：
 - **ARQ path**：`BANK_ENTERPRISE`，`force=true` → Redis/ARQ worker → 异常 → 人工复核 → 报告
 - **SSE path**：`BANK_CLEARING`，`start-live → events → TASK_DONE` → 状态 → 报告
+- **Replay API**：`GET /api/v1/traces/{task_id}/flows/{flow_id}?trace_id=` 按 JWT user→task→flow→trace 顺序验证 ownership，默认返回最新执行，支持历史 run 选择。前端页面 `/traces/:taskId/:flowId` 从差错台账详情进入。
 
 summary JSON 输出包含 `schema_version: "1.0"`、9 个稳定步骤名、`boundary: {llm_provider: "fake", embedding_backend: "hash"}` 和两条 path 的 task IDs。成功返回 0，失败仍尽力写 summary 并返回非零。
 
@@ -243,12 +244,13 @@ GitHub Actions workflow（`.github/workflows/ci.yml`）在 PR 上运行四个 ch
 - RAG 无命中必须转人工，不得臆造 evidence。
 - 所有业务查询显式按 `user_id` 过滤。
 - 当前鉴权为 JWT Bearer Token；`X-User-ID` 仅为历史设计，不再作为当前 API 调用契约。
-- `db/schema.sql` 与 service 内 `Table` 定义需要保持同步。
+- `db/schema.sql` 与 service 内 `Table` 定义需要保持同步。`CREATE TABLE IF NOT EXISTS t_trace_span` 已在 `schema.sql` 中提供，fresh database 可通过执行该 DDL 创建表。`_ensure_initialized()` 只延续 local/test 行为，不得依赖它隐藏生产 schema 变更；existing MySQL/Compose 数据卷必须显式重放更新后的 `schema.sql`。
 - 不要把真实 `.env`、真实数据、运行时数据库文件提交到仓库。
 
 ## 已知限制
 
-- SSE 实时事件是进程内 emitter（单 backend 实例），不具备断线回放或水平扩展能力。
+- SSE 实时事件是进程内 emitter（单 backend 实例，`AgentStreamEvent.schema_version="1.2"`），不具备断线回放或水平扩展能力。浏览器断开后可通过持久化 Replay API 恢复完整 Timeline，但 SSE 自身不支持 `Last-Event-ID` 或跨实例广播。
+- Execution Trace 按 flow 完成后批量写入 `t_trace_span`（append-only），flow 完成前发生进程崩溃则当前 Trace 不可恢复（crash gap）。当前无 retention/delete 机制，进入生产前需补充数据治理决策。
 - `vite preview` 仅适合本地演示；生产部署需另立 ADR 决定静态资源服务器和反向代理。
 - 镜像使用版本 tag (`mysql:8.4`, `redis:7.4-alpine`) 而非 digest，不能宣称字节级跨架构复现。
 - 默认路径为 Fake/hash，不调用真实模型；真实 DeepSeek 和 embedding 仅允许显式 opt-in。

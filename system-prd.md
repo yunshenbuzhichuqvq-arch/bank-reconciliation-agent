@@ -51,12 +51,12 @@
 - YAML 声明式规则引擎 + ExceptionRouter(核心分支)。
 - **AuditAgent 真实 LLM 调用**:结构化 JSON 输出(decision / risk_level / reason / confidence / evidence)+ Schema 校验 + 有界重试 + 兜底转人工。
 - Markdown 规则文档 + ChromaDB Top-K 检索。
-- MySQL 任务表、流水表、队列表、差错台账表、RAG 检索记录表。
+- MySQL 任务表、流水表、队列表、差错台账表、RAG 检索记录表、`t_trace_span` 执行 Trace 表。
 - 任务状态查询 API、差错明细查询 API。
 - Vue:账单上传页、任务看板、差错台账页、人工复核页;人工复核事务更新台账。
-- 单笔异常的本地 trace。
+- 每个异常 flow 的完整执行 Trace(append-only、tenant-scoped、按 flow 持久化)。
 
-产物:API + 数据库记录 + Agent/RAG JSON + 一条完整 trace + 本地页面。
+产物:API + 数据库记录 + Agent/RAG JSON + 一条完整 DB Trace + 本地页面。
 
 ### 3.2 阶段二:Agent 工程做深  🔶 大部分完成
 
@@ -119,7 +119,7 @@
 
 ### 4.5 差错台账页(阶段一)
 
-分页查询,按任务、差错类型、处理状态、风险等级筛选。单笔详情含 AI 审计意见、RAG 来源、人工处理记录,以及 Agent 决策链路回放(本地 trace)。
+分页查询,按任务、差错类型、处理状态、风险等级筛选。单笔详情含 AI 审计意见、RAG 来源、人工处理记录,以及"查看执行轨迹"入口(observation replay,通过 Replay API 与独立 TraceReplayPage 展示持久化执行节点)。
 
 ### 4.6 报表审计页(阶段三)
 
@@ -836,6 +836,11 @@ ExceptionRouter 按优先级逐一匹配,第一个命中即返回。`RuleEngine.
 
 当前证据边界:40 条 Agent Eval 只完成 fake-provider baseline,真实 DeepSeek 报告覆盖早期 6 条集合;Stage 22 before/after 实验已完成但目标桶 miss count 未下降,因此报告为 `success=false`;Stage 23 是 5 次调用的 offline benchmark,不能写成生产 SLA。
 
+**Trace 相关边界**:
+- `t_trace_span` 为 append-only,当前无 retention/delete 机制,进入生产前须补充数据治理决策。
+- `TraceService.metrics_snapshot()` 返回 process-local counters(`source=runtime_memory`),backend 与 worker 进程不可聚合,不得标注为集群级指标。
+- Trace 在 flow 完成并批量落库前遭遇进程崩溃时可能缺失(durable partial tracing 不在 Stage 29 范围内)。
+
 ## 14. 验收标准
 
 ### 14.1 阶段一
@@ -846,7 +851,7 @@ ExceptionRouter 按优先级逐一匹配,第一个命中即返回。`RuleEngine.
 - AuditAgent 输出结构化 JSON(含 evidence)、通过 Schema 校验。
 - 任务 / 流水 / 异常 / 审计建议写入 MySQL;任务状态与差错明细 API 可查。
 - Vue 上传 / 看板 / 台账 / 复核页可用;人工复核事务更新台账。
-- 能输出单笔异常的本地 trace(输入 → RAG 命中 → Agent 输出 → 落库)。
+- 能输出单笔异常的持久化 Trace(`t_trace_span` + Replay API),并通过前端 TraceReplayPage 回放执行节点。Business `TraceAgent` 是可选的 LLM 追溯 agent(Fallback L3),与 Execution Trace 不同。
 - 覆盖最小负向测试:缺字段、金额非法、空文件或重复流水中至少 3 类。
 
 ### 14.2 阶段二
@@ -886,7 +891,7 @@ Agent 使用普通函数工具(不用 MCP),定义三级权限边界,从阶段二
 | L1 结构化输出 | Agent 输出 JSON 审计建议 | 必须通过 Schema + 硬约束校验才能被消费 |
 | L2 数据库写入 | 台账落库、队列 / 任务统计更新 | Agent **禁止直接写入**,必须经事务保障 |
 
-各 Agent 工具白名单:ExtractionAgent 纯 LLM 推理(禁数据库);AuditAgent 仅 RAG 检索 + 计算结果(只读);TraceAgent 仅追溯查询(只读)。校验管线 ② 校验 Agent 输出是否包含不应有的数据库操作指令,检测到越权立即标记 `PENDING_HUMAN` 并记日志。
+各 Agent 工具白名单:ExtractionAgent 纯 LLM 推理(禁数据库);AuditAgent 仅 RAG 检索 + 计算结果(只读);TraceAgent 仅追溯查询(只读)。注意:Business `TraceAgent` 是可选 LLM agent(Fallback L3 跨期追溯),不同于 Execution Trace(只读执行节点采集,不调用 LLM)。校验管线 ② 校验 Agent 输出是否包含不应有的数据库操作指令,检测到越权立即标记 `PENDING_HUMAN` 并记日志。
 
 ### 15.2 可靠性保障(围绕 LLM API 不稳定)
 
