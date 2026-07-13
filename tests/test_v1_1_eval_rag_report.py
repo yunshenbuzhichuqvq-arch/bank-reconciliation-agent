@@ -1563,3 +1563,119 @@ def test_stage30_comparison_markdown_shows_enrichment_role_and_revision() -> Non
     assert "query_enrichment.enabled" in md
     assert "bank-clearing-single-side-missing" in md
     assert "latency_ms" in md
+
+
+# ---------------------------------------------------------------------------
+# TASK-30.8: bucket set, uniqueness and case count fail-closed
+# ---------------------------------------------------------------------------
+
+
+def _stage30_pair(**kwargs):
+    baseline = _stage30_baseline(
+        clearing_single_side_recall=0.40,
+        clearing_single_side_miss_count=7,
+        **kwargs,
+    )
+    after = _stage30_after(
+        clearing_single_side_recall=0.60,
+        clearing_single_side_miss_count=4,
+        **kwargs,
+    )
+    return baseline, after
+
+
+def _mode_buckets(matrix):
+    return matrix["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"]
+
+
+def _run_stage30(baseline, after):
+    return eval_rag.build_optimization_comparison_report(
+        baseline,
+        after,
+        target_scenario_type="BANK_CLEARING",
+        target_error_type="SINGLE_SIDE_MISSING",
+    )
+
+
+def test_stage30_bucket_gate_fails_when_after_missing_non_target_bucket() -> None:
+    baseline, after = _stage30_pair()
+    after_buckets = _mode_buckets(after)
+    after["rows"]["bge_m3"]["modes"]["hybrid"]["bucket_metrics"] = [
+        b for b in after_buckets if b["error_type"] != "TIMING_DIFFERENCE"
+    ]
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("missing baseline buckets" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_fails_when_after_has_extra_bucket() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after).append(
+        {
+            "scenario_type": "BANK_ENTERPRISE",
+            "error_type": "EXTRA_BUCKET",
+            "case_count": 0,
+            "miss_count": 0,
+            "hit_at_1": 0.0,
+            "recall_at_5": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_5": 0.0,
+        }
+    )
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("extra buckets" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_fails_when_duplicate_bucket() -> None:
+    baseline, after = _stage30_pair()
+    dup = dict(_mode_buckets(after)[0])
+    _mode_buckets(after).append(dup)
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("duplicate bucket keys" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_fails_when_case_count_differs() -> None:
+    baseline, after = _stage30_pair()
+    _mode_buckets(after)[0]["case_count"] += 1
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("case_count mismatch" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_fails_when_case_count_sum_mismatch() -> None:
+    baseline, after = _stage30_pair()
+    for matrix in (baseline, after):
+        _mode_buckets(matrix)[0]["case_count"] += 5
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("case_count sum" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_bucket_gate_fails_when_required_metric_field_missing() -> None:
+    baseline, after = _stage30_pair()
+    del _mode_buckets(after)[0]["ndcg_at_5"]
+
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is False
+    assert report["success"] is False
+    assert any("ndcg_at_5" in r and "non-numeric" in r for r in report["trust"]["reasons"])
+
+
+def test_stage30_all_non_target_equals_total_buckets_minus_one() -> None:
+    baseline, after = _stage30_pair()
+    report = _run_stage30(baseline, after)
+    assert report["trust"]["trusted"] is True
+    total_buckets = len(_mode_buckets(baseline))
+    assert len(report["side_effect_buckets"]["all_non_target"]) == total_buckets - 1

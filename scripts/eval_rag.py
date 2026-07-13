@@ -928,20 +928,20 @@ def _bucket_deltas(
                 "scenario_type": baseline_bucket["scenario_type"],
                 "error_type": baseline_bucket["error_type"],
                 "before": {
-                    "case_count": baseline_bucket["case_count"],
-                    "miss_count": baseline_bucket["miss_count"],
-                    "hit_at_1": baseline_bucket["hit_at_1"],
-                    "recall_at_5": baseline_bucket["recall_at_5"],
-                    "mrr": baseline_bucket["mrr"],
-                    "ndcg_at_5": baseline_bucket["ndcg_at_5"],
+                    "case_count": baseline_bucket.get("case_count"),
+                    "miss_count": baseline_bucket.get("miss_count"),
+                    "hit_at_1": baseline_bucket.get("hit_at_1"),
+                    "recall_at_5": baseline_bucket.get("recall_at_5"),
+                    "mrr": baseline_bucket.get("mrr"),
+                    "ndcg_at_5": baseline_bucket.get("ndcg_at_5"),
                 },
                 "after": {
-                    "case_count": after_bucket["case_count"],
-                    "miss_count": after_bucket["miss_count"],
-                    "hit_at_1": after_bucket["hit_at_1"],
-                    "recall_at_5": after_bucket["recall_at_5"],
-                    "mrr": after_bucket["mrr"],
-                    "ndcg_at_5": after_bucket["ndcg_at_5"],
+                    "case_count": after_bucket.get("case_count"),
+                    "miss_count": after_bucket.get("miss_count"),
+                    "hit_at_1": after_bucket.get("hit_at_1"),
+                    "recall_at_5": after_bucket.get("recall_at_5"),
+                    "mrr": after_bucket.get("mrr"),
+                    "ndcg_at_5": after_bucket.get("ndcg_at_5"),
                 },
                 "delta": delta,
             }
@@ -1009,6 +1009,79 @@ def _validate_stage30_roles(
         reasons.append("after query_enrichment missing profile_sha256")
     latency = after_qe.get("latency_ms")
     reasons.extend(_validate_after_latency(latency, after_matrix.get("case_count")))
+    return reasons
+
+
+_BUCKET_INT_FIELDS = ("case_count", "miss_count")
+_BUCKET_FLOAT_FIELDS = ("hit_at_1", "recall_at_5", "mrr", "ndcg_at_5")
+
+
+def _bucket_key_counts(buckets: list[dict[str, Any]]) -> dict[tuple[Any, Any], int]:
+    counts: dict[tuple[Any, Any], int] = {}
+    for bucket in buckets:
+        key = (bucket.get("scenario_type"), bucket.get("error_type"))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _validate_stage30_buckets(
+    baseline_buckets: list[dict[str, Any]],
+    after_buckets: list[dict[str, Any]],
+    *,
+    baseline_case_count: Any,
+    after_case_count: Any,
+) -> list[str]:
+    reasons: list[str] = []
+
+    for label, buckets in (("baseline", baseline_buckets), ("after", after_buckets)):
+        for bucket in buckets:
+            key = (bucket.get("scenario_type"), bucket.get("error_type"))
+            for field in _BUCKET_INT_FIELDS:
+                value = bucket.get(field)
+                if not isinstance(value, int) or isinstance(value, bool):
+                    reasons.append(f"{label} bucket {key} field {field} is missing or non-integer")
+            for field in _BUCKET_FLOAT_FIELDS:
+                value = bucket.get(field)
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    reasons.append(f"{label} bucket {key} field {field} is missing or non-numeric")
+
+    baseline_counts = _bucket_key_counts(baseline_buckets)
+    after_counts = _bucket_key_counts(after_buckets)
+    for label, counts in (("baseline", baseline_counts), ("after", after_counts)):
+        duplicates = sorted(str(k) for k, c in counts.items() if c > 1)
+        if duplicates:
+            reasons.append(f"{label} has duplicate bucket keys: {duplicates}")
+
+    baseline_keys = set(baseline_counts)
+    after_keys = set(after_counts)
+    missing_in_after = sorted(str(k) for k in baseline_keys - after_keys)
+    if missing_in_after:
+        reasons.append(f"after is missing baseline buckets: {missing_in_after}")
+    extra_in_after = sorted(str(k) for k in after_keys - baseline_keys)
+    if extra_in_after:
+        reasons.append(f"after has extra buckets not in baseline: {extra_in_after}")
+
+    baseline_by_key = {(b.get("scenario_type"), b.get("error_type")): b for b in baseline_buckets}
+    after_by_key = {(b.get("scenario_type"), b.get("error_type")): b for b in after_buckets}
+    for key in sorted(baseline_keys & after_keys, key=str):
+        before_count = baseline_by_key[key].get("case_count")
+        after_count = after_by_key[key].get("case_count")
+        if before_count != after_count:
+            reasons.append(
+                f"bucket {key} case_count mismatch: baseline={before_count}, after={after_count}"
+            )
+
+    baseline_sum = sum(b.get("case_count", 0) for b in baseline_buckets)
+    after_sum = sum(b.get("case_count", 0) for b in after_buckets)
+    if baseline_sum != baseline_case_count:
+        reasons.append(
+            f"baseline bucket case_count sum {baseline_sum} != matrix case_count {baseline_case_count}"
+        )
+    if after_sum != after_case_count:
+        reasons.append(
+            f"after bucket case_count sum {after_sum} != matrix case_count {after_case_count}"
+        )
+
     return reasons
 
 
@@ -1110,6 +1183,17 @@ def build_optimization_comparison_report(
     if after_bucket_err:
         trust_reasons.append(after_bucket_err)
         trusted = False
+
+    if stage30 and not baseline_bucket_err and not after_bucket_err:
+        bucket_reasons = _validate_stage30_buckets(
+            baseline_buckets,
+            after_buckets,
+            baseline_case_count=baseline_matrix.get("case_count"),
+            after_case_count=after_matrix.get("case_count"),
+        )
+        if bucket_reasons:
+            trust_reasons.extend(bucket_reasons)
+            trusted = False
 
     baseline_global = _global_metrics_for_mode(baseline_matrix, backend, mode)
     after_global = _global_metrics_for_mode(after_matrix, backend, mode)
