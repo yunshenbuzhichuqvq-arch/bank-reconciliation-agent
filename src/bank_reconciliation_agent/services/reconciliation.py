@@ -23,7 +23,6 @@ from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.core.llm.cost import compute_cost
 from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
 from bank_reconciliation_agent.core.logging import log
-from bank_reconciliation_agent.rag import query_enrichment
 from bank_reconciliation_agent.rag.retriever import rule_retriever
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery, LedgerRow
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
@@ -601,7 +600,7 @@ class ReconciliationService:
             )
         ]
 
-    def _build_rag_query(self, result: ReconciliationMatchResult, scenario_type: str) -> str:
+    def _build_rag_query(self, result: ReconciliationMatchResult) -> str:
         query_prefix_by_error_type = {
             "AMOUNT_MISMATCH": "金额不一致 对账差异 处理规则",
             "BANK_UNARRIVED": "银行未到账 企业已记账 单边 查询查复",
@@ -613,17 +612,11 @@ class ReconciliationService:
             result.error_type or "",
             f"{result.error_type or ''} reconciliation exception",
         )
-        base_query = (
+        return (
             f"{result.error_type or ''} {prefix} "
             f"bank_amount={self._format_optional_decimal(result.bank_amount)} "
             f"clear_amount={self._format_optional_decimal(result.clear_amount)} "
             f"amount_diff={self._format_optional_decimal(result.amount_diff)}"
-        )
-        return query_enrichment.enrich(
-            base_query,
-            scenario_type,
-            result.error_type,
-            result.exception_branch,
         )
 
     def _to_reconciliation_evidence(self, item: RagSearchItem) -> ReconciliationRagEvidence:
@@ -789,7 +782,7 @@ class ReconciliationService:
             if result.status == "AUTO_FIXED":
                 continue
 
-            rag_query = self._build_rag_query(result, scenario_type)
+            rag_query = self._build_rag_query(result)
             rule_hit = {
                 "error_type": result.error_type or "",
                 "exception_branch": result.exception_branch,
