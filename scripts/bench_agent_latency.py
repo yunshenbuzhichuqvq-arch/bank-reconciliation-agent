@@ -259,6 +259,8 @@ def run_stage31_critical_path(
     from bank_reconciliation_agent.services.workflow import run_item
     from bank_reconciliation_agent.services.trace import TraceRecorder
     from bank_reconciliation_agent.core.llm.provider import LLMUnavailable
+    from bank_reconciliation_agent.services.tool_adapters import build_default_registry
+    from bank_reconciliation_agent.services.tool_executor import ToolExecutor
 
     is_real_provider = provider_name == "deepseek"
     is_real_backend = embedding_backend == "bge_m3"
@@ -275,6 +277,11 @@ def run_stage31_critical_path(
         trust_reasons.append("fake_provider")
     if not is_real_backend:
         trust_reasons.append("fake_embedding_backend")
+
+    bench_tool_executor = ToolExecutor(
+        build_default_registry(),
+        lambda ctx: True,
+    )
 
     input_data = {
         "scenario_type": "BANK_ENTERPRISE",
@@ -349,7 +356,7 @@ def run_stage31_critical_path(
 
         started = time.perf_counter()
         try:
-            final_state = run_item(state)
+            final_state = run_item(state, tool_executor=bench_tool_executor)
             root_status = "SUCCEEDED"
         except Exception:
             root_status = "FAILED"
