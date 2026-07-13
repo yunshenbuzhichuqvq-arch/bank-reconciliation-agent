@@ -276,6 +276,7 @@ def test_finalize_recorder_appends_fallback_terminal_for_pending_human() -> None
         ai_suggestion="PENDING_HUMAN",
         evidence=[],
         confidence=0.0,
+        fallback_applied=True,
         next_action="PENDING_HUMAN",
     )
     spans = service._finalize_recorder(recorder, decision)

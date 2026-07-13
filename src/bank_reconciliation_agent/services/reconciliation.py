@@ -400,7 +400,8 @@ class ReconciliationService:
         )
 
     def _summarize_match_results(
-        self, results: list[ReconciliationMatchResult],
+        self,
+        results: list[ReconciliationMatchResult],
     ) -> ReconciliationMatchSummary:
         return ReconciliationMatchSummary(
             auto_fixed_rows=sum(r.status == "AUTO_FIXED" for r in results),
@@ -508,7 +509,8 @@ class ReconciliationService:
         if task is None:
             raise HTTPException(status_code=404, detail="reconciliation task not found")
         return ReconciliationStatusResponse(
-            task_id=task_id, status=task.status,
+            task_id=task_id,
+            status=task.status,
             auto_fixed_rows=task.auto_fixed_rows,
             pending_ai_rows=task.pending_ai_rows,
             ai_processed_rows=task.ai_processed_rows,
@@ -532,27 +534,31 @@ class ReconciliationService:
                 row.rag_source,
                 scenario_type=task.scenario_type,
             )
-            items.append(ReconciliationExceptionItem(
-                flow_id=row.flow_id,
-                status="PENDING_HUMAN",
-                error_type=row.error_type,
-                exception_branch=row.exception_branch,
-                bank_amount=self._format_optional_decimal(row.bank_amount),
-                clear_amount=self._format_optional_decimal(row.clear_amount),
-                amount_diff=amount_diff,
-                rag_evidence=evidence,
-                audit_decision=ReconciliationAuditDecision(
+            items.append(
+                ReconciliationExceptionItem(
                     flow_id=row.flow_id,
-                    decision=row.handle_status,
-                    risk_level="MEDIUM",
-                    reason=row.ai_audit_opinion or "",
-                    evidence=evidence,
-                    confidence=float(row.ai_confidence) if row.ai_confidence else 0.0,
-                ),
-            ))
+                    status="PENDING_HUMAN",
+                    error_type=row.error_type,
+                    exception_branch=row.exception_branch,
+                    bank_amount=self._format_optional_decimal(row.bank_amount),
+                    clear_amount=self._format_optional_decimal(row.clear_amount),
+                    amount_diff=amount_diff,
+                    rag_evidence=evidence,
+                    audit_decision=ReconciliationAuditDecision(
+                        flow_id=row.flow_id,
+                        decision=row.handle_status,
+                        risk_level="MEDIUM",
+                        reason=row.ai_audit_opinion or "",
+                        evidence=evidence,
+                        confidence=float(row.ai_confidence) if row.ai_confidence else 0.0,
+                    ),
+                )
+            )
 
         return ReconciliationExceptionListResponse(
-            task_id=task_id, total=len(items), items=items,
+            task_id=task_id,
+            total=len(items),
+            items=items,
         )
 
     def _format_optional_decimal(self, value: Decimal | None) -> str | None:
@@ -598,19 +604,27 @@ class ReconciliationService:
 
     def _to_reconciliation_evidence(self, item: RagSearchItem) -> ReconciliationRagEvidence:
         return ReconciliationRagEvidence(
-            chunk_id=item.chunk_id, source=item.source,
-            source_name=item.source_name, source_url=item.source_url,
-            source_file=item.source_file, section_title=item.section_title,
-            element_type=item.element_type, business_tags=item.business_tags,
-            score=item.score, content=item.content,
+            chunk_id=item.chunk_id,
+            source=item.source,
+            source_name=item.source_name,
+            source_url=item.source_url,
+            source_file=item.source_file,
+            section_title=item.section_title,
+            element_type=item.element_type,
+            business_tags=item.business_tags,
+            score=item.score,
+            content=item.content,
         )
 
     def _to_reconciliation_audit_decision(
-        self, decision: AuditDecision,
+        self,
+        decision: AuditDecision,
     ) -> ReconciliationAuditDecision:
         return ReconciliationAuditDecision(
-            flow_id=decision.flow_id, decision=decision.decision,
-            risk_level=decision.risk_level, reason=decision.reason,
+            flow_id=decision.flow_id,
+            decision=decision.decision,
+            risk_level=decision.risk_level,
+            reason=decision.reason,
             evidence=[self._to_reconciliation_evidence(item) for item in decision.evidence],
             confidence=decision.confidence,
             fallback_applied=decision.fallback_applied,
@@ -630,14 +644,19 @@ class ReconciliationService:
         for result in results:
             if result.status == "AUTO_FIXED":
                 continue
-            queue_rows.append({
-                "task_id": task_id, "flow_id": result.flow_id,
-                "bank_transaction_id": None, "clear_transaction_id": None,
-                "error_type": result.error_type or "",
-                "exception_branch": result.exception_branch,
-                "status": result.status,
-                "risk_level": "MEDIUM", "retry_count": 0,
-            })
+            queue_rows.append(
+                {
+                    "task_id": task_id,
+                    "flow_id": result.flow_id,
+                    "bank_transaction_id": None,
+                    "clear_transaction_id": None,
+                    "error_type": result.error_type or "",
+                    "exception_branch": result.exception_branch,
+                    "status": result.status,
+                    "risk_level": "MEDIUM",
+                    "retry_count": 0,
+                }
+            )
         return queue_rows
 
     def _write_ledger_entries(
@@ -783,8 +802,7 @@ class ReconciliationService:
                     recorder=recorder,
                 )
             rag_items = [
-                RagSearchItem.model_validate(item)
-                for item in workflow_state["rag_context"]
+                RagSearchItem.model_validate(item) for item in workflow_state["rag_context"]
             ]
             rag_response = RagSearchResponse.model_validate(
                 workflow_state.get("rag_response", {"items": rag_items})
@@ -793,14 +811,16 @@ class ReconciliationService:
                 "chunk_ids": [item.chunk_id for item in rag_items],
                 "best_score": max((item.score for item in rag_items), default=None),
             }
-            rag_log_rows.append(rag_log_service.build_row(
-                user_id=user_id,
-                task_id=task_id,
-                query_text=rag_query,
-                top_k=settings.rag_rerank_top_k,
-                items=rag_items,
-                response=rag_response,
-            ))
+            rag_log_rows.append(
+                rag_log_service.build_row(
+                    user_id=user_id,
+                    task_id=task_id,
+                    query_text=rag_query,
+                    top_k=settings.rag_rerank_top_k,
+                    items=rag_items,
+                    response=rag_response,
+                )
+            )
             audit_decision = AuditDecision.model_validate(workflow_state["audit_decision"])
             fallback_path = workflow_state.get("fallback_path")
             consumed_logs = [
@@ -808,9 +828,7 @@ class ReconciliationService:
             ]
             cached_logs = [row for row in workflow_state["agent_logs"] if row.get("cached", False)]
             prompt_tokens = sum(int(row.get("prompt_tokens", 0)) for row in consumed_logs)
-            completion_tokens = sum(
-                int(row.get("completion_tokens", 0)) for row in consumed_logs
-            )
+            completion_tokens = sum(int(row.get("completion_tokens", 0)) for row in consumed_logs)
             saved_prompt_tokens += sum(int(row.get("prompt_tokens", 0)) for row in cached_logs)
             saved_completion_tokens += sum(
                 int(row.get("completion_tokens", 0)) for row in cached_logs
@@ -840,35 +858,43 @@ class ReconciliationService:
                 "clear_amount": self._format_optional_decimal(result.clear_amount),
                 "amount_diff": self._format_optional_decimal(result.amount_diff),
             }
-            agent_log_rows.append(agent_log_service.build_row(
-                user_id=user_id,
-                task_id=task_id,
-                queue_id=None,
-                agent_name="AuditAgent",
-                event_type="AUDIT_DECISION",
-                input_payload=input_payload,
-                output_payload=agent_output,
-                post_hook_results=self._post_hook_results(workflow_state),
-                prompt_version=self._prompt_version_from_logs(workflow_state["agent_logs"]),
-                fallback_level=audit_decision.fallback_level,
-                llm_tokens=llm_tokens,
-            ))
+            agent_log_rows.append(
+                agent_log_service.build_row(
+                    user_id=user_id,
+                    task_id=task_id,
+                    queue_id=None,
+                    agent_name="AuditAgent",
+                    event_type="AUDIT_DECISION",
+                    input_payload=input_payload,
+                    output_payload=agent_output,
+                    post_hook_results=self._post_hook_results(workflow_state),
+                    prompt_version=self._prompt_version_from_logs(workflow_state["agent_logs"]),
+                    fallback_level=audit_decision.fallback_level,
+                    llm_tokens=llm_tokens,
+                )
+            )
             trace_spans = self._finalize_recorder(recorder, audit_decision)
             if trace_spans:
                 trace_snapshots.append((result.flow_id, recorder.trace_id or "", trace_spans))
-            rows.append(LedgerRow(
-                id=0, task_id=task_id, flow_id=result.flow_id,
-                error_type=result.error_type or "",
-                exception_branch=result.exception_branch,
-                bank_amount=result.bank_amount,
-                clear_amount=result.clear_amount,
-                discrepancy_amount=self._ledger_discrepancy_amount(result),
-                ai_audit_opinion=audit_decision.reason,
-                ai_confidence=Decimal(str(audit_decision.confidence)).quantize(Decimal("0.0001")),
-                rag_source=", ".join(item.chunk_id for item in rag_items) or None,
-                fallback_path=fallback_path,
-                handle_status=audit_decision.decision,
-            ))
+            rows.append(
+                LedgerRow(
+                    id=0,
+                    task_id=task_id,
+                    flow_id=result.flow_id,
+                    error_type=result.error_type or "",
+                    exception_branch=result.exception_branch,
+                    bank_amount=result.bank_amount,
+                    clear_amount=result.clear_amount,
+                    discrepancy_amount=self._ledger_discrepancy_amount(result),
+                    ai_audit_opinion=audit_decision.reason,
+                    ai_confidence=Decimal(str(audit_decision.confidence)).quantize(
+                        Decimal("0.0001")
+                    ),
+                    rag_source=", ".join(item.chunk_id for item in rag_items) or None,
+                    fallback_path=fallback_path,
+                    handle_status=audit_decision.decision,
+                )
+            )
         return ReconciliationWriteBundle(
             ledger_rows=rows,
             rag_log_rows=rag_log_rows,
@@ -933,16 +959,21 @@ class ReconciliationService:
 
         A recorder self-fault only disables the current Trace; it never changes
         business results. Returns an empty list when there is nothing to persist.
+
+        Terminal type is FINAL for normal completions (AUTO_FIXED, PENDING_HUMAN
+        with no fallback, UNRESOLVED) and FALLBACK only when an actual safety
+        fallback was applied. FALLBACK.outcome is always PENDING_HUMAN.
         """
         outcome = (
             WorkflowOutcome.AUTO_FIXED
             if audit_decision.decision == "AUTO_FIXED"
             else WorkflowOutcome.PENDING_HUMAN
         )
+        fallback_applied = bool(audit_decision.fallback_applied)
         terminal_type = (
-            SpanType.FINAL
-            if audit_decision.decision == "AUTO_FIXED"
-            else SpanType.FALLBACK
+            SpanType.FALLBACK
+            if fallback_applied and audit_decision.decision != "AUTO_FIXED"
+            else SpanType.FINAL
         )
         try:
             recorder.close_root(
@@ -1100,7 +1131,8 @@ class ReconciliationService:
     def _post_hook_results(self, workflow_state: ReconciliationState) -> dict[str, object]:
         decision_log = next(
             (
-                row for row in reversed(workflow_state["agent_logs"])
+                row
+                for row in reversed(workflow_state["agent_logs"])
                 if row.get("agent_name") == "DecisionHook"
             ),
             {},
@@ -1108,7 +1140,9 @@ class ReconciliationService:
         return {
             "schema_retries": int(workflow_state.get("retry_count", 0)),
             "constraint_violated": list(decision_log.get("violated", [])),
-            "decision_route": str(decision_log.get("next_action", workflow_state.get("next_action", ""))),
+            "decision_route": str(
+                decision_log.get("next_action", workflow_state.get("next_action", ""))
+            ),
         }
 
 

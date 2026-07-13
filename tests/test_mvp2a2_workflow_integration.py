@@ -67,8 +67,10 @@ def test_write_ledger_entries_persists_hybrid_fields_from_rag_response(monkeypat
     rag_item = _evidence()
     rag_response = RagSearchResponse(items=[rag_item], rewritten_query="金额差异 对账 规则")
 
-    def fake_run_workflow_for_result(*, user_id, task_id, scenario_type, result, rag_query):
-        del user_id, task_id, scenario_type, result, rag_query
+    def fake_run_workflow_for_result(
+        *, user_id, task_id, scenario_type, result, rag_query, recorder=None
+    ):
+        del user_id, task_id, scenario_type, result, rag_query, recorder
         return _workflow_state(rag_item, rag_response)
 
     monkeypatch.setattr(service, "_run_workflow_for_result", fake_run_workflow_for_result)

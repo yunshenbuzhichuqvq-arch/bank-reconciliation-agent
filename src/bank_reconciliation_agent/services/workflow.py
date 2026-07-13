@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
@@ -35,7 +36,11 @@ from bank_reconciliation_agent.services.hooks import (
     decision_hook,
     schema_hook,
 )
-from bank_reconciliation_agent.services.stream_emitter import NullEmitter, StreamEmitter, to_stream_event
+from bank_reconciliation_agent.services.stream_emitter import (
+    NullEmitter,
+    StreamEmitter,
+    to_stream_event,
+)
 from bank_reconciliation_agent.services.tool_adapters import default_tool_executor
 from bank_reconciliation_agent.services.tool_executor import safe_tool_projection
 from bank_reconciliation_agent.services.trace import NoOpRecorder, TraceRecorder
@@ -138,11 +143,10 @@ def _record_tool_span(
     projection: dict[str, Any],
     *,
     emitter: StreamEmitter | None = None,
+    started_at: datetime | None = None,
 ) -> None:
     recorder = _recorder(state)
-    status, outcome = _TOOL_STATUS_MAP.get(
-        str(projection["status"]), (SpanStatus.FAILED, None)
-    )
+    status, outcome = _TOOL_STATUS_MAP.get(str(projection["status"]), (SpanStatus.FAILED, None))
     recovered_error_type: str | None = None
     if projection.get("retry_recovered"):
         for attempt in result.attempts:
@@ -161,6 +165,7 @@ def _record_tool_span(
         evidence_ids=list(projection.get("evidence_ids", [])),
         error_type=projection.get("error_type"),
         fallback_reason=projection.get("fallback_reason"),
+        started_at=started_at,
     )
     _emit_trace_span(state, recorder, emitter)
 
@@ -173,15 +178,21 @@ def _record_agent_span(
     duration_ms: float,
     status: SpanStatus | None = None,
     emitter: StreamEmitter | None = None,
+    started_at: datetime | None = None,
 ) -> None:
     recorder = _recorder(state)
     usage = _llm_usage(agent)
     span_status = status
     if span_status is None:
-        span_status = (
-            SpanStatus.FAILED if usage.get("final_failure_type") else SpanStatus.SUCCEEDED
-        )
+        span_status = SpanStatus.FAILED if usage.get("final_failure_type") else SpanStatus.SUCCEEDED
     model_name = getattr(getattr(agent, "last_llm_result", None), "model", None)
+    if started_at is None:
+        started_at = datetime.now(timezone.utc) - timedelta(milliseconds=duration_ms)
+    recovered_error_type: str | None = None
+    if usage.get("retry_recovered"):
+        summary = getattr(agent, "last_llm_summary", None)
+        if summary is not None:
+            recovered_error_type = getattr(summary, "recovered_error_type", None)
     recorder.record_agent(
         name=name,
         status=span_status,
@@ -192,11 +203,12 @@ def _record_agent_span(
         cached_calls=int(usage.get("cached_calls", 0)),
         attempt=max(1, int(usage.get("transport_attempts", 1) or 1)),
         retry_recovered=bool(usage.get("retry_recovered", False)),
-        recovered_error_type=None,
+        recovered_error_type=recovered_error_type,
         structured_repair_attempted=bool(usage.get("structured_repair_attempted", False)),
         structured_repair_succeeded=bool(usage.get("structured_repair_succeeded", False)),
         error_type=usage.get("final_failure_type"),
         fallback_reason=usage.get("fallback_reason"),
+        started_at=started_at,
     )
     _emit_trace_span(state, recorder, emitter)
 
@@ -270,13 +282,17 @@ def run_item(
             emitter=emitter,
         )
         state["extraction_result"] = _model_or_mapping_dump(extraction_result)
-        _append_agent_log(state, {
-            "agent_name": "ExtractionAgent",
-            "step": "extract",
-            "flow_id": flow_id,
-            "prompt_version": getattr(extraction_agent, "prompt_version", None),
-            **_llm_usage(extraction_agent),
-        }, emitter)
+        _append_agent_log(
+            state,
+            {
+                "agent_name": "ExtractionAgent",
+                "step": "extract",
+                "flow_id": flow_id,
+                "prompt_version": getattr(extraction_agent, "prompt_version", None),
+                **_llm_usage(extraction_agent),
+            },
+            emitter,
+        )
 
     cutoff_t1_context: dict[str, str] | None = None
     if exception_branch == "BC-R003":
@@ -305,7 +321,9 @@ def run_item(
             "flow_id": flow_id,
             "summary": summary,
             "transaction_date": _transaction_date(state),
-            "amount": _optional_string(math_result.get("bank_amount") or math_result.get("clear_amount")),
+            "amount": _optional_string(
+                math_result.get("bank_amount") or math_result.get("clear_amount")
+            ),
             "remark": remark,
         }
         if exception_branch == "BC-R003":
@@ -339,14 +357,18 @@ def run_item(
             emitter=emitter,
         )
         trace_payload = _model_or_mapping_dump(trace_result)
-        _append_agent_log(state, {
-            "agent_name": "TraceAgent",
-            "step": "trace",
-            "flow_id": flow_id,
-            "output": trace_payload,
-            "prompt_version": getattr(trace_agent, "prompt_version", None),
-            **_llm_usage(trace_agent),
-        }, emitter)
+        _append_agent_log(
+            state,
+            {
+                "agent_name": "TraceAgent",
+                "step": "trace",
+                "flow_id": flow_id,
+                "output": trace_payload,
+                "prompt_version": getattr(trace_agent, "prompt_version", None),
+                **_llm_usage(trace_agent),
+            },
+            emitter,
+        )
 
     search_result = _execute_tool(
         tool_executor,
@@ -407,15 +429,19 @@ def run_item(
         audit_kwargs=audit_kwargs,
         emitter=emitter,
     )
-    _append_agent_log(state, {
-        "agent_name": "AuditAgent",
-        "step": "decide_with_llm",
-        "flow_id": flow_id,
-        "fallback_level": 1,
-        "output_payload": audit_decision.model_dump(mode="json"),
-        "prompt_version": getattr(audit_agent, "prompt_version", None),
-        **_llm_usage(audit_agent),
-    }, emitter)
+    _append_agent_log(
+        state,
+        {
+            "agent_name": "AuditAgent",
+            "step": "decide_with_llm",
+            "flow_id": flow_id,
+            "fallback_level": 1,
+            "output_payload": audit_decision.model_dump(mode="json"),
+            "prompt_version": getattr(audit_agent, "prompt_version", None),
+            **_llm_usage(audit_agent),
+        },
+        emitter,
+    )
 
     fallback_path = "L1"
     if state.get("error_message") == "schema validation failed":
@@ -484,16 +510,20 @@ def run_item(
             state["next_action"] = audit_decision.next_action
             return state
         audit_decision = mark_fallback(audit_decision, fallback_level=2)
-        _append_agent_log(state, {
-            "agent_name": "AuditAgent",
-            "step": "decide_with_llm",
-            "flow_id": flow_id,
-            "fallback_level": 2,
-            "few_shot_rows": len(state["fallback_cases"]),
-            "output_payload": audit_decision.model_dump(mode="json"),
-            "prompt_version": getattr(audit_agent, "prompt_version", None),
-            **_llm_usage(audit_agent),
-        }, emitter)
+        _append_agent_log(
+            state,
+            {
+                "agent_name": "AuditAgent",
+                "step": "decide_with_llm",
+                "flow_id": flow_id,
+                "fallback_level": 2,
+                "few_shot_rows": len(state["fallback_cases"]),
+                "output_payload": audit_decision.model_dump(mode="json"),
+                "prompt_version": getattr(audit_agent, "prompt_version", None),
+                **_llm_usage(audit_agent),
+            },
+            emitter,
+        )
         if confidence_is_low(audit_decision.confidence):
             fallback_path = "L1->L2->L3"
             trace_kwargs = {
@@ -536,15 +566,19 @@ def run_item(
                 emitter=emitter,
             )
             trace_payload = _model_or_mapping_dump(trace_result)
-            _append_agent_log(state, {
-                "agent_name": "TraceAgent",
-                "step": "trace",
-                "flow_id": flow_id,
-                "output": trace_payload,
-                "fallback_level": 3,
-                "prompt_version": getattr(trace_agent, "prompt_version", None),
-                **_llm_usage(trace_agent),
-            }, emitter)
+            _append_agent_log(
+                state,
+                {
+                    "agent_name": "TraceAgent",
+                    "step": "trace",
+                    "flow_id": flow_id,
+                    "output": trace_payload,
+                    "fallback_level": 3,
+                    "prompt_version": getattr(trace_agent, "prompt_version", None),
+                    **_llm_usage(trace_agent),
+                },
+                emitter,
+            )
             audit_decision = _audit_decision_once(
                 state=state,
                 audit_agent=audit_agent,
@@ -570,15 +604,19 @@ def run_item(
                 state["next_action"] = audit_decision.next_action
                 return state
             audit_decision = mark_fallback(audit_decision, fallback_level=3)
-            _append_agent_log(state, {
-                "agent_name": "AuditAgent",
-                "step": "decide_with_llm",
-                "flow_id": flow_id,
-                "fallback_level": 3,
-                "output_payload": audit_decision.model_dump(mode="json"),
-                "prompt_version": getattr(audit_agent, "prompt_version", None),
-                **_llm_usage(audit_agent),
-            }, emitter)
+            _append_agent_log(
+                state,
+                {
+                    "agent_name": "AuditAgent",
+                    "step": "decide_with_llm",
+                    "flow_id": flow_id,
+                    "fallback_level": 3,
+                    "output_payload": audit_decision.model_dump(mode="json"),
+                    "prompt_version": getattr(audit_agent, "prompt_version", None),
+                    **_llm_usage(audit_agent),
+                },
+                emitter,
+            )
             if confidence_is_low(float(trace_payload.get("confidence", 0.0))):
                 fallback_path = "L1->L2->L3->HUMAN"
                 audit_decision.reason = f"{audit_decision.reason}；L3 追溯置信度不足，转人工。"
@@ -608,7 +646,6 @@ def run_item(
     return state
 
 
-
 def _run_fuzzy_candidate_confirmation(
     *,
     state: ReconciliationState,
@@ -635,15 +672,19 @@ def _run_fuzzy_candidate_confirmation(
         audit_kwargs=audit_kwargs,
         emitter=emitter,
     )
-    _append_agent_log(state, {
-        "agent_name": "AuditAgent",
-        "step": "confirm_match",
-        "flow_id": flow_id,
-        "fallback_level": 0,
-        "output_payload": decision.model_dump(mode="json"),
-        "prompt_version": getattr(audit_agent, "prompt_version", None),
-        **_llm_usage(audit_agent),
-    }, emitter)
+    _append_agent_log(
+        state,
+        {
+            "agent_name": "AuditAgent",
+            "step": "confirm_match",
+            "flow_id": flow_id,
+            "fallback_level": 0,
+            "output_payload": decision.model_dump(mode="json"),
+            "prompt_version": getattr(audit_agent, "prompt_version", None),
+            **_llm_usage(audit_agent),
+        },
+        emitter,
+    )
 
     current_amount = _to_decimal(math_result.get("bank_amount")) or _to_decimal(
         math_result.get("clear_amount")
@@ -681,15 +722,19 @@ def _run_fuzzy_candidate_confirmation(
             },
             emitter=emitter,
         )
-        _append_agent_log(state, {
-            "agent_name": "AuditAgent",
-            "step": "decide_with_llm",
-            "flow_id": flow_id,
-            "fallback_level": 0,
-            "output_payload": decision.model_dump(mode="json"),
-            "prompt_version": getattr(audit_agent, "prompt_version", None),
-            **_llm_usage(audit_agent),
-        }, emitter)
+        _append_agent_log(
+            state,
+            {
+                "agent_name": "AuditAgent",
+                "step": "decide_with_llm",
+                "flow_id": flow_id,
+                "fallback_level": 0,
+                "output_payload": decision.model_dump(mode="json"),
+                "prompt_version": getattr(audit_agent, "prompt_version", None),
+                **_llm_usage(audit_agent),
+            },
+            emitter,
+        )
     elif decision.decision == "UNRESOLVED":
         if math_result.get("bank_amount") is not None:
             state["error_type"] = "BOOK_UNRECORDED"
@@ -756,13 +801,17 @@ def _fail_closed_item(
     state["fallback_path"] = "AI_ERROR->HUMAN"
     state["next_action"] = "PENDING_HUMAN"
     state["error_message"] = usage.get("fallback_reason") or "structured_output_invalid"
-    _append_agent_log(state, {
-        "agent_name": agent_name,
-        "step": step,
-        "flow_id": flow_id,
-        "fallback_level": 1,
-        **usage,
-    }, emitter)
+    _append_agent_log(
+        state,
+        {
+            "agent_name": agent_name,
+            "step": step,
+            "flow_id": flow_id,
+            "fallback_level": 1,
+            **usage,
+        },
+        emitter,
+    )
     _emit_stream_row(
         state,
         {
@@ -805,13 +854,17 @@ def _audit_decision_once(
             hook_name="SchemaHook",
             flow_id=audit_kwargs.get("flow_id"),
         )
-        _append_agent_log(state, {
-            "agent_name": "SchemaHook",
-            "step": "schema_validate",
-            "flow_id": audit_kwargs.get("flow_id"),
-            "retry_count": 0,
-            "error_message": "schema validation failed",
-        }, emitter)
+        _append_agent_log(
+            state,
+            {
+                "agent_name": "SchemaHook",
+                "step": "schema_validate",
+                "flow_id": audit_kwargs.get("flow_id"),
+                "retry_count": 0,
+                "error_message": "schema validation failed",
+            },
+            emitter,
+        )
 
         state["error_message"] = "schema validation failed"
         return AuditDecision(
@@ -862,16 +915,37 @@ def _execute_tool(
     fallback_level: int = 0,
 ) -> ToolCallResult:
     context = _build_tool_context(state, fallback_level=fallback_level)
+    _tool_start = time.monotonic()
     result = tool_executor.execute(name, args, context)
     projection = safe_tool_projection(result)
-    _record_tool_span(state, result, projection, emitter=emitter)
-    _append_agent_log(state, {
-        "agent_name": "ToolExecutor",
-        "step": "tool_call",
-        "flow_id": _flow_id(state),
-        **projection,
-    }, emitter)
+    _record_tool_span(
+        state,
+        result,
+        projection,
+        emitter=emitter,
+        started_at=_datetime_from_monotonic_start(_tool_start, projection),
+    )
+    _append_agent_log(
+        state,
+        {
+            "agent_name": "ToolExecutor",
+            "step": "tool_call",
+            "flow_id": _flow_id(state),
+            **projection,
+        },
+        emitter,
+    )
     return result
+
+
+def _datetime_from_monotonic_start(
+    mono_start: float,
+    projection: dict[str, Any],
+) -> datetime | None:
+    """Back-calculate UTC started_at from monotonic start and wall-clock duration."""
+    return datetime.now(timezone.utc) - timedelta(
+        milliseconds=float(projection.get("duration_ms", 0.0))
+    )
 
 
 def _tool_fail_closed_item(
@@ -938,8 +1012,10 @@ def _apply_post_hooks(
     _emit_trace_span(state, _recorder(state), emitter)
     if not constraint.ok:
         violated_suffix = f"；违反约束: {', '.join(constraint.violated)}"
-        audit_decision.reason = f"{audit_decision.reason}{violated_suffix}" if audit_decision.reason else (
-            f"违反约束: {', '.join(constraint.violated)}"
+        audit_decision.reason = (
+            f"{audit_decision.reason}{violated_suffix}"
+            if audit_decision.reason
+            else (f"违反约束: {', '.join(constraint.violated)}")
         )
         audit_decision = mark_fallback(
             audit_decision,
@@ -955,13 +1031,17 @@ def _apply_post_hooks(
     state["confidence"] = audit_decision.confidence
     state["fallback_level"] = audit_decision.fallback_level
     state["next_action"] = route
-    _append_agent_log(state, {
-        "agent_name": "DecisionHook",
-        "step": "post_hook_route",
-        "flow_id": audit_decision.flow_id,
-        "violated": constraint.violated,
-        "next_action": route,
-    }, emitter)
+    _append_agent_log(
+        state,
+        {
+            "agent_name": "DecisionHook",
+            "step": "post_hook_route",
+            "flow_id": audit_decision.flow_id,
+            "violated": constraint.violated,
+            "next_action": route,
+        },
+        emitter,
+    )
 
 
 def _append_agent_log(

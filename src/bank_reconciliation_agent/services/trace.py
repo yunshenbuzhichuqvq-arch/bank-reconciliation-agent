@@ -15,7 +15,7 @@ import json
 import time as _time
 import uuid as _uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import ClassVar, Generator
 
@@ -784,12 +784,23 @@ class TraceRecorder:
         evidence_ids: list[str] | None = None,
         error_type: str | None = None,
         fallback_reason: str | None = None,
+        started_at: datetime | None = None,
     ) -> None:
-        """Record a completed Tool span from safe projection data."""
+        """Record a completed Tool span from safe projection data.
+
+        If *started_at* is provided, the span's start time is backdated to
+        that value and ``ended_at`` is computed as ``started_at + duration_ms``.
+        Otherwise both are set to ``datetime.now(timezone.utc)``.
+        """
         if self._disabled:
             return
 
         builder = self._new_builder(SpanType.TOOL, name)
+        if started_at is not None:
+            builder.started_at = started_at
+            builder.ended_at = started_at + timedelta(milliseconds=max(0, int(duration_ms)))
+        else:
+            builder.ended_at = datetime.now(timezone.utc)
         builder.status = status
         builder.outcome = outcome
         builder.duration_ms = max(0, int(duration_ms))
@@ -800,9 +811,6 @@ class TraceRecorder:
         builder.evidence_ids = evidence_ids or []
         builder.error_type = error_type
         builder.fallback_reason = fallback_reason
-
-        # Close with pre-set duration (not monotonic, already provided)
-        builder.ended_at = datetime.now(timezone.utc)
 
     def record_agent(
         self,
@@ -821,12 +829,23 @@ class TraceRecorder:
         structured_repair_succeeded: bool = False,
         error_type: str | None = None,
         fallback_reason: str | None = None,
+        started_at: datetime | None = None,
     ) -> None:
-        """Record a completed Agent span from LLM summary data."""
+        """Record a completed Agent span from LLM summary data.
+
+        If *started_at* is provided, the span's start time is backdated to
+        that value and ``ended_at`` is computed as ``started_at + duration_ms``.
+        Otherwise both are set to ``datetime.now(timezone.utc)``.
+        """
         if self._disabled:
             return
 
         builder = self._new_builder(SpanType.AGENT, name)
+        if started_at is not None:
+            builder.started_at = started_at
+            builder.ended_at = started_at + timedelta(milliseconds=max(0, int(duration_ms)))
+        else:
+            builder.ended_at = datetime.now(timezone.utc)
         builder.status = status
         builder.duration_ms = max(0, int(duration_ms))
         builder.model_name = model_name
@@ -841,8 +860,6 @@ class TraceRecorder:
         builder.error_type = error_type
         builder.fallback_reason = fallback_reason
 
-        builder.ended_at = datetime.now(timezone.utc)
-
     # -- lifecycle ---------------------------------------------------------
 
     def close_root(
@@ -855,21 +872,26 @@ class TraceRecorder:
     ) -> None:
         """Close the root WORKFLOW span and optionally add a terminal span.
 
-        If ``terminal_type`` is provided (``FINAL`` or ``FALLBACK``), a
-        terminal span is appended before closing the root.
+        If ``terminal_type`` is not provided, a default is inferred:
+        ``FINAL`` for ``AUTO_FIXED``, ``FALLBACK`` otherwise.  Callers
+        with complete fallback awareness should always pass the canonical
+        terminal type explicitly.
         """
         if self._disabled:
             return
 
-        # Add terminal span if requested
-        if terminal_type is not None:
-            t_name = terminal_name or (
-                "final_decision" if terminal_type == SpanType.FINAL else "fallback_human"
-            )
-            terminal = self._new_builder(terminal_type, t_name)
-            terminal.status = status
-            terminal.outcome = outcome
-            terminal.close()
+        # Infer terminal type when not provided (backward-compatible default).
+        if terminal_type is None:
+            terminal_type = SpanType.FINAL if outcome == "AUTO_FIXED" else SpanType.FALLBACK
+
+        # Add terminal span
+        t_name = terminal_name or (
+            "final_decision" if terminal_type == SpanType.FINAL else "fallback_human"
+        )
+        terminal = self._new_builder(terminal_type, t_name)
+        terminal.status = status
+        terminal.outcome = outcome
+        terminal.close()
 
         # Close root span
         self._root.status = status
@@ -881,6 +903,9 @@ class TraceRecorder:
 
         The snapshot is cached after first call.  Returns empty tuple
         if the recorder has been disabled.
+
+        Runs full structural validation before returning; raises
+        ``ValueError`` on any invariant violation.
         """
         if self._disabled:
             return ()
@@ -889,6 +914,7 @@ class TraceRecorder:
             return self._snapshot
 
         spans = tuple(b.to_span() for b in self._spans)
+        validate_trace_snapshot(list(spans))
         self._snapshot = spans
         return spans
 
