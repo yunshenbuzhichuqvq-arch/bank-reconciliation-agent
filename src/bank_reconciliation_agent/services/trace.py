@@ -3,13 +3,23 @@
 Contains:
 - ``t_trace_span`` SQLAlchemy Core Table definition.
 - ``TraceService`` with tenant-scoped batch insert and query methods.
+- ``TraceRecorder`` — flow-scoped, in-memory span collector (TASK-29.2).
+- ``NoOpRecorder`` — zero-side-effect substitute when tracing is disabled.
+- ``validate_trace_snapshot`` — structural invariant checker.
 - Legacy ``TraceWriter`` (to be removed in TASK-29.3).
 """
 
 from __future__ import annotations
 
 import json
+import time as _time
+import uuid as _uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Generator
+
+import structlog
 
 from sqlalchemy import (
     BigInteger,
@@ -31,7 +41,11 @@ from sqlalchemy.engine import Engine
 
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
-from bank_reconciliation_agent.schemas.trace import TraceSpan
+from bank_reconciliation_agent.schemas.trace import (
+    SpanStatus,
+    SpanType,
+    TraceSpan,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -343,8 +357,503 @@ class TraceService:
 
 
 # ---------------------------------------------------------------------------
-# Legacy TraceWriter — retained temporarily for TASK-29.1.
-# Must be removed in TASK-29.3.
+# Structural invariant validation
+# ---------------------------------------------------------------------------
+
+
+def validate_trace_snapshot(spans: list[TraceSpan] | tuple[TraceSpan, ...]) -> None:
+    """Validate structural invariants for a complete Trace snapshot.
+
+    Raises ``ValueError`` on any violation.  Per spec:
+    - Exactly one WORKFLOW root span with ``sequence_no=1``.
+    - Exactly one FINAL or FALLBACK terminal, not both.
+    - ``sequence_no`` continuous, unique, starting from 1.
+    - All ``parent_span_id`` point to spans within the same Trace.
+    - No non-AGENT spans with non-zero token/model/cache/repair fields
+      (already enforced by ``TraceSpan`` validator).
+    """
+    if not spans:
+        raise ValueError("Trace snapshot must have at least one root span")
+
+    span_list = list(spans)
+
+    # 1. Exactly one WORKFLOW root span at sequence_no=1
+    roots = [s for s in span_list if s.span_type == SpanType.WORKFLOW]
+    if len(roots) != 1:
+        raise ValueError(f"Trace must have exactly one WORKFLOW root span, found {len(roots)}")
+    root = roots[0]
+    if root.sequence_no != 1:
+        raise ValueError(f"WORKFLOW root span must have sequence_no=1, got {root.sequence_no}")
+    if root.parent_span_id is not None:
+        raise ValueError("WORKFLOW root span must have parent_span_id=null")
+
+    # 2. Exactly one terminal: FINAL or FALLBACK (not both)
+    finals = [s for s in span_list if s.span_type == SpanType.FINAL]
+    fallbacks = [s for s in span_list if s.span_type == SpanType.FALLBACK]
+    terminal_count = len(finals) + len(fallbacks)
+    if terminal_count == 0:
+        raise ValueError(
+            "Trace must have exactly one terminal span (FINAL or FALLBACK), found none"
+        )
+    if terminal_count > 1:
+        raise ValueError(
+            f"Trace must have exactly one terminal span, "
+            f"found {len(finals)} FINAL and {len(fallbacks)} FALLBACK"
+        )
+
+    # 3. sequence_no: continuous, unique, starting from 1
+    seq_numbers = sorted(s.sequence_no for s in span_list)
+    expected = list(range(1, len(span_list) + 1))
+    if seq_numbers != expected:
+        seen = set()
+        duplicates = []
+        for sn in (s.sequence_no for s in span_list):
+            if sn in seen:
+                duplicates.append(sn)
+            seen.add(sn)
+        if duplicates:
+            raise ValueError(f"Trace has duplicate sequence numbers: {duplicates}")
+        raise ValueError(
+            f"Trace sequence numbers must be continuous from 1; "
+            f"got {seq_numbers}, expected {expected}"
+        )
+
+    # 4. All parent_span_id must point to spans within this Trace
+    span_ids = {s.span_id for s in span_list}
+    for s in span_list:
+        if s.parent_span_id is not None and s.parent_span_id not in span_ids:
+            raise ValueError(
+                f"Span {s.span_id} has parent_span_id={s.parent_span_id} "
+                f"which does not exist in this Trace"
+            )
+
+    # 5. All spans must share the same trace_id
+    trace_ids = {s.trace_id for s in span_list}
+    if len(trace_ids) != 1:
+        raise ValueError(f"All spans must share the same trace_id, found {trace_ids}")
+
+
+# ---------------------------------------------------------------------------
+# Internal span builder (in-memory, mutable until snapshot)
+# ---------------------------------------------------------------------------
+
+_log = structlog.get_logger("trace.recorder")
+
+
+class _SpanBuilder:
+    """Mutable span state used internally by ``TraceRecorder``."""
+
+    __slots__ = (
+        "trace_id",
+        "span_id",
+        "parent_span_id",
+        "user_id",
+        "task_id",
+        "flow_id",
+        "sequence_no",
+        "span_type",
+        "name",
+        "started_at",
+        "ended_at",
+        "duration_ms",
+        "status",
+        "outcome",
+        "attempt",
+        "retry_recovered",
+        "recovered_error_type",
+        "structured_repair_attempted",
+        "structured_repair_succeeded",
+        "model_name",
+        "prompt_tokens",
+        "completion_tokens",
+        "cached_calls",
+        "result_count",
+        "error_type",
+        "fallback_reason",
+        "evidence_ids",
+        "_mono_start",
+    )
+
+    def __init__(
+        self,
+        *,
+        trace_id: str,
+        span_id: str,
+        parent_span_id: str | None,
+        user_id: str,
+        task_id: str,
+        flow_id: str,
+        sequence_no: int,
+        span_type: SpanType,
+        name: str,
+        mono_start: float,
+    ) -> None:
+        self.trace_id = trace_id
+        self.span_id = span_id
+        self.parent_span_id = parent_span_id
+        self.user_id = user_id
+        self.task_id = task_id
+        self.flow_id = flow_id
+        self.sequence_no = sequence_no
+        self.span_type = span_type
+        self.name = name
+        self.started_at: datetime = datetime.now(timezone.utc)
+        self.ended_at: datetime | None = None
+        self.duration_ms: int = 0
+        self.status: SpanStatus = SpanStatus.SUCCEEDED
+        self.outcome: str | None = None
+        self._mono_start = mono_start
+
+        # Optional fields — defaults
+        self.attempt: int = 1
+        self.retry_recovered: bool = False
+        self.recovered_error_type: str | None = None
+        self.structured_repair_attempted: bool | None = None
+        self.structured_repair_succeeded: bool | None = None
+        self.model_name: str | None = None
+        self.prompt_tokens: int | None = None
+        self.completion_tokens: int | None = None
+        self.cached_calls: int | None = None
+        self.result_count: int | None = None
+        self.error_type: str | None = None
+        self.fallback_reason: str | None = None
+        self.evidence_ids: list[str] = []
+
+    def close(self, *, status: SpanStatus | None = None) -> None:
+        mono_end = _time.monotonic()
+        self.ended_at = datetime.now(timezone.utc)
+        self.duration_ms = max(0, int((mono_end - self._mono_start) * 1000))
+        if status is not None:
+            self.status = status
+
+    def to_span(self) -> TraceSpan:
+        return TraceSpan(
+            trace_id=self.trace_id,
+            span_id=self.span_id,
+            parent_span_id=self.parent_span_id,
+            user_id=self.user_id,
+            task_id=self.task_id,
+            flow_id=self.flow_id,
+            sequence_no=self.sequence_no,
+            span_type=self.span_type,
+            name=self.name,
+            started_at=self.started_at,
+            ended_at=self.ended_at or datetime.now(timezone.utc),
+            duration_ms=self.duration_ms,
+            status=self.status,
+            outcome=self.outcome,
+            attempt=self.attempt,
+            retry_recovered=self.retry_recovered,
+            recovered_error_type=self.recovered_error_type,
+            structured_repair_attempted=self.structured_repair_attempted,
+            structured_repair_succeeded=self.structured_repair_succeeded,
+            model_name=self.model_name,
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            cached_calls=self.cached_calls,
+            result_count=self.result_count,
+            error_type=self.error_type,
+            fallback_reason=self.fallback_reason,
+            evidence_ids=self.evidence_ids,
+        )
+
+
+# ---------------------------------------------------------------------------
+# TraceRecorder — flow-scoped, in-memory span collector
+# ---------------------------------------------------------------------------
+
+
+class TraceRecorder:
+    """Flow-scoped recorder that collects spans in memory.
+
+    Creates a new ``trace_id`` and root ``WORKFLOW`` span on init.
+    Use ``span()`` context manager for Route/Tool/Agent/Guard nodes.
+    Use ``record_tool()`` / ``record_agent()`` for direct projection.
+    Call ``close_root()`` when the flow completes, then ``snapshot()``.
+
+    The recorder does **not** write to the database; that is the
+    caller's responsibility (via ``TraceService.save_trace``).
+    """
+
+    def __init__(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        flow_id: str,
+        root_name: str = "reconciliation_workflow",
+    ) -> None:
+        self._user_id = user_id
+        self._task_id = task_id
+        self._flow_id = flow_id
+        self._trace_id = str(_uuid.uuid4())
+        self._sequence_counter = 0
+        self._spans: list[_SpanBuilder] = []
+        self._parent_stack: list[str] = []  # stack of span_ids
+        self._disabled = False
+        self._snapshot: tuple[TraceSpan, ...] | None = None
+
+        # Create root WORKFLOW span
+        self._root = self._new_builder(SpanType.WORKFLOW, root_name)
+        self._parent_stack.append(self._root.span_id)
+
+    @property
+    def trace_id(self) -> str:
+        return self._trace_id
+
+    # -- context manager for generic spans ---------------------------------
+
+    @contextmanager
+    def span(
+        self,
+        span_type: SpanType,
+        name: str,
+        *,
+        outcome: str | None = None,
+        model_name: str | None = None,
+    ) -> Generator[_SpanBuilder, None, None]:
+        """Context manager for recording a span.
+
+        On normal exit the span status is ``SUCCEEDED``; on exception
+        the span is marked ``FAILED`` and the exception re-raised.
+        """
+        if self._disabled:
+            yield _SpanBuilder(
+                trace_id="",
+                span_id="",
+                parent_span_id=None,
+                user_id="",
+                task_id="",
+                flow_id="",
+                sequence_no=0,
+                span_type=span_type,
+                name=name,
+                mono_start=_time.monotonic(),
+            )
+            return
+
+        builder = self._new_builder(span_type, name)
+        if outcome is not None:
+            builder.outcome = outcome
+        if model_name is not None:
+            builder.model_name = model_name
+
+        self._parent_stack.append(builder.span_id)
+        try:
+            yield builder
+        except Exception:
+            builder.close(status=SpanStatus.FAILED)
+            self._parent_stack.pop()
+            raise
+        else:
+            builder.close(status=SpanStatus.SUCCEEDED)
+            self._parent_stack.pop()
+
+    # -- direct projection methods -----------------------------------------
+
+    def record_tool(
+        self,
+        *,
+        name: str,
+        status: SpanStatus,
+        outcome: str | None,
+        duration_ms: int | float,
+        attempt: int,
+        retry_recovered: bool,
+        recovered_error_type: str | None,
+        result_count: int = 0,
+        evidence_ids: list[str] | None = None,
+        error_type: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        """Record a completed Tool span from safe projection data."""
+        if self._disabled:
+            return
+
+        builder = self._new_builder(SpanType.TOOL, name)
+        builder.status = status
+        builder.outcome = outcome
+        builder.duration_ms = max(0, int(duration_ms))
+        builder.attempt = attempt
+        builder.retry_recovered = retry_recovered
+        builder.recovered_error_type = recovered_error_type
+        builder.result_count = result_count
+        builder.evidence_ids = evidence_ids or []
+        builder.error_type = error_type
+        builder.fallback_reason = fallback_reason
+
+        # Close with pre-set duration (not monotonic, already provided)
+        builder.ended_at = datetime.now(timezone.utc)
+
+    def record_agent(
+        self,
+        *,
+        name: str,
+        status: SpanStatus,
+        duration_ms: int | float,
+        model_name: str | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cached_calls: int = 0,
+        attempt: int = 1,
+        retry_recovered: bool = False,
+        recovered_error_type: str | None = None,
+        structured_repair_attempted: bool = False,
+        structured_repair_succeeded: bool = False,
+        error_type: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        """Record a completed Agent span from LLM summary data."""
+        if self._disabled:
+            return
+
+        builder = self._new_builder(SpanType.AGENT, name)
+        builder.status = status
+        builder.duration_ms = max(0, int(duration_ms))
+        builder.model_name = model_name
+        builder.prompt_tokens = prompt_tokens
+        builder.completion_tokens = completion_tokens
+        builder.cached_calls = cached_calls
+        builder.attempt = attempt
+        builder.retry_recovered = retry_recovered
+        builder.recovered_error_type = recovered_error_type
+        builder.structured_repair_attempted = structured_repair_attempted
+        builder.structured_repair_succeeded = structured_repair_succeeded
+        builder.error_type = error_type
+        builder.fallback_reason = fallback_reason
+
+        builder.ended_at = datetime.now(timezone.utc)
+
+    # -- lifecycle ---------------------------------------------------------
+
+    def close_root(
+        self,
+        *,
+        status: SpanStatus,
+        outcome: str,
+        terminal_type: SpanType | None = None,
+        terminal_name: str | None = None,
+    ) -> None:
+        """Close the root WORKFLOW span and optionally add a terminal span.
+
+        If ``terminal_type`` is provided (``FINAL`` or ``FALLBACK``), a
+        terminal span is appended before closing the root.
+        """
+        if self._disabled:
+            return
+
+        # Add terminal span if requested
+        if terminal_type is not None:
+            t_name = terminal_name or (
+                "final_decision" if terminal_type == SpanType.FINAL else "fallback_human"
+            )
+            terminal = self._new_builder(terminal_type, t_name)
+            terminal.status = status
+            terminal.outcome = outcome
+            terminal.close()
+
+        # Close root span
+        self._root.status = status
+        self._root.outcome = outcome
+        self._root.close()
+
+    def snapshot(self) -> tuple[TraceSpan, ...]:
+        """Return an immutable, validated tuple of ``TraceSpan`` objects.
+
+        The snapshot is cached after first call.  Returns empty tuple
+        if the recorder has been disabled.
+        """
+        if self._disabled:
+            return ()
+
+        if self._snapshot is not None:
+            return self._snapshot
+
+        spans = tuple(b.to_span() for b in self._spans)
+        self._snapshot = spans
+        return spans
+
+    def disable(self) -> None:
+        """Disable this recorder.
+
+        Used when the recorder itself encounters a fault.  After
+        disabling, ``span()`` becomes a no-op pass-through and
+        ``snapshot()`` returns an empty tuple.  Business control flow
+        is never affected.
+        """
+        self._disabled = True
+        self._spans.clear()
+        self._snapshot = ()
+
+    # -- internals ---------------------------------------------------------
+
+    def _next_sequence(self) -> int:
+        self._sequence_counter += 1
+        return self._sequence_counter
+
+    def _current_parent_id(self) -> str | None:
+        return self._parent_stack[-1] if self._parent_stack else None
+
+    def _new_builder(self, span_type: SpanType, name: str) -> _SpanBuilder:
+        builder = _SpanBuilder(
+            trace_id=self._trace_id,
+            span_id=str(_uuid.uuid4()),
+            parent_span_id=self._current_parent_id(),
+            user_id=self._user_id,
+            task_id=self._task_id,
+            flow_id=self._flow_id,
+            sequence_no=self._next_sequence(),
+            span_type=span_type,
+            name=name,
+            mono_start=_time.monotonic(),
+        )
+        self._spans.append(builder)
+        return builder
+
+
+# ---------------------------------------------------------------------------
+# NoOpRecorder — zero-side-effect substitute
+# ---------------------------------------------------------------------------
+
+
+class NoOpRecorder:
+    """Drop-in substitute for ``TraceRecorder`` that does nothing.
+
+    Used when the caller does not provide a recorder or when tracing
+    is not desired.  All methods are safe no-ops.
+    """
+
+    @property
+    def trace_id(self) -> str | None:
+        return None
+
+    @contextmanager
+    def span(
+        self,
+        span_type: SpanType,
+        name: str,
+        *,
+        outcome: str | None = None,
+        model_name: str | None = None,
+    ) -> Generator[None, None, None]:
+        yield
+
+    def record_tool(self, **kwargs: object) -> None:
+        pass
+
+    def record_agent(self, **kwargs: object) -> None:
+        pass
+
+    def close_root(self, **kwargs: object) -> None:
+        pass
+
+    def snapshot(self) -> tuple[()]:
+        return ()
+
+    def disable(self) -> None:
+        pass
+
+
 # ---------------------------------------------------------------------------
 
 
