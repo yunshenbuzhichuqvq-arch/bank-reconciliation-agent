@@ -257,6 +257,55 @@ def test_review_approve_rejects_task_owned_by_other_user() -> None:
         raise AssertionError("expected HTTPException")
 
 
+def test_trace_replay_reads_are_scoped_by_user_id() -> None:
+    from bank_reconciliation_agent.schemas.trace import (
+        SpanStatus,
+        SpanType,
+        WorkflowOutcome,
+    )
+    from bank_reconciliation_agent.services.trace import TraceRecorder, TraceService
+
+    trace_service = TraceService()
+
+    def _persist(user_id: str, task_id: str, flow_id: str) -> str:
+        recorder = TraceRecorder(user_id=user_id, task_id=task_id, flow_id=flow_id)
+        with recorder.span(SpanType.ROUTE, "BE-R002"):
+            pass
+        recorder.close_root(
+            status=SpanStatus.SUCCEEDED,
+            outcome=WorkflowOutcome.PENDING_HUMAN,
+            terminal_type=SpanType.FALLBACK,
+        )
+        spans = list(recorder.snapshot())
+        assert trace_service.persist_snapshot(
+            user_id=user_id, task_id=task_id, flow_id=flow_id, spans=spans
+        )
+        return recorder.trace_id
+
+    u1_trace = _persist("iso_u1", "TASK_TRACE_ISO", "F_ISO")
+    _persist("iso_u2", "TASK_TRACE_ISO", "F_ISO")
+
+    # Each user only sees their own run.
+    assert trace_service.count_runs(user_id="iso_u1", task_id="TASK_TRACE_ISO", flow_id="F_ISO") == 1
+    assert trace_service.count_runs(user_id="iso_u2", task_id="TASK_TRACE_ISO", flow_id="F_ISO") == 1
+
+    # u2 cannot read u1's specific trace via the tenant-scoped reader.
+    cross = trace_service.get_spans(
+        user_id="iso_u2",
+        task_id="TASK_TRACE_ISO",
+        flow_id="F_ISO",
+        trace_id=u1_trace,
+    )
+    assert cross == []
+    own = trace_service.get_spans(
+        user_id="iso_u1",
+        task_id="TASK_TRACE_ISO",
+        flow_id="F_ISO",
+        trace_id=u1_trace,
+    )
+    assert own and own[0].span_type == SpanType.WORKFLOW
+
+
 def test_task_25_1_mark_attempt_started_is_user_scoped() -> None:
     ts = TaskService()
     for uid in ("u1", "u2"):

@@ -15,6 +15,7 @@ class ErrorCode(StrEnum):
     TOO_MANY_ROWS = "TOO_MANY_ROWS"
     INVALID_DATA_TYPE = "INVALID_DATA_TYPE"
     TASK_NOT_FOUND = "TASK_NOT_FOUND"
+    TRACE_NOT_FOUND = "TRACE_NOT_FOUND"
 
 
 class ApiResponse(BaseModel, Generic[T]):

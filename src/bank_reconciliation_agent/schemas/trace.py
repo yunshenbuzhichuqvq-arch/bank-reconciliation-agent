@@ -178,3 +178,112 @@ class TraceSpan(BaseModel):
             if self.structured_repair_succeeded is not None:
                 raise ValueError("structured_repair_succeeded must be null for non-AGENT spans")
         return self
+
+
+# ---------------------------------------------------------------------------
+# Replay API response models (safe projection, never expose user_id)
+# ---------------------------------------------------------------------------
+
+
+class ReplayStatus(StrEnum):
+    """Closed enum for the replay availability of a task/flow."""
+
+    AVAILABLE = "AVAILABLE"
+    IN_PROGRESS = "IN_PROGRESS"
+    TRACE_NOT_AVAILABLE = "TRACE_NOT_AVAILABLE"
+
+
+class TraceSpanView(BaseModel):
+    """Safe, tenant-stripped view of a persisted span for API/SSE.
+
+    Deliberately omits ``user_id`` and database internal ``id``; only
+    allowlisted observation fields are exposed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = Field(default="1.0", pattern=r"^1\.0$")
+    trace_id: str
+    span_id: str
+    parent_span_id: str | None = None
+    task_id: str
+    flow_id: str
+    sequence_no: int
+    span_type: SpanType
+    name: str
+    started_at: datetime
+    ended_at: datetime
+    duration_ms: int
+    status: SpanStatus
+    outcome: str | None = None
+    attempt: int = 1
+    retry_recovered: bool = False
+    recovered_error_type: str | None = None
+    structured_repair_attempted: bool | None = None
+    structured_repair_succeeded: bool | None = None
+    model_name: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cached_calls: int | None = None
+    result_count: int | None = None
+    error_type: str | None = None
+    fallback_reason: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_span(cls, span: TraceSpan) -> TraceSpanView:
+        return cls(
+            schema_version=span.schema_version,
+            trace_id=span.trace_id,
+            span_id=span.span_id,
+            parent_span_id=span.parent_span_id,
+            task_id=span.task_id,
+            flow_id=span.flow_id,
+            sequence_no=span.sequence_no,
+            span_type=span.span_type,
+            name=span.name,
+            started_at=span.started_at,
+            ended_at=span.ended_at,
+            duration_ms=span.duration_ms,
+            status=span.status,
+            outcome=span.outcome,
+            attempt=span.attempt,
+            retry_recovered=span.retry_recovered,
+            recovered_error_type=span.recovered_error_type,
+            structured_repair_attempted=span.structured_repair_attempted,
+            structured_repair_succeeded=span.structured_repair_succeeded,
+            model_name=span.model_name,
+            prompt_tokens=span.prompt_tokens,
+            completion_tokens=span.completion_tokens,
+            cached_calls=span.cached_calls,
+            result_count=span.result_count,
+            error_type=span.error_type,
+            fallback_reason=span.fallback_reason,
+            evidence_ids=list(span.evidence_ids),
+        )
+
+
+class TraceRunSummary(BaseModel):
+    """Condensed per-run summary, most-recent first in the replay response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str
+    started_at: datetime
+    status: SpanStatus
+    outcome: str | None = None
+
+
+class TraceReplayData(BaseModel):
+    """Replay payload returned inside ``ApiResponse``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    replay_status: ReplayStatus
+    selected_trace_id: str | None = None
+    execution_count: int = 0
+    runs: list[TraceRunSummary] = Field(default_factory=list)
+    spans: list[TraceSpanView] = Field(default_factory=list)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
