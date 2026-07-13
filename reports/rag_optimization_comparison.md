@@ -18,8 +18,11 @@
 - status: measured
 - effective_backend: `bge_m3`
 - real_backend_policy: auto
+- git_revision: `b015add4b674a2fe7e595d8a5594ae47d0d614a1`
 - eval_set_sha256: `71fd0db2e02faeccca15bf177e1582b9db0518af9208dc5025ae6481699929c2`
 - chunk_corpus_sha256: `b71d67f6a9954a7ee1a3ab0ad40f80ceaf7de0b14fa00dfd7978f14ed2f78018`
+- query_enrichment.enabled (baseline): False
+- query_enrichment.profile (baseline): None
 
 ## After Source
 
@@ -28,8 +31,13 @@
 - status: measured
 - effective_backend: `bge_m3`
 - real_backend_policy: auto
+- git_revision: `51b48efbb717a03cab3d2add16dc216bd127db19`
 - eval_set_sha256: `71fd0db2e02faeccca15bf177e1582b9db0518af9208dc5025ae6481699929c2`
 - chunk_corpus_sha256: `b71d67f6a9954a7ee1a3ab0ad40f80ceaf7de0b14fa00dfd7978f14ed2f78018`
+- query_enrichment.enabled (after): True
+- query_enrichment.profile (after): bank-clearing-single-side-missing
+- query_enrichment.profile_sha256 (after): `40dce1eb42546d416f3717f3c8027d761f62fa08671fd667dc86645e95ac6b7f`
+- query_enrichment.latency_ms (after): count=120, p50=0.0019590079318732023, p95=0.003369417390786109, max=0.013874989235773683
 
 ## Target Bucket
 
