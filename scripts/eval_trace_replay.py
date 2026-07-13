@@ -31,48 +31,82 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-# A file-backed SQLite keeps tables visible across the connections used by the
-# global services and the FastAPI TestClient (an in-memory DB would not persist
-# across the separate connections opened by the HTTP replay path). The DSN is
-# only defaulted when not already configured (pytest configures its own test DB
-# in conftest, which we must not override). The report is computed from
-# in-process scenario results and process-local counters, so any residual rows
-# in the file never affect the metrics.
-os.environ.setdefault(
-    "MYSQL_DSN",
-    f"sqlite:///{Path(tempfile.gettempdir()) / 'trace_replay_eval.sqlite'}",
-)
-os.environ.setdefault("EMBEDDING_BACKEND", "hash")
-os.environ.setdefault("ENABLE_RAG_RERANKER", "false")
-os.environ.setdefault("ENABLE_RAG_HYBRID", "false")
-os.environ.setdefault("ENABLE_RAG_REWRITE", "false")
 
-from sqlalchemy import create_engine
+def _lock_offline_environment() -> None:
+    """Enforce the offline / hash-embedding / local-SQLite contract this report
+    claims, before any project service is imported.
 
-from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
-from bank_reconciliation_agent.core.llm.provider import LLMResult
-from bank_reconciliation_agent.db.session import get_engine
-from bank_reconciliation_agent.schemas.ledger import LedgerQuery
-from bank_reconciliation_agent.schemas.rag import RagSearchItem
-from bank_reconciliation_agent.schemas.trace import (
+    If the caller has already configured a non-SQLite database, a non-hash
+    embedding backend, or enabled RAG reranker/hybrid/rewrite, we fail fast with
+    a non-zero exit and touch nothing: no project import, no scenario, no report
+    overwrite. When unset, we default to a file-backed local SQLite (visible
+    across the connections used by the FastAPI TestClient), hash embedding and
+    the three RAG flags disabled. A pre-configured SQLite DSN (e.g. the pytest
+    test DB) is accepted as-is and never overridden.
+    """
+    dsn = os.environ.get("MYSQL_DSN")
+    if dsn is not None and not dsn.startswith("sqlite"):
+        sys.stderr.write(
+            "eval_trace_replay refuses to run: MYSQL_DSN must be a SQLite DSN "
+            "(got a non-SQLite database). No reports were written.\n"
+        )
+        raise SystemExit(2)
+    embedding = os.environ.get("EMBEDDING_BACKEND")
+    if embedding is not None and embedding != "hash":
+        sys.stderr.write(
+            "eval_trace_replay refuses to run: EMBEDDING_BACKEND must be 'hash' "
+            f"(got {embedding!r}). No reports were written.\n"
+        )
+        raise SystemExit(2)
+    for flag in ("ENABLE_RAG_RERANKER", "ENABLE_RAG_HYBRID", "ENABLE_RAG_REWRITE"):
+        value = os.environ.get(flag)
+        if value is not None and value.strip().lower() == "true":
+            sys.stderr.write(
+                f"eval_trace_replay refuses to run: {flag} must be disabled. "
+                "No reports were written.\n"
+            )
+            raise SystemExit(2)
+    os.environ.setdefault(
+        "MYSQL_DSN",
+        f"sqlite:///{Path(tempfile.gettempdir()) / 'trace_replay_eval.sqlite'}",
+    )
+    os.environ.setdefault("EMBEDDING_BACKEND", "hash")
+    os.environ.setdefault("ENABLE_RAG_RERANKER", "false")
+    os.environ.setdefault("ENABLE_RAG_HYBRID", "false")
+    os.environ.setdefault("ENABLE_RAG_REWRITE", "false")
+
+
+_lock_offline_environment()
+
+from sqlalchemy import create_engine  # noqa: E402
+
+from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision  # noqa: E402
+from bank_reconciliation_agent.core.llm.provider import LLMResult  # noqa: E402
+from bank_reconciliation_agent.db.session import get_engine  # noqa: E402
+from bank_reconciliation_agent.schemas.ledger import LedgerQuery  # noqa: E402
+from bank_reconciliation_agent.schemas.rag import RagSearchItem  # noqa: E402
+from bank_reconciliation_agent.schemas.trace import (  # noqa: E402
     SpanType,
     TraceSpan,
 )
-from bank_reconciliation_agent.schemas.tools import (
+from bank_reconciliation_agent.schemas.tools import (  # noqa: E402
     SearchRulesOutput,
     ToolAttemptRecord,
     ToolCallResult,
 )
-from bank_reconciliation_agent.services.trace import (
+from bank_reconciliation_agent.services.trace import (  # noqa: E402
     TraceRecorder,
     TraceService,
     validate_trace_snapshot,
 )
-from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from bank_reconciliation_agent.services.workflow import (  # noqa: E402
+    ReconciliationState,
+    run_item,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-REPORTS_DIR = PROJECT_ROOT / "reports"
+REPORTS_DIR = Path(os.environ.get("TRACE_REPLAY_REPORTS_DIR") or (PROJECT_ROOT / "reports"))
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -972,6 +1006,64 @@ def _validate_report(json_report: dict[str, object]) -> list[str]:
     return errors
 
 
+def _validate_markdown(markdown_text: str, json_report: dict[str, object]) -> list[str]:
+    """Return errors if the rendered Markdown drifts from the same JSON report.
+
+    Guards against ``_build_markdown`` silently diverging from the machine facts:
+    scenario set/order, 6/6 pass count, 5/6 completeness and the claim boundary
+    must all appear verbatim in the Markdown that will be written alongside JSON.
+    """
+    errors: list[str] = []
+    if not markdown_text.strip():
+        errors.append("markdown is empty")
+        return errors
+
+    names = [s["scenario"] for s in json_report["scenarios"]]
+    last_index = -1
+    for name in names:
+        heading = f"### {name}"
+        idx = markdown_text.find(heading)
+        if idx == -1:
+            errors.append(f"markdown missing scenario heading: {name}")
+        elif idx < last_index:
+            errors.append(f"markdown scenario out of order: {name}")
+        else:
+            last_index = idx
+
+    metrics = json_report["metrics"]
+    required_fragments = [
+        f"Scenario pass count**: {json_report['scenario_pass_count']}/{json_report['scenario_total']}",
+        f"Numerator (eligible flows persisted)**: {metrics['numerator']}",
+        f"Denominator (eligible flows executed)**: {metrics['denominator']}",
+        f"**Provider**: {json_report['provider']}",
+        f"**Embedding**: {json_report['embedding']}",
+        f"**Database**: {json_report['database']}",
+    ]
+    for fragment in required_fragments:
+        if fragment not in markdown_text:
+            errors.append(f"markdown missing fragment: {fragment!r}")
+
+    return errors
+
+
+def _write_reports_atomically(json_text: str, markdown_text: str) -> tuple[Path, Path]:
+    """Write both reports to temp files, then atomically replace the targets.
+
+    Neither final report is touched until both temp files are written, so a
+    failure mid-write can never leave a half-updated pair on disk.
+    """
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    json_path = REPORTS_DIR / "trace_replay_evidence.json"
+    md_path = REPORTS_DIR / "trace_replay_evidence.md"
+    json_tmp = REPORTS_DIR / "trace_replay_evidence.json.tmp"
+    md_tmp = REPORTS_DIR / "trace_replay_evidence.md.tmp"
+    json_tmp.write_text(json_text, encoding="utf-8")
+    md_tmp.write_text(markdown_text, encoding="utf-8")
+    os.replace(json_tmp, json_path)
+    os.replace(md_tmp, md_path)
+    return json_path, md_path
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -979,7 +1071,7 @@ def _validate_report(json_report: dict[str, object]) -> list[str]:
 
 def main() -> int:
     print("=== Trace Replay Evidence Runner ===")
-    print("Provider: fake | Embedding: hash | Database: sqlite (in-memory)")
+    print("Provider: fake | Embedding: hash | Database: sqlite (file-backed/local)")
     print()
 
     runners = [
@@ -1002,6 +1094,7 @@ def main() -> int:
     metrics = _compute_metrics(scenarios_run)
     json_report = _build_json(scenarios_run, metrics)
 
+    # 1. Report schema / cross-field validation before rendering anything.
     errors = _validate_report(json_report)
     if errors:
         print("\nValidation failed; existing reports left untouched:")
@@ -1009,14 +1102,25 @@ def main() -> int:
             print(f"  - {err}")
         return 1
 
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    json_path = REPORTS_DIR / "trace_replay_evidence.json"
-    json_path.write_text(json.dumps(json_report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\nJSON report  → {json_path}")
+    # 2. Render both artefacts fully in memory from the same JSON report.
+    try:
+        json_text = json.dumps(json_report, ensure_ascii=False, indent=2)
+        markdown_text = _build_markdown(json_report)
+    except Exception as exc:
+        print(f"\nReport rendering failed ({type(exc).__name__}); reports left untouched.")
+        return 1
 
-    markdown = _build_markdown(json_report)
-    md_path = REPORTS_DIR / "trace_replay_evidence.md"
-    md_path.write_text(markdown, encoding="utf-8")
+    # 3. Verify the Markdown was generated from the same JSON facts.
+    md_errors = _validate_markdown(markdown_text, json_report)
+    if md_errors:
+        print("\nMarkdown/JSON consistency check failed; reports left untouched:")
+        for err in md_errors:
+            print(f"  - {err}")
+        return 1
+
+    # 4. Only now touch disk, writing both artefacts atomically.
+    json_path, md_path = _write_reports_atomically(json_text, markdown_text)
+    print(f"\nJSON report  → {json_path}")
     print(f"Markdown report → {md_path}")
 
     print(

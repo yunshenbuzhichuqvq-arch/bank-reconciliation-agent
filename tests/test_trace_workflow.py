@@ -13,7 +13,9 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
 from bank_reconciliation_agent.agents.extraction_agent import ExtractionAgentError
@@ -607,3 +609,80 @@ def test_finalize_recorder_unresolved_is_final_with_unresolved_outcome() -> None
     assert terminal.span_type == SpanType.FINAL
     assert terminal.outcome == "UNRESOLVED"
     assert spans[0].outcome == "UNRESOLVED"
+
+
+# ---------------------------------------------------------------------------
+# 9. Tool exception closes the open span FAILED and re-raises
+# ---------------------------------------------------------------------------
+
+
+class _RaisingToolExecutor:
+    """Raises during ``execute()`` while capturing whether the TOOL span was
+    already allocated (open) at the moment of the call."""
+
+    def __init__(self, recorder: TraceRecorder, exc: BaseException) -> None:
+        self._recorder = recorder
+        self._exc = exc
+        self.span_allocated_during_call: bool | None = None
+
+    def execute(self, name, args, context):
+        del args, context
+        open_tool = [
+            b
+            for b in self._recorder._spans
+            if b.span_type == SpanType.TOOL and b.name == name and b.ended_at is None
+        ]
+        self.span_allocated_during_call = (
+            len(open_tool) == 1 and open_tool[0].started_at is not None
+        )
+        raise self._exc
+
+
+def _tool_spans(recorder: TraceRecorder):
+    return [b for b in recorder._spans if b.span_type == SpanType.TOOL]
+
+
+def test_tool_operational_error_closes_span_failed_and_propagates() -> None:
+    recorder = _recorder()
+    executor = _RaisingToolExecutor(
+        recorder, OperationalError("SELECT 1", {}, Exception("db down"))
+    )
+    with pytest.raises(OperationalError):
+        run_item(
+            _state("BE-R002", recorder),
+            extraction_agent=SpyExtractionAgent(),
+            trace_agent=SpyTraceAgent(),
+            audit_agent=SpyAuditAgent(),
+            tool_executor=executor,
+        )
+    assert executor.span_allocated_during_call is True
+
+    tool_spans = _tool_spans(recorder)
+    assert len(tool_spans) == 1  # no duplicate Tool span
+    span = tool_spans[0]
+    assert span.status == SpanStatus.FAILED
+    assert span.ended_at is not None
+    assert span.outcome is None
+    assert span.error_type == "TRANSIENT_READ_ERROR"
+    assert span.fallback_reason == "TOOL_TRANSIENT_READ_ERROR"
+    assert span.attempt == 1
+
+
+def test_tool_internal_error_closes_span_failed_and_propagates() -> None:
+    recorder = _recorder()
+    executor = _RaisingToolExecutor(recorder, RuntimeError("unexpected boom"))
+    with pytest.raises(RuntimeError):
+        run_item(
+            _state("BE-R002", recorder),
+            extraction_agent=SpyExtractionAgent(),
+            trace_agent=SpyTraceAgent(),
+            audit_agent=SpyAuditAgent(),
+            tool_executor=executor,
+        )
+    tool_spans = _tool_spans(recorder)
+    assert len(tool_spans) == 1
+    span = tool_spans[0]
+    assert span.status == SpanStatus.FAILED
+    assert span.outcome is None
+    assert span.error_type == "INTERNAL_ERROR"
+    assert span.fallback_reason == "TOOL_INTERNAL_ERROR"

@@ -6,6 +6,8 @@ Refs: TASK-29.7
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -198,6 +200,132 @@ def test_runner_deterministic_across_consecutive_runs(monkeypatch, tmp_path: Pat
     # Markdown is generated from JSON, not hand-crafted.
     assert md_1
     assert md_2
+
+
+# ---------------------------------------------------------------------------
+# Atomic report writing: never overwrite half of a paired report
+# ---------------------------------------------------------------------------
+
+
+def _seed_old_reports(reports_dir: Path) -> tuple[Path, Path]:
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    json_path = reports_dir / "trace_replay_evidence.json"
+    md_path = reports_dir / "trace_replay_evidence.md"
+    json_path.write_text("OLD-JSON-CONTENT", encoding="utf-8")
+    md_path.write_text("OLD-MD-CONTENT", encoding="utf-8")
+    return json_path, md_path
+
+
+def test_main_leaves_reports_untouched_when_markdown_render_fails(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(eval_trace_replay, "REPORTS_DIR", tmp_path)
+    json_path, md_path = _seed_old_reports(tmp_path)
+
+    def _boom(report):
+        raise RuntimeError("markdown boom")
+
+    monkeypatch.setattr(eval_trace_replay, "_build_markdown", _boom)
+
+    assert eval_trace_replay.main() != 0
+    assert json_path.read_text("utf-8") == "OLD-JSON-CONTENT"
+    assert md_path.read_text("utf-8") == "OLD-MD-CONTENT"
+
+
+def test_main_leaves_reports_untouched_on_cross_field_inconsistency(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(eval_trace_replay, "REPORTS_DIR", tmp_path)
+    json_path, md_path = _seed_old_reports(tmp_path)
+
+    real_compute = eval_trace_replay._compute_metrics
+
+    def _tampered(scenarios):
+        metrics = real_compute(scenarios)
+        metrics["numerator"] = 4  # inconsistent with the 5 persisted scenarios
+        return metrics
+
+    monkeypatch.setattr(eval_trace_replay, "_compute_metrics", _tampered)
+
+    assert eval_trace_replay.main() != 0
+    assert json_path.read_text("utf-8") == "OLD-JSON-CONTENT"
+    assert md_path.read_text("utf-8") == "OLD-MD-CONTENT"
+
+
+def test_main_markdown_is_consistent_with_json(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(eval_trace_replay, "REPORTS_DIR", tmp_path)
+    assert eval_trace_replay.main() == 0
+
+    report = json.loads((tmp_path / "trace_replay_evidence.json").read_text("utf-8"))
+    md = (tmp_path / "trace_replay_evidence.md").read_text("utf-8")
+
+    assert report["metrics"]["numerator"] == 5
+    assert report["metrics"]["denominator"] == 6
+    assert report["scenario_pass_count"] == 6
+    assert (
+        f"Scenario pass count**: {report['scenario_pass_count']}/{report['scenario_total']}" in md
+    )
+    assert "Numerator (eligible flows persisted)**: 5" in md
+    assert "Denominator (eligible flows executed)**: 6" in md
+
+
+# ---------------------------------------------------------------------------
+# Environment lock: refuse non-offline configurations before importing services
+# ---------------------------------------------------------------------------
+
+
+def _run_runner_subprocess(env_overrides: dict[str, str], reports_dir: Path):
+    env = {**os.environ, "TRACE_REPLAY_REPORTS_DIR": str(reports_dir)}
+    env.update(env_overrides)
+    return subprocess.run(
+        [sys.executable, "-m", "scripts.eval_trace_replay"],
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+
+def test_runner_refuses_non_sqlite_dsn(tmp_path: Path):
+    reports = tmp_path / "reports"
+    json_path, md_path = _seed_old_reports(reports)
+    proc = _run_runner_subprocess(
+        {"MYSQL_DSN": "mysql+pymysql://user:pass@localhost:3306/db"}, reports
+    )
+    assert proc.returncode != 0
+    # Fail-fast happened before any report write.
+    assert json_path.read_text("utf-8") == "OLD-JSON-CONTENT"
+    assert md_path.read_text("utf-8") == "OLD-MD-CONTENT"
+
+
+def test_runner_refuses_non_hash_embedding(tmp_path: Path):
+    reports = tmp_path / "reports"
+    json_path, md_path = _seed_old_reports(reports)
+    proc = _run_runner_subprocess(
+        {
+            "MYSQL_DSN": f"sqlite:///{tmp_path / 'eval.sqlite'}",
+            "EMBEDDING_BACKEND": "bge_small",
+        },
+        reports,
+    )
+    assert proc.returncode != 0
+    # Failed before loading any embedding model or writing reports.
+    assert json_path.read_text("utf-8") == "OLD-JSON-CONTENT"
+    assert md_path.read_text("utf-8") == "OLD-MD-CONTENT"
+
+
+def test_runner_accepts_valid_sqlite_hash_env(tmp_path: Path):
+    reports = tmp_path / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    proc = _run_runner_subprocess(
+        {
+            "MYSQL_DSN": f"sqlite:///{tmp_path / 'eval.sqlite'}",
+            "EMBEDDING_BACKEND": "hash",
+        },
+        reports,
+    )
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads((reports / "trace_replay_evidence.json").read_text("utf-8"))
+    assert report["metrics"]["numerator"] == 5
+    assert report["metrics"]["denominator"] == 6
+    assert report["scenario_pass_count"] == 6
 
 
 # ---------------------------------------------------------------------------

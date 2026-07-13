@@ -3,6 +3,9 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, NotRequired, Protocol, TypedDict
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+from sqlalchemy.exc import OperationalError
+
 from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision, audit_agent
 from bank_reconciliation_agent.agents.extraction_agent import (
     ExtractionAgent,
@@ -924,7 +927,29 @@ def _execute_tool(
 ) -> ToolCallResult:
     context = _build_tool_context(state, fallback_level=fallback_level)
     handle = _recorder(state).start_tool(name)
-    result = tool_executor.execute(name, args, context)
+    try:
+        result = tool_executor.execute(name, args, context)
+    except (OperationalError, RedisConnectionError):
+        # Infrastructure read failure that escaped the Tool Executor (e.g. retry
+        # exhaustion). Close the already-open span as FAILED with the Stage 28
+        # stable tokens, then re-raise so the item is not falsely fail-closed.
+        _finish_tool_span_failed(
+            state,
+            handle,
+            error_type="TRANSIENT_READ_ERROR",
+            fallback_reason="TOOL_TRANSIENT_READ_ERROR",
+            emitter=emitter,
+        )
+        raise
+    except Exception:
+        _finish_tool_span_failed(
+            state,
+            handle,
+            error_type="INTERNAL_ERROR",
+            fallback_reason="TOOL_INTERNAL_ERROR",
+            emitter=emitter,
+        )
+        raise
     projection = safe_tool_projection(result)
     _complete_tool_span(state, handle, result, projection, emitter=emitter)
     _append_agent_log(
@@ -938,6 +963,41 @@ def _execute_tool(
         emitter,
     )
     return result
+
+
+def _finish_tool_span_failed(
+    state: ReconciliationState,
+    handle: Any,
+    *,
+    error_type: str,
+    fallback_reason: str,
+    emitter: StreamEmitter | None = None,
+) -> None:
+    """Close a pending TOOL span as FAILED after ``execute()`` raised.
+
+    Uses Stage 28 stable error/fallback tokens and never stores the exception
+    text. ``attempt`` defaults to 1 because no safe physical-attempt metadata is
+    available from a raised exception. The whole close + emit is best-effort:
+    any fault here is swallowed so the original business exception keeps
+    propagating unchanged via the caller's bare ``raise``.
+    """
+    try:
+        recorder = _recorder(state)
+        recorder.finish_tool(
+            handle,
+            status=SpanStatus.FAILED,
+            outcome=None,
+            attempt=1,
+            retry_recovered=False,
+            recovered_error_type=None,
+            result_count=0,
+            evidence_ids=[],
+            error_type=error_type,
+            fallback_reason=fallback_reason,
+        )
+        _emit_trace_span(state, recorder, emitter)
+    except Exception as exc:
+        log.warning("tool_span_close_failed", error_type=type(exc).__name__)
 
 
 def _tool_fail_closed_item(

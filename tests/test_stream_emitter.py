@@ -1,16 +1,25 @@
+import json
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
 
+from bank_reconciliation_agent.schemas.ledger import LedgerQuery
 from bank_reconciliation_agent.schemas.stream import AgentStreamEvent, StreamEventType
 from bank_reconciliation_agent.schemas.trace import TraceSpanView, SpanType, SpanStatus
 from bank_reconciliation_agent.services.exception_router import BranchResult
+from bank_reconciliation_agent.services.ledger import ledger_service
+from bank_reconciliation_agent.services.queue import queue_service
 from bank_reconciliation_agent.services.reconciliation import (
     ReconciliationMatchResult,
     ReconciliationService,
 )
 from bank_reconciliation_agent.services.stream_emitter import QueueEmitter, to_trace_span_event
-from bank_reconciliation_agent.services.trace import TraceService
+from bank_reconciliation_agent.services.task import task_service
+from bank_reconciliation_agent.services.trace import (
+    TraceService,
+    trace_service as global_trace_service,
+)
 from bank_reconciliation_agent.services.workflow import run_item
 
 from tests.test_workflow import (
@@ -413,16 +422,10 @@ def test_production_path_sse_span_set_matches_persisted_rows(monkeypatch) -> Non
         assert "user_id" not in payload
 
 
-def test_production_path_emitter_failure_does_not_break_persistence(monkeypatch) -> None:
-    """A broken SSE emitter never blocks the batch persistence of a valid Trace."""
-    engine = create_engine("sqlite:///:memory:")
-    service = ReconciliationService()
-    service._engine = engine
-    trace_service = TraceService(engine)
-
-    monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.trace_service", trace_service
-    )
+def _prod_setup(monkeypatch):
+    """Wire the real ReconciliationService finalize/persist path on the shared
+    engine with deterministic spy agents; return the service."""
+    service = ReconciliationService()  # uses the global engine, like the workers
     monkeypatch.setattr(
         "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "银行流水"},
@@ -445,27 +448,126 @@ def test_production_path_emitter_failure_does_not_break_persistence(monkeypatch)
     monkeypatch.setattr(
         "bank_reconciliation_agent.services.reconciliation.run_item", deterministic_run_item
     )
+    return service
+
+
+class _RecordingLog:
+    """Fake structured logger capturing warning calls; every other level no-ops."""
+
+    def __init__(self) -> None:
+        self.warnings: list[tuple[str, dict]] = []
+
+    def warning(self, event, **kwargs) -> None:
+        self.warnings.append((event, kwargs))
+
+    def __getattr__(self, name):
+        def _noop(*args, **kwargs):
+            return None
+
+        return _noop
+
+
+_SENSITIVE_MARKER = "SENSITIVE-TRACE-PAYLOAD-DO-NOT-LEAK"
+
+
+def _install_from_span_failure(monkeypatch, emitter):
+    def _boom(span):
+        raise RuntimeError(_SENSITIVE_MARKER)
+
+    monkeypatch.setattr(TraceSpanView, "from_span", staticmethod(_boom))
+    return emitter
+
+
+def _install_event_failure(monkeypatch, emitter):
+    def _boom(view, *, seq):
+        raise RuntimeError(_SENSITIVE_MARKER)
+
+    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.to_trace_span_event", _boom)
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.to_trace_span_event", _boom
+    )
+    return emitter
+
+
+def _install_emit_failure(monkeypatch, emitter):
+    del emitter
 
     class _BrokenEmitter:
         def emit(self, event) -> None:
             if event.event_type == StreamEventType.TRACE_SPAN:
-                raise RuntimeError("trace_span emit broken")
+                raise RuntimeError(_SENSITIVE_MARKER)
 
-    user_id, task_id, flow_id = "iso_u", "TASK-ISO-SSE", "FLOW-ISO"
+    return _BrokenEmitter()
+
+
+@pytest.mark.parametrize(
+    "installer",
+    [_install_from_span_failure, _install_event_failure, _install_emit_failure],
+    ids=["from_span", "to_trace_span_event", "emitter_emit"],
+)
+def test_production_path_trace_span_failure_is_isolated(monkeypatch, installer) -> None:
+    """Each of the three trace_span failure classes (projection, event build,
+    emit) is isolated: business commits, Trace persists, warnings stay clean."""
+    recording_log = _RecordingLog()
+    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.log", recording_log)
+    monkeypatch.setattr("bank_reconciliation_agent.services.reconciliation.log", recording_log)
+
+    user_id = "iso_u"
+    task_id = f"TASK-ISO-{installer.__name__}"
+    flow_id = "FLOW-ISO"
+
+    service = _prod_setup(monkeypatch)
+    task_service.replace_task(
+        user_id=user_id,
+        task_id=task_id,
+        scenario_type="BANK_ENTERPRISE",
+        total_bank_rows=1,
+        total_clear_rows=1,
+        auto_fixed_rows=0,
+        pending_ai_rows=1,
+        pending_human_rows=0,
+        status="RUNNING",
+    )
+
+    emitter = installer(monkeypatch, QueueEmitter())
+
     result = _prod_match_result(flow_id)
     queue_rows = service._write_queue_entries(user_id, task_id, "BANK_ENTERPRISE", [result])
 
-    # Must not raise even though every trace_span emit fails.
+    # 1. Business call must not raise despite the injected trace_span fault.
     service._write_ledger_entries(
         user_id,
         task_id,
         "BANK_ENTERPRISE",
         [result],
         queue_rows=queue_rows,
-        emitter=_BrokenEmitter(),
+        emitter=emitter,
     )
 
-    db_spans = trace_service.get_spans(user_id=user_id, task_id=task_id, flow_id=flow_id)
+    # 2. Ledger committed and the final decision is unchanged.
+    ledger_page = ledger_service.list(
+        user_id=user_id, query=LedgerQuery(task_id=task_id, page=1, page_size=100)
+    )
+    ledger_row = next((r for r in ledger_page.items if r.flow_id == flow_id), None)
+    assert ledger_row is not None
+    assert ledger_row.handle_status == "PENDING_HUMAN"
+
+    # 3. Queue committed.
+    assert queue_service.get_row(user_id=user_id, task_id=task_id, flow_id=flow_id) is not None
+
+    # 4. Task stats committed.
+    task_row = task_service.get(user_id=user_id, task_id=task_id)
+    assert task_row is not None
+    assert task_row.ai_processed_rows == 1
+
+    # 5. Trace rows still persisted with WORKFLOW + a unique terminal, proving the
+    #    recorder snapshot was neither disabled nor rewritten by the fault.
+    db_spans = global_trace_service.get_spans(user_id=user_id, task_id=task_id, flow_id=flow_id)
     types = [s.span_type for s in db_spans]
     assert SpanType.WORKFLOW in types
     assert types.count(SpanType.FINAL) + types.count(SpanType.FALLBACK) == 1
+
+    # 6. Warnings were emitted for the isolated fault but carry no exception text.
+    assert any(event == "trace_span_emit_failed" for event, _ in recording_log.warnings)
+    serialized = json.dumps(recording_log.warnings, default=str)
+    assert _SENSITIVE_MARKER not in serialized
