@@ -4,7 +4,7 @@
 - **Branch**: `stage-31-trace-guided-performance`
 - **Spec**: `docs/stages/stage-31-trace-guided-performance/spec.md`
 - **ADR**: `decisions/ADR-31.1-measurement-gated-critical-path-concurrency.md`
-- **Status**: review-blocked
+- **Status**: done (`no_go`; runtime remains serial)
 - **Date**: 2026-07-13
 
 ## Execution Rules
@@ -45,7 +45,7 @@ TASK-31.3 和 TASK-31.4 标记为 `out-of-scope`；opencode 不得自行进入�
 
 ## TASK-31.1 — 建立 Stage 31 benchmark、报告与 fail-closed gate contract
 
-**Status**: review-blocked
+**Status**: done
 **Spec Ref**: `Benchmark CLI Contract`、`Baseline JSON Contract`、`Measurement and Gate Semantics`、
 `Comparison and Retention Gate`
 **ADR Ref**: `ADR-31.1` Decision 2、3、5
@@ -130,7 +130,7 @@ uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent
 
 ## TASK-31.2 — 生成真实 Stage 31 baseline 并冻结入口结论
 
-**Status**: review-blocked
+**Status**: done (accepted through TASK-31.9 rerun: `no_go`)
 **Spec Ref**: `Phase A — Baseline contract and decision gate`、`Fixed benchmark input`、
 `Trace sample eligibility`、`Independence gate`
 **ADR Ref**: `ADR-31.1` Decision 1–3
@@ -217,7 +217,7 @@ jq '{stage, artifact_role, git_revision, input_sha256, provider, rag, run_plan, 
 
 ## TASK-31.3 — 条件式实现目标路径最小并发候选
 
-**Status**: pending (conditional: TASK-31.2=`candidate_allowed` only)
+**Status**: out-of-scope (TASK-31.9=`no_go`)
 **Spec Ref**: `Phase B — Conditional candidate`、`Conditional Runtime Contract`、
 `Tenant and context isolation`
 **ADR Ref**: `ADR-31.1` Decision 4
@@ -304,7 +304,7 @@ uv run ruff format --check src/bank_reconciliation_agent/services/workflow.py \
 
 ## TASK-31.4 — 条件式生成 after/comparison 并执行保留或回滚
 
-**Status**: pending (conditional: TASK-31.2=`candidate_allowed` only)
+**Status**: out-of-scope (TASK-31.9=`no_go`; no candidate exists)
 **Spec Ref**: `Phase B — Conditional candidate`、`Comparison and Retention Gate`
 **ADR Ref**: `ADR-31.1` Decision 5
 
@@ -417,7 +417,7 @@ jq '{trust, success, outcome, failure_reasons, latency, usage, cost, reliability
 
 ## TASK-31.5 — 运行 Stage/PR 全量门禁并记录 verification
 
-**Status**: review-blocked
+**Status**: out-of-scope (superseded by final TASK-31.10 verification)
 **Spec Ref**: `Phase C — Stage verification`、全部 `Acceptance Criteria`
 **ADR Ref**: `ADR-31.1`
 
@@ -662,7 +662,7 @@ uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent
 
 ## TASK-31.8 — 修复 after artifact 与 comparison retention contract
 
-**Status**: review-blocked (CPU environment identity/comparison coverage moved to TASK-31.11)
+**Status**: done
 **Spec Ref**: `Benchmark CLI Contract`、`Comparison and Retention Gate`、
 `Conditional Runtime Contract`
 **ADR Ref**: `ADR-31.1` Decision 5
@@ -734,7 +734,7 @@ uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent
 
 ## TASK-31.9 — 使用修复后的 contract 重新生成真实 baseline
 
-**Status**: review-blocked (2026-07-14 artifact omitted required CPU identity)
+**Status**: done (`no_go`)
 **Spec Ref**: `Phase A — Baseline contract and decision gate`、`Fixed benchmark input`、
 `Trace sample eligibility`、`Independence gate`
 **ADR Ref**: `ADR-31.1` Decision 1–3
@@ -806,7 +806,7 @@ jq '{stage, artifact_role, git_revision, input_sha256, provider, rag, run_plan, 
 
 ## TASK-31.10 — 对最终修复树重跑 Stage/PR 门禁并重写 verification
 
-**Status**: review-blocked (awaiting TASK-31.11 and accepted TASK-31.9 rerun)
+**Status**: done
 **Spec Ref**: `Phase C — Stage verification`、全部 `Acceptance Criteria`
 **ADR Ref**: `ADR-31.1`
 
@@ -879,7 +879,7 @@ git status --short
 
 ## TASK-31.11 — 补齐 CPU environment identity 与 comparison fail-closed contract
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Baseline JSON Contract`、`Comparison and Retention Gate`、`Observability truth`
 **ADR Ref**: `ADR-31.1` Decision 2、3、5
 
