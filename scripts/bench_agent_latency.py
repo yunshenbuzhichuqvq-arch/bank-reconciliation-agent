@@ -253,6 +253,7 @@ def run_stage31_critical_path(
     cold_runs: int,
     warmup_runs: int,
     runs: int,
+    artifact_role: str = "baseline",
 ) -> dict[str, Any]:
     from bank_reconciliation_agent.core.config import settings
     from bank_reconciliation_agent.core.llm.cost import compute_cost
@@ -713,7 +714,7 @@ def run_stage31_critical_path(
     return {
         "schema_version": "1.0",
         "stage": "stage-31-trace-guided-performance",
-        "artifact_role": "baseline",
+        "artifact_role": artifact_role,
         "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "git_revision": get_git_revision(),
         "input_sha256": input_sha256,
@@ -829,11 +830,22 @@ def run_stage31_comparison(
 
     reasons: list[str] = []
 
+    # Schema validation
+    for role, data in [("baseline", baseline), ("after", after)]:
+        if data.get("schema_version") != "1.0":
+            reasons.append(f"{role}_schema_version_invalid")
+        if data.get("stage") != "stage-31-trace-guided-performance":
+            reasons.append(f"{role}_stage_invalid")
+
     # Artifact role validation
     if baseline.get("artifact_role") != "baseline":
         reasons.append("baseline_role_invalid")
     if after.get("artifact_role") != "after":
         reasons.append("after_role_invalid")
+
+    # Baseline must have candidate_allowed
+    if baseline.get("decision") != "candidate_allowed":
+        reasons.append(f"baseline_decision_not_allowed_{baseline.get('decision')}")
 
     # Trust validation
     if not baseline.get("trust", {}).get("trusted"):
@@ -859,12 +871,20 @@ def run_stage31_comparison(
     a_rag = after.get("rag", {})
     if b_rag.get("requested_embedding_backend") != a_rag.get("requested_embedding_backend"):
         reasons.append("embedding_backend_mismatch")
+    if b_rag.get("effective_embedding_backend") != a_rag.get("effective_embedding_backend"):
+        reasons.append("effective_embedding_mismatch")
+    if b_rag.get("retrieval_mode") != a_rag.get("retrieval_mode"):
+        reasons.append("retrieval_mode_mismatch")
 
     # Environment consistency
     b_env = baseline.get("environment", {})
     a_env = after.get("environment", {})
-    if b_env.get("os") != a_env.get("os") or b_env.get("architecture") != a_env.get("architecture"):
-        reasons.append("environment_mismatch")
+    if b_env.get("os") != a_env.get("os"):
+        reasons.append("os_mismatch")
+    if b_env.get("architecture") != a_env.get("architecture"):
+        reasons.append("arch_mismatch")
+    if b_env.get("python") != a_env.get("python"):
+        reasons.append("python_version_mismatch")
 
     # Run plan match
     b_plan = baseline.get("run_plan", {})
@@ -876,17 +896,19 @@ def run_stage31_comparison(
     if b_plan.get("warmup_runs") != a_plan.get("warmup_runs"):
         reasons.append("warmup_runs_mismatch")
 
-    # Git revision must be different (after should be a candidate revision)
+    # Git revision must be different
     if baseline.get("git_revision") == after.get("git_revision"):
         reasons.append("same_revision")
+    if not baseline.get("git_revision") or not after.get("git_revision"):
+        reasons.append("missing_revision")
 
     # Complete count requirements
     b_complete = b_plan.get("complete_measured_count", 0)
     a_complete = a_plan.get("complete_measured_count", 0)
     if b_complete < 20:
-        reasons.append(f"baseline_insufficient_complete_samples_{b_complete}")
+        reasons.append(f"baseline_insufficient_complete_{b_complete}")
     if a_complete < 20:
-        reasons.append(f"after_insufficient_complete_samples_{a_complete}")
+        reasons.append(f"after_insufficient_complete_{a_complete}")
 
     # Trace completeness
     b_trace = baseline.get("trace", {})
@@ -896,11 +918,15 @@ def run_stage31_comparison(
     if a_trace.get("completeness_rate", 0) != 1.0:
         reasons.append("after_trace_incomplete")
 
-    # Focused and stage gates
+    # Focused and stage gates — cannot substitute artifact contract gates
     if not focused_gates_passed:
         reasons.append("focused_gates_failed")
     if not stage_gates_passed:
         reasons.append("stage_gates_failed")
+
+    # Even with gates passed, artifact evidence must exist
+    if focused_gates_passed and stage_gates_passed:
+        pass  # These flags are checked, but contract evidence below is required
 
     # Latency comparison
     b_p95 = baseline.get("latency", {}).get("end_to_end", {}).get("p95_latency_ms", 0)
@@ -912,19 +938,23 @@ def run_stage31_comparison(
     if actual_improvement_pct < 20.0:
         reasons.append(f"actual_improvement_{actual_improvement_pct}_lt_20.0")
 
-    # Usage comparison
+    # Usage comparison — call counts must not increase
     b_usage = baseline.get("usage", {})
     a_usage = after.get("usage", {})
+    b_agent_calls = b_usage.get("logical_agent_calls", 0)
+    a_agent_calls = a_usage.get("logical_agent_calls", 0)
+    if a_agent_calls > b_agent_calls:
+        reasons.append("agent_call_count_increased")
+    b_tool_calls = b_usage.get("logical_tool_calls", 0)
+    a_tool_calls = a_usage.get("logical_tool_calls", 0)
+    if a_tool_calls > b_tool_calls:
+        reasons.append("tool_call_count_increased")
+
+    # Token comparison
     b_per_run_tokens = b_usage.get("per_successful_run_tokens") or 0
     a_per_run_tokens = a_usage.get("per_successful_run_tokens") or 0
     if b_per_run_tokens > 0 and a_per_run_tokens > b_per_run_tokens * 1.05:
-        reasons.append("per_run_tokens_increased_gt_105pct")
-
-    # Provider call count comparison
-    b_calls = b_usage.get("provider_call_count", 0)
-    a_calls = a_usage.get("provider_call_count", 0)
-    if a_calls > b_calls:
-        reasons.append("provider_call_count_increased")
+        reasons.append(f"per_run_tokens_{a_per_run_tokens}_gt_{b_per_run_tokens}_105pct")
 
     # Cost comparison
     b_cost_str = baseline.get("cost", {}).get("per_successful_run_estimated_usd")
@@ -932,13 +962,13 @@ def run_stage31_comparison(
     b_cost = Decimal(b_cost_str) if b_cost_str else Decimal(0)
     a_cost = Decimal(a_cost_str) if a_cost_str else Decimal(0)
     if b_cost > 0 and a_cost > b_cost * Decimal("1.05"):
-        reasons.append("per_run_cost_increased_gt_105pct")
+        reasons.append(f"per_run_cost_{a_cost}_gt_{b_cost}_105pct")
 
     # Error rate comparison
     b_err = baseline.get("reliability", {}).get("error_rate", 0)
     a_err = after.get("reliability", {}).get("error_rate", 0)
     if a_err > b_err + 0.05:
-        reasons.append(f"error_rate_increased_{a_err}_gt_{b_err}_plus_5pp")
+        reasons.append(f"error_rate_{a_err}_gt_{b_err}_plus_5pp")
 
     # Error distribution check
     a_err_dist = after.get("reliability", {}).get("error_distribution", {})
@@ -947,7 +977,7 @@ def run_stage31_comparison(
     if new_error_types:
         reasons.append(f"new_error_types_{sorted(new_error_types)}")
 
-    # Independence gate — comparison must have passed
+    # Independence gate
     b_ind = baseline.get("independence", {})
     b_unsafe = any(
         f.get("finding", "") in ("unknown", "unsafe", "unbounded")
@@ -958,6 +988,12 @@ def run_stage31_comparison(
 
     success = len(reasons) == 0
     return {
+        "schema_version": "1.0",
+        "stage": "stage-31-trace-guided-performance",
+        "artifact_role": "comparison",
+        "baseline_revision": baseline.get("git_revision", ""),
+        "after_revision": after.get("git_revision", ""),
+        "input_sha256": baseline.get("input_sha256", ""),
         "success": success,
         "outcome": "optimization_accepted" if success else "optimization_rejected",
         "failure_reasons": reasons,
@@ -975,8 +1011,10 @@ def run_stage31_comparison(
         "usage": {
             "baseline_per_successful_run_tokens": b_per_run_tokens,
             "after_per_successful_run_tokens": a_per_run_tokens,
-            "baseline_provider_call_count": b_calls,
-            "after_provider_call_count": a_calls,
+            "baseline_logical_agent_calls": b_agent_calls,
+            "after_logical_agent_calls": a_agent_calls,
+            "baseline_logical_tool_calls": b_tool_calls,
+            "after_logical_tool_calls": a_tool_calls,
         },
         "cost": {
             "baseline_per_successful_run_estimated_usd": str(b_cost),
@@ -1257,6 +1295,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-report", type=Path, default=None)
     parser.add_argument("--baseline-json", type=Path, default=None)
     parser.add_argument("--after-json", type=Path, default=None)
+    parser.add_argument("--artifact-role", default="baseline", choices=["baseline", "after"])
     parser.add_argument("--focused-gates-passed", action="store_true")
     parser.add_argument("--stage-gates-passed", action="store_true")
     args = parser.parse_args(argv)
@@ -1275,6 +1314,7 @@ def main(argv: list[str] | None = None) -> int:
                 cold_runs=args.cold_runs,
                 warmup_runs=args.warmup_runs,
                 runs=args.runs,
+                artifact_role=args.artifact_role,
             )
             if report.get("decision") == "environment_gap":
                 exit_code = 1

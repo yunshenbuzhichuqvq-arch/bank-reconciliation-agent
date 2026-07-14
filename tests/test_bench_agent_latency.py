@@ -991,7 +991,8 @@ def _make_minimal_stage31_report(overrides: dict | None = None) -> dict:
             "resource_reclamation": {"finding": "safe"},
         },
         "usage": {
-            "provider_call_count": 20,
+            "logical_agent_calls": 20,
+            "logical_tool_calls": 20,
             "total_tokens": 2000,
             "per_successful_run_tokens": 100,
         },
@@ -1102,7 +1103,7 @@ def test_stage31_comparison_reject_insufficient_samples(tmp_path: Path) -> None:
     )
     rep = json.loads(rep_path.read_text())
     assert rep["outcome"] == "optimization_rejected"
-    assert any("insufficient_complete_samples" in r for r in rep["failure_reasons"])
+    assert any("insufficient_complete" in r for r in rep["failure_reasons"])
 
 
 def test_stage31_comparison_reject_input_mismatch(tmp_path: Path) -> None:
@@ -1321,7 +1322,8 @@ def test_stage31_comparison_reject_usage_cost_increase(tmp_path: Path) -> None:
             "artifact_role": "after",
             "git_revision": "def456",
             "usage": {
-                "provider_call_count": 20,
+                "logical_agent_calls": 20,
+                "logical_tool_calls": 20,
                 "total_tokens": 3000,
                 "per_successful_run_tokens": 150,
             },
@@ -1691,3 +1693,195 @@ def test_stage31_independence_findings_have_source(monkeypatch, tmp_path: Path) 
         assert "detail" in finding
         assert "source" in finding
         assert finding["finding"] in ("safe", "bounded", "unknown", "unsafe", "unbounded")
+
+
+# ---------------------------------------------------------------------------
+# TASK-31.8: After artifact role, comparison retention contract
+# ---------------------------------------------------------------------------
+
+
+def test_stage31_cli_generates_after_role(tmp_path: Path) -> None:
+    json_path = tmp_path / "after31.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--artifact-role",
+            "after",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["artifact_role"] == "after"
+    assert report["stage"] == "stage-31-trace-guided-performance"
+
+
+def test_stage31_comparison_reject_baseline_not_candidate_allowed(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report({"decision": "no_go"})
+    after = _make_minimal_stage31_report({"artifact_role": "after", "git_revision": "def456"})
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert rep["outcome"] == "optimization_rejected"
+    assert any("baseline_decision_not_allowed" in r for r in rep["failure_reasons"])
+
+
+def test_stage31_comparison_reject_schema_version_invalid(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report({"schema_version": "0.9"})
+    after = _make_minimal_stage31_report({"artifact_role": "after", "git_revision": "def456"})
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert "baseline_schema_version_invalid" in rep["failure_reasons"]
+
+
+def test_stage31_comparison_reject_call_count_increase(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report()
+    after = _make_minimal_stage31_report(
+        {
+            "artifact_role": "after",
+            "git_revision": "def456",
+            "usage": {
+                "logical_agent_calls": 30,
+                "logical_tool_calls": 20,
+                "total_tokens": 2000,
+                "per_successful_run_tokens": 100,
+            },
+        }
+    )
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert "agent_call_count_increased" in rep["failure_reasons"]
+
+
+def test_stage31_comparison_reject_missing_git_revision(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report()
+    after = _make_minimal_stage31_report({"artifact_role": "after", "git_revision": ""})
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert "missing_revision" in rep["failure_reasons"]
+
+
+def test_stage31_comparison_has_artifact_identity_fields(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report()
+    after = _make_minimal_stage31_report({"artifact_role": "after", "git_revision": "def456"})
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+
+    for key in [
+        "schema_version",
+        "stage",
+        "artifact_role",
+        "baseline_revision",
+        "after_revision",
+        "input_sha256",
+    ]:
+        assert key in rep, f"Missing identity field: {key}"
+    assert rep["artifact_role"] == "comparison"
