@@ -44,6 +44,18 @@ const _singleSided: PendingReviewItem = {
   discrepancy_amount: "760.00",
 };
 
+const _approvedMatch: PendingReviewItem = {
+  ..._bilateral,
+  queue_id: 3,
+  ai_suggestion: "APPROVED_MATCH",
+};
+
+const _forceHold: PendingReviewItem = {
+  ..._bilateral,
+  queue_id: 4,
+  ai_suggestion: "FORCE_HOLD",
+};
+
 function mountCard(item: PendingReviewItem) {
   return mount(ReviewCard, {
     props: { item },
@@ -90,10 +102,22 @@ describe("ReviewCard", () => {
     expect(_singleSided.bank_amount).toBeNull();
   });
 
-  it("shows 待人工复核 instead of raw PENDING_HUMAN token", () => {
+  it("shows 待人工复核 for ai_suggestion PENDING_HUMAN", () => {
     const wrapper = mountCard(_bilateral);
-    expect(wrapper.text()).toContain("待复核");
+    expect(wrapper.text()).toContain("待人工复核");
     expect(wrapper.text()).not.toContain("PENDING_HUMAN");
+  });
+
+  it("shows 待人工复核 for ai_suggestion APPROVED_MATCH instead of raw token", () => {
+    const wrapper = mountCard(_approvedMatch);
+    expect(wrapper.text()).toContain("待人工复核");
+    expect(wrapper.text()).not.toContain("APPROVED_MATCH");
+  });
+
+  it("shows 待人工复核 for ai_suggestion FORCE_HOLD instead of raw token", () => {
+    const wrapper = mountCard(_forceHold);
+    expect(wrapper.text()).toContain("待人工复核");
+    expect(wrapper.text()).not.toContain("FORCE_HOLD");
   });
 
   it("does not render historical reference placeholder", () => {

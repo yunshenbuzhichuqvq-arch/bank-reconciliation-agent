@@ -27,10 +27,6 @@ function scoreText(value: number | null) {
   return value.toFixed(3);
 }
 
-function statusLabel(value: string) {
-  return STATUS_META[value]?.label ?? value;
-}
-
 function amountText(value: string | null) {
   if (value === null) {
     return "无对应流水";
@@ -105,7 +101,7 @@ function serialText(value: string | null) {
         </div>
         <div>
           <dt>处理状态</dt>
-          <dd>{{ statusLabel(item.ai_suggestion) }}</dd>
+          <dd>{{ STATUS_META.PENDING_HUMAN.label }}</dd>
         </div>
         <div>
           <dt>AI 置信度</dt>

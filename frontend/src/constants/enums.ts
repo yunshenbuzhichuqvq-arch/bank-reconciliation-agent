@@ -6,7 +6,7 @@ export type ScenarioType = "BANK_ENTERPRISE"|"BANK_CLEARING"
 export const STATUS_META:Record<string,{label:string;tone:Tone}> = {
   UPLOADED:{label:"已上传",tone:"neutral"}, AI_RUNNING:{label:"AI 审计中",tone:"info"},
   AUTO_FIXED:{label:"自动平账",tone:"success"}, PENDING_AI:{label:"AI 确认中",tone:"info"},
-  PENDING_HUMAN:{label:"待复核",tone:"warning"},
+  PENDING_HUMAN:{label:"待人工复核",tone:"warning"},
   FIXED:{label:"已平账",tone:"success"}, HELD:{label:"已挂账",tone:"danger"},
 }
 export const RISK_META:Record<string,{label:string;tone:Tone}> = {
