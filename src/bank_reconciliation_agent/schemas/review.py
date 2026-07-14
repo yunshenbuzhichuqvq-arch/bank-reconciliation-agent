@@ -1,6 +1,7 @@
+from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 
 class RagSourceRef(BaseModel):
@@ -19,6 +20,19 @@ class PendingReviewItem(BaseModel):
     rag_sources: list[RagSourceRef]
     similar_historical_cases: int = 0
     historical_approve_rate: str = "0%"
+    task_id: str
+    flow_id: str
+    bank_serial_no: str | None = None
+    clearing_serial_no: str | None = None
+    bank_amount: Decimal | None = None
+    clear_amount: Decimal | None = None
+    discrepancy_amount: Decimal
+
+    @field_serializer("bank_amount", "clear_amount", "discrepancy_amount")
+    def serialize_decimal_str(self, v: Decimal | None) -> str | None:
+        if v is None:
+            return None
+        return str(v)
 
 
 class PendingReviewListResponse(BaseModel):

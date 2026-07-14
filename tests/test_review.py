@@ -1,4 +1,5 @@
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,10 @@ from bank_reconciliation_agent.services import review as review_module
 from bank_reconciliation_agent.services.review import human_review_table, review_service
 from bank_reconciliation_agent.services.review_graph import get_review_graph
 from bank_reconciliation_agent.services.task import reconciliation_task_table
+from bank_reconciliation_agent.services.transactions import (
+    bank_transaction_table,
+    clear_transaction_table,
+)
 from bank_reconciliation_agent.core.config import settings
 from scripts.generate_mock_excel import generate_mvp1_mock_excel
 from tests.auth_helpers import demo_bearer_headers
@@ -113,27 +118,45 @@ def test_approve_match_writes_review_and_updates_ledger_queue_task(tmp_path: Pat
 
     engine = get_engine()
     with engine.connect() as connection:
-        review = connection.execute(
-            select(human_review_table).where(human_review_table.c.queue_id == pending["queue_id"])
-        ).mappings().one()
-        ledger = connection.execute(
-            select(error_ledger_table).where(
-                error_ledger_table.c.user_id == "demo_user",
-                error_ledger_table.c.task_id == task_id,
-                error_ledger_table.c.flow_id == "F2003",
+        review = (
+            connection.execute(
+                select(human_review_table).where(
+                    human_review_table.c.queue_id == pending["queue_id"]
+                )
             )
-        ).mappings().one()
-        queue = connection.execute(
-            select(reconciliation_queue_table).where(
-                reconciliation_queue_table.c.id == pending["queue_id"]
+            .mappings()
+            .one()
+        )
+        ledger = (
+            connection.execute(
+                select(error_ledger_table).where(
+                    error_ledger_table.c.user_id == "demo_user",
+                    error_ledger_table.c.task_id == task_id,
+                    error_ledger_table.c.flow_id == "F2003",
+                )
             )
-        ).mappings().one()
-        task = connection.execute(
-            select(reconciliation_task_table).where(
-                reconciliation_task_table.c.user_id == "demo_user",
-                reconciliation_task_table.c.task_id == task_id,
+            .mappings()
+            .one()
+        )
+        queue = (
+            connection.execute(
+                select(reconciliation_queue_table).where(
+                    reconciliation_queue_table.c.id == pending["queue_id"]
+                )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
+        task = (
+            connection.execute(
+                select(reconciliation_task_table).where(
+                    reconciliation_task_table.c.user_id == "demo_user",
+                    reconciliation_task_table.c.task_id == task_id,
+                )
+            )
+            .mappings()
+            .one()
+        )
 
     assert review["user_id"] == "demo_user"
     assert review["scenario_type"] == "BANK_ENTERPRISE"
@@ -332,7 +355,9 @@ def test_review_graph_interrupt_resume_persists_checkpoint(
     get_review_graph.cache_clear()
 
 
-def test_approve_via_checkpoint_matches_plain_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_approve_via_checkpoint_matches_plain_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     task_id = _upload_task(tmp_path)
     pending = client.get(
         f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=1",
@@ -362,7 +387,9 @@ def test_approve_via_checkpoint_matches_plain_result(tmp_path: Path, monkeypatch
     get_review_graph.cache_clear()
 
 
-def test_approve_via_checkpoint_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_approve_via_checkpoint_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     task_id = _upload_task(tmp_path)
     pending = client.get(
         f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=1",
@@ -401,12 +428,16 @@ def test_approve_via_checkpoint_is_idempotent(tmp_path: Path, monkeypatch: pytes
         review_count = connection.execute(
             select(func.count()).select_from(human_review_table)
         ).scalar_one()
-        task = connection.execute(
-            select(reconciliation_task_table).where(
-                reconciliation_task_table.c.user_id == "demo_user",
-                reconciliation_task_table.c.task_id == task_id,
+        task = (
+            connection.execute(
+                select(reconciliation_task_table).where(
+                    reconciliation_task_table.c.user_id == "demo_user",
+                    reconciliation_task_table.c.task_id == task_id,
+                )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
 
     assert review_count == review_count_before + 1
     assert task["pending_human_rows"] == 5
@@ -418,3 +449,163 @@ def test_pending_review_requires_user_header() -> None:
     response = client.get("/api/v1/review/pending")
 
     assert response.status_code == 401
+
+
+def test_pending_review_item_includes_new_context_fields(tmp_path: Path) -> None:
+    task_id = _upload_task(tmp_path)
+
+    response = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=20",
+        headers=DEMO_HEADERS,
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+
+    be_r002 = next(item for item in items if item["exception_branch"] == "BE-R002")
+    assert isinstance(be_r002["task_id"], str)
+    assert len(be_r002["task_id"]) > 0
+    assert isinstance(be_r002["flow_id"], str)
+    assert len(be_r002["flow_id"]) > 0
+    assert isinstance(be_r002["bank_serial_no"], str)
+    assert len(be_r002["bank_serial_no"]) > 0
+    assert isinstance(be_r002["clearing_serial_no"], str)
+    assert len(be_r002["clearing_serial_no"]) > 0
+    assert isinstance(be_r002["discrepancy_amount"], str)
+    assert Decimal(be_r002["discrepancy_amount"]) != 0
+
+
+def test_pending_review_amounts_are_serialized_as_strings(tmp_path: Path) -> None:
+    task_id = _upload_task(tmp_path)
+
+    items = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=20",
+        headers=DEMO_HEADERS,
+    ).json()["data"]["items"]
+
+    be_r002 = next(item for item in items if item["exception_branch"] == "BE-R002")
+    for field in ("bank_amount", "clear_amount", "discrepancy_amount"):
+        value = be_r002[field]
+        assert isinstance(value, str), f"{field} should be str, got {type(value)}"
+        Decimal(value)
+
+
+def test_pending_review_single_sided_null_fields(tmp_path: Path) -> None:
+    task_id = _upload_task(tmp_path)
+
+    items = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=2&page_size=2",
+        headers=DEMO_HEADERS,
+    ).json()["data"]["items"]
+
+    bank_unarrived = next(item for item in items if item["exception_branch"] == "BE-R005")
+    assert bank_unarrived["bank_serial_no"] is None
+    assert bank_unarrived["bank_amount"] is None
+    assert bank_unarrived["clearing_serial_no"] is not None
+    assert bank_unarrived["clear_amount"] is not None
+    assert bank_unarrived["discrepancy_amount"] is not None
+    assert bank_unarrived["clear_amount"] != "0"
+    assert bank_unarrived["discrepancy_amount"] != "0"
+
+    book_unrecorded = next(item for item in items if item["exception_branch"] == "BE-R006")
+    assert book_unrecorded["clearing_serial_no"] is None
+    assert book_unrecorded["clear_amount"] is None
+    assert book_unrecorded["bank_serial_no"] is not None
+    assert book_unrecorded["bank_amount"] is not None
+    assert book_unrecorded["discrepancy_amount"] is not None
+
+
+def test_pending_review_pagination_and_total_unchanged(tmp_path: Path) -> None:
+    task_id = _upload_task(tmp_path)
+
+    response = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=2",
+        headers=DEMO_HEADERS,
+    )
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["total"] == 6
+    assert len(body["items"]) == 2
+    assert [item["exception_branch"] for item in body["items"]] == ["BE-R002", "BE-R004"]
+
+    page_two = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=2&page_size=2",
+        headers=DEMO_HEADERS,
+    )
+    assert page_two.status_code == 200
+    assert len(page_two.json()["data"]["items"]) == 2
+
+    page_three = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=3&page_size=2",
+        headers=DEMO_HEADERS,
+    )
+    assert page_three.status_code == 200
+    assert len(page_three.json()["data"]["items"]) == 2
+
+
+def test_pending_review_tenant_isolation_no_cross_user_leakage(tmp_path: Path) -> None:
+    task_id = _upload_task(tmp_path)
+
+    be_r002_item = _pending_item_by_branch(task_id, "BE-R002")
+    flow_id = be_r002_item["flow_id"]
+
+    engine = get_engine()
+    now_val = func.now()
+    with engine.begin() as connection:
+        connection.execute(
+            bank_transaction_table.insert().values(
+                task_id=task_id,
+                user_id="other_user",
+                flow_id=flow_id,
+                bank_serial_no="OTHER_USER_SERIAL_NO",
+                amount=Decimal("999.00"),
+                trade_time=now_val,
+            )
+        )
+        connection.execute(
+            clear_transaction_table.insert().values(
+                task_id=task_id,
+                user_id="other_user",
+                flow_id=flow_id,
+                clearing_serial_no="OTHER_USER_CLEAR_SERIAL",
+                amount=Decimal("888.00"),
+                transaction_amount=Decimal("888.00"),
+                net_amount=Decimal("888.00"),
+                trade_time=now_val,
+            )
+        )
+
+    items = client.get(
+        f"/api/v1/review/pending?task_id={task_id}&page=1&page_size=20",
+        headers=DEMO_HEADERS,
+    ).json()["data"]["items"]
+
+    current_item = next(item for item in items if item["exception_branch"] == "BE-R002")
+    assert current_item["bank_serial_no"] != "OTHER_USER_SERIAL_NO"
+    assert current_item["clearing_serial_no"] != "OTHER_USER_CLEAR_SERIAL"
+
+
+def test_pending_review_bilateral_amounts_match_persisted_values(tmp_path: Path) -> None:
+    task_id = _upload_task(tmp_path)
+
+    engine = get_engine()
+    with engine.connect() as connection:
+        ledger = (
+            connection.execute(
+                select(
+                    error_ledger_table.c.bank_amount,
+                    error_ledger_table.c.clear_amount,
+                    error_ledger_table.c.discrepancy_amount,
+                ).where(
+                    error_ledger_table.c.user_id == "demo_user",
+                    error_ledger_table.c.task_id == task_id,
+                    error_ledger_table.c.flow_id == "F2003",
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    be_r002_item = _pending_item_by_branch(task_id, "BE-R002")
+    assert Decimal(be_r002_item["bank_amount"]) == ledger["bank_amount"]
+    assert Decimal(be_r002_item["clear_amount"]) == ledger["clear_amount"]
+    assert Decimal(be_r002_item["discrepancy_amount"]) == ledger["discrepancy_amount"]
