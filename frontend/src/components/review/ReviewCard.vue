@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PendingReviewItem, ReviewAction } from "../../types/api";
-import { ACTION_LABEL, ERROR_TYPE_LABEL } from "../../constants/enums";
+import { ERROR_TYPE_LABEL, STATUS_META } from "../../constants/enums";
 import BaseButton from "../ui/BaseButton.vue";
 import BaseCard from "../ui/BaseCard.vue";
 import RiskBadge from "../ui/RiskBadge.vue";
@@ -26,6 +26,20 @@ function scoreText(value: number | null) {
   }
   return value.toFixed(3);
 }
+
+function amountText(value: string | null) {
+  if (value === null) {
+    return "无对应流水";
+  }
+  return value;
+}
+
+function serialText(value: string | null) {
+  if (value === null) {
+    return "无对应流水";
+  }
+  return value;
+}
 </script>
 
 <template>
@@ -33,7 +47,9 @@ function scoreText(value: number | null) {
     <template #header>
       <div class="review-card__header">
         <div>
-          <p class="review-card__eyebrow">队列 #{{ item.queue_id }}</p>
+          <p class="review-card__eyebrow">
+            流水 #{{ item.flow_id }}
+          </p>
           <h2>{{ ERROR_TYPE_LABEL[item.error_type] ?? item.error_type }}</h2>
         </div>
         <RiskBadge :level="item.risk_level" />
@@ -41,14 +57,51 @@ function scoreText(value: number | null) {
     </template>
 
     <div class="review-card">
+      <dl class="review-card__identifiers">
+        <div>
+          <dt>任务</dt>
+          <dd class="cell-mono">{{ item.task_id }}</dd>
+        </div>
+        <div>
+          <dt>队列</dt>
+          <dd class="cell-mono">{{ item.queue_id }}</dd>
+        </div>
+      </dl>
+
+      <section class="review-card__section">
+        <h3>流水信息</h3>
+        <dl class="review-card__amounts">
+          <div>
+            <dt>银行流水号</dt>
+            <dd class="cell-mono">{{ serialText(item.bank_serial_no) }}</dd>
+          </div>
+          <div>
+            <dt>清算流水号</dt>
+            <dd class="cell-mono">{{ serialText(item.clearing_serial_no) }}</dd>
+          </div>
+          <div>
+            <dt>银行金额</dt>
+            <dd class="cell-mono">{{ amountText(item.bank_amount) }}</dd>
+          </div>
+          <div>
+            <dt>清算金额</dt>
+            <dd class="cell-mono">{{ amountText(item.clear_amount) }}</dd>
+          </div>
+          <div>
+            <dt>差额</dt>
+            <dd class="cell-mono">{{ item.discrepancy_amount }}</dd>
+          </div>
+        </dl>
+      </section>
+
       <dl class="review-card__meta">
         <div>
           <dt>规则分支</dt>
           <dd class="cell-mono">{{ item.exception_branch ?? "—" }}</dd>
         </div>
         <div>
-          <dt>AI 建议</dt>
-          <dd>{{ ACTION_LABEL[item.ai_suggestion as ReviewAction] ?? item.ai_suggestion }}</dd>
+          <dt>处理状态</dt>
+          <dd>{{ STATUS_META.PENDING_HUMAN.label }}</dd>
         </div>
         <div>
           <dt>AI 置信度</dt>
@@ -70,14 +123,6 @@ function scoreText(value: number | null) {
           </li>
         </ul>
         <p v-else>—</p>
-      </section>
-
-      <section class="review-card__section review-card__placeholder">
-        <h3>历史参考</h3>
-        <p>
-          MVP 占位：相似案例 {{ item.similar_historical_cases }} 条，历史通过率
-          <span class="cell-mono">{{ item.historical_approve_rate }}</span>
-        </p>
       </section>
     </div>
 
@@ -129,6 +174,21 @@ h3 {
   gap: var(--space-5);
 }
 
+.review-card__identifiers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.review-card__identifiers div {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
+}
+
 .review-card__meta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -136,8 +196,22 @@ h3 {
   margin: 0;
 }
 
-.review-card__meta div,
-.review-card__placeholder {
+.review-card__meta div {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
+}
+
+.review-card__amounts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.review-card__amounts div {
   min-width: 0;
   padding: var(--space-3);
   background: var(--color-bg-soft);
@@ -203,8 +277,19 @@ dd,
   justify-content: flex-end;
 }
 
+@media (max-width: 1000px) {
+  .review-card__amounts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 760px) {
-  .review-card__meta {
+  .review-card__meta,
+  .review-card__identifiers {
+    grid-template-columns: 1fr;
+  }
+
+  .review-card__amounts {
     grid-template-columns: 1fr;
   }
 

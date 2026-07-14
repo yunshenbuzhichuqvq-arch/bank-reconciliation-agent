@@ -35,6 +35,10 @@ from bank_reconciliation_agent.services.hooks import auth_hook
 from bank_reconciliation_agent.services.ledger import error_ledger_table
 from bank_reconciliation_agent.services.queue import reconciliation_queue_table
 from bank_reconciliation_agent.services.task import reconciliation_task_table
+from bank_reconciliation_agent.services.transactions import (
+    bank_transaction_table,
+    clear_transaction_table,
+)
 
 
 metadata = MetaData()
@@ -42,7 +46,9 @@ metadata = MetaData()
 human_review_table = Table(
     "t_human_review",
     metadata,
-    Column("id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True),
+    Column(
+        "id", BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    ),
     Column("user_id", String(64), nullable=False),
     Column("scenario_type", String(32), nullable=False, default="BANK_ENTERPRISE"),
     Column("queue_id", BigInteger, nullable=False),
@@ -86,6 +92,20 @@ class ReviewService:
         )
         joined_tables = reconciliation_queue_table.join(error_ledger_table, join_condition)
         count_statement = select(func.count()).select_from(joined_tables).where(*filters)
+
+        bank_join = and_(
+            bank_transaction_table.c.user_id == reconciliation_queue_table.c.user_id,
+            bank_transaction_table.c.task_id == reconciliation_queue_table.c.task_id,
+            bank_transaction_table.c.flow_id == reconciliation_queue_table.c.flow_id,
+        )
+        clear_join = and_(
+            clear_transaction_table.c.user_id == reconciliation_queue_table.c.user_id,
+            clear_transaction_table.c.task_id == reconciliation_queue_table.c.task_id,
+            clear_transaction_table.c.flow_id == reconciliation_queue_table.c.flow_id,
+        )
+        rows_joined = joined_tables.outerjoin(bank_transaction_table, bank_join).outerjoin(
+            clear_transaction_table, clear_join
+        )
         rows_statement = (
             select(
                 reconciliation_queue_table.c.id.label("queue_id"),
@@ -95,8 +115,15 @@ class ReviewService:
                 error_ledger_table.c.ai_confidence,
                 error_ledger_table.c.ai_audit_opinion,
                 error_ledger_table.c.rag_source,
+                reconciliation_queue_table.c.task_id,
+                reconciliation_queue_table.c.flow_id,
+                bank_transaction_table.c.bank_serial_no,
+                clear_transaction_table.c.clearing_serial_no,
+                error_ledger_table.c.bank_amount,
+                error_ledger_table.c.clear_amount,
+                error_ledger_table.c.discrepancy_amount,
             )
-            .select_from(joined_tables)
+            .select_from(rows_joined)
             .where(*filters)
             .order_by(reconciliation_queue_table.c.created_at, reconciliation_queue_table.c.id)
             .offset((page - 1) * page_size)
@@ -181,7 +208,9 @@ class ReviewService:
 
         queue_row, ledger_row = self._load_review_context(user_id=user_id, queue_id=queue_id)
         if self._is_terminal_queue_status(queue_row["status"]):
-            return self._build_existing_result(queue_id=queue_id, current_status=queue_row["status"])
+            return self._build_existing_result(
+                queue_id=queue_id, current_status=queue_row["status"]
+            )
 
         graph = get_review_graph()
         config = {"configurable": {"thread_id": f"{queue_row['task_id']}:{queue_id}"}}
@@ -216,7 +245,9 @@ class ReviewService:
         if queue_row["task_id"] != task_id:
             raise HTTPException(status_code=409, detail="checkpoint task mismatch")
         if self._is_terminal_queue_status(queue_row["status"]):
-            return self._build_existing_result(queue_id=queue_id, current_status=queue_row["status"])
+            return self._build_existing_result(
+                queue_id=queue_id, current_status=queue_row["status"]
+            )
 
         current_status = self._status_for_action(action)
         with self._engine.begin() as connection:
@@ -303,19 +334,29 @@ class ReviewService:
     def _load_review_context(self, *, user_id: str, queue_id: int) -> tuple[Any, Any]:
         self._ensure_initialized()
         with self._engine.connect() as connection:
-            queue_row = connection.execute(
-                select(reconciliation_queue_table).where(reconciliation_queue_table.c.id == queue_id)
-            ).mappings().first()
+            queue_row = (
+                connection.execute(
+                    select(reconciliation_queue_table).where(
+                        reconciliation_queue_table.c.id == queue_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
             if queue_row is None:
                 raise HTTPException(status_code=404, detail="review item not found")
             auth_hook(user_id=user_id, task_id=queue_row["task_id"])
-            ledger_row = connection.execute(
-                select(error_ledger_table).where(
-                    error_ledger_table.c.user_id == user_id,
-                    error_ledger_table.c.task_id == queue_row["task_id"],
-                    error_ledger_table.c.flow_id == queue_row["flow_id"],
+            ledger_row = (
+                connection.execute(
+                    select(error_ledger_table).where(
+                        error_ledger_table.c.user_id == user_id,
+                        error_ledger_table.c.task_id == queue_row["task_id"],
+                        error_ledger_table.c.flow_id == queue_row["flow_id"],
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         return queue_row, ledger_row
 
     def _is_terminal_queue_status(self, status: str) -> bool:
@@ -346,6 +387,13 @@ class ReviewService:
             ai_confidence=self._to_float_or_none(row["ai_confidence"]),
             ai_reason=row["ai_audit_opinion"],
             rag_sources=self._rag_sources(row["rag_source"]),
+            task_id=row["task_id"],
+            flow_id=row["flow_id"],
+            bank_serial_no=row["bank_serial_no"],
+            clearing_serial_no=row["clearing_serial_no"],
+            bank_amount=row["bank_amount"],
+            clear_amount=row["clear_amount"],
+            discrepancy_amount=row["discrepancy_amount"],
         )
 
     def _ai_suggestion(self, exception_branch: str | None) -> str:
@@ -372,5 +420,6 @@ class ReviewService:
         if action == "APPROVED_MATCH":
             return "FIXED"
         return "HELD"
+
 
 review_service = ReviewService()
