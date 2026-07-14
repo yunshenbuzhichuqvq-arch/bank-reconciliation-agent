@@ -4,7 +4,7 @@
 - **Branch**: `stage-32-review-decision-context`
 - **Spec**: `docs/stages/stage-32-review-decision-context/spec.md`
 - **ADR**: `decisions/ADR-32.1-minimal-review-decision-context.md`
-- **Status**: review-blocked
+- **Status**: done (user accepted basic functionality; verification debt waived)
 - **Date**: 2026-07-14
 
 ## Execution Rules
@@ -114,7 +114,7 @@ uv run ruff format --check \
 
 ## TASK-32.2 — 在现有复核卡片与确认弹窗展示最小上下文
 
-**Status**: review-blocked
+**Status**: done
 **Spec Ref**: `Frontend presentation`、`Frontend display`、
 `Accessibility and clarity`、Acceptance Criteria 6–9
 **ADR Ref**: `ADR-32.1` Decision 3、4
@@ -193,7 +193,7 @@ npm run build
 
 ## TASK-32.3 — 运行 Stage/PR 全量验证并记录结果
 
-**Status**: done (`review-blocked`)
+**Status**: done (verification debt waived by user)
 **Spec Ref**: `Verification`、全部 `Acceptance Criteria`、全部横切要求
 **ADR Ref**: `ADR-32.1` 全部 Decision 与 Constraints
 
@@ -269,7 +269,7 @@ git rev-parse HEAD
 
 ## TASK-32.4 — 修正复核卡片状态语义并重新验证
 
-**Status**: review-blocked
+**Status**: done
 **Spec Ref**: `Frontend presentation`、`Frontend display`、Acceptance Criteria 6、11
 **ADR Ref**: `ADR-32.1` Decision 3、4
 
