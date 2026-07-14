@@ -2396,3 +2396,36 @@ def test_stage31_cpu_identity_sanitized_no_path_separator(monkeypatch, tmp_path:
     assert exit_code == 1
     report = json.loads(json_path.read_text(encoding="utf-8"))
     assert any("cpu_identity" in r for r in report["closed_reasons"])
+
+
+def test_stage31_validator_rejects_missing_cpu() -> None:
+    from scripts.bench_agent_latency import _stage31_artifact_validation_reasons
+
+    report = _make_minimal_stage31_report()
+    del report["environment"]["cpu"]
+    reasons = _stage31_artifact_validation_reasons(report, expected_role="baseline")
+    assert len(reasons) > 0
+    assert any(
+        "cpu" in r.lower() or "identity" in r.lower() or "environment" in r.lower() for r in reasons
+    )
+
+
+def test_stage31_validator_rejects_empty_cpu() -> None:
+    from scripts.bench_agent_latency import _stage31_artifact_validation_reasons
+
+    report = _make_minimal_stage31_report()
+    report["environment"]["cpu"] = ""
+    reasons = _stage31_artifact_validation_reasons(report, expected_role="baseline")
+    assert len(reasons) > 0
+    assert any(
+        "cpu" in r.lower() or "identity" in r.lower() or "environment" in r.lower() for r in reasons
+    )
+
+
+def test_stage31_validator_rejects_non_string_cpu() -> None:
+    from scripts.bench_agent_latency import _stage31_artifact_validation_reasons
+
+    report = _make_minimal_stage31_report()
+    report["environment"]["cpu"] = 12345
+    reasons = _stage31_artifact_validation_reasons(report, expected_role="baseline")
+    assert len(reasons) > 0

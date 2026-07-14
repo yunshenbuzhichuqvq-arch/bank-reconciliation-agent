@@ -1047,7 +1047,7 @@ def _stage31_artifact_validation_reasons(
             )
         if isinstance(environment, dict):
             identity_values.extend(
-                environment.get(key) for key in ("os", "architecture", "python", "boundary")
+                environment.get(key) for key in ("os", "architecture", "cpu", "python", "boundary")
             )
         if not identity_values or any(
             not isinstance(value, str) or not value for value in identity_values
