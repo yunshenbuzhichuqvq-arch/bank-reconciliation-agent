@@ -5,9 +5,9 @@
   "schema_version": "1.0",
   "stage": "stage-31-trace-guided-performance",
   "artifact_role": "baseline",
-  "evaluated_at": "2026-07-13T15:23:23.460129Z",
-  "git_revision": "0a849a8f23b71151d9182b84623cffc3e6f0cdb1",
-  "input_sha256": "f51a4070637006a640d0ea54d63fe4fd6ecc89feac7b903227380f8772b87577",
+  "evaluated_at": "2026-07-14T01:28:46.866097Z",
+  "git_revision": "7c4b0a7d13f6ab437cbbb0a20815980bbf944214",
+  "input_sha256": "1f4c2ccf28d6deccfe31caac3b01737aa842f351bc75fe847ff2a89c067233a3",
   "environment": {
     "os": "Darwin",
     "architecture": "arm64",
@@ -42,284 +42,391 @@
     "completeness_rate": 1.0,
     "samples": [
       {
-        "trace_id": "655c761c-0d09-4b7d-bc90-9503c395715e",
+        "trace_id": "fea1da4b-9be1-4182-b65b-0b256d4c536e",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "b10ef3dd-5629-41d3-859c-9250e21b1d83",
+        "trace_id": "9c75a350-1f69-4493-890a-7ff8b279071c",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "660f3495-4d60-468f-8901-7a0b02748dab",
+        "trace_id": "f17fe584-584e-48c5-81da-1cda332c6729",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "4a9a601a-c648-43b6-919d-98b72101e896",
+        "trace_id": "a0ac6379-432b-47e3-908d-9a534e071503",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "da582273-dd2a-4b40-a2f2-90a7101f22fc",
+        "trace_id": "dfd38267-6fac-41d7-ada8-b452d521618c",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "bf4ad47e-0b89-41e3-a011-98ed400b3478",
+        "trace_id": "dc9036da-b989-48ba-aa50-c0422b905222",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "e8932162-41f4-4f24-8e64-4260597dd9b4",
+        "trace_id": "9cc7c049-9e8d-4c81-9edb-c86a35ba7cad",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "65641afa-43e3-456b-b06b-b2a3120c64b6",
+        "trace_id": "f16241f1-1dbf-481a-8754-40dd5298a949",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "ca361b99-389d-4ced-9e1f-3971b24c20cd",
+        "trace_id": "9f44fdd8-d84c-48a8-9fd8-34a27e2ba1a1",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 2
       },
       {
-        "trace_id": "379cff04-4240-4666-8aa2-9c17dadf95d3",
+        "trace_id": "7e6cec99-bbe1-417f-9884-ffbb85831012",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "de330fec-0b74-4847-8925-10d08ea1dca1",
+        "trace_id": "f5c6c5ef-9b13-42f9-b2a5-56d57dce9d7a",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "d02b1068-a814-448c-bf44-1b0547904e78",
+        "trace_id": "a486bb0b-7f39-4b55-925a-14c5aab2b0a1",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 2
       },
       {
-        "trace_id": "ee109949-2f61-4c18-9687-36613335c51b",
+        "trace_id": "c97c8f4c-515b-430b-9d8a-bc421ec13d0e",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 2
       },
       {
-        "trace_id": "0e1c80e2-5bad-42a8-9618-767eabcd81f9",
+        "trace_id": "454aa882-bcc9-4714-9bf6-dbd88230f1d5",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "0711c782-3f7f-4988-b36a-341ff36a1590",
+        "trace_id": "c45ce308-b7fd-436d-b8bb-7783fc60d773",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "87d436d9-9af6-44bf-94a3-41995e62188f",
+        "trace_id": "3b98403a-bc9a-44b5-b691-5a851610b962",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 2
       },
       {
-        "trace_id": "d276c386-d0d5-42bd-a5b9-08982764b93c",
+        "trace_id": "aeab987b-649f-4c2e-849b-65f5ce132f31",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "84e9ca24-b545-44c1-8f60-4502233f58d6",
+        "trace_id": "768e7ce2-2ae0-4b4f-bfe6-e45b8a2a36c7",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "ed14d862-6259-48e1-ad0f-ee6943e5803f",
+        "trace_id": "6cdf5041-7919-45e3-8746-4e98f670403b",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       },
       {
-        "trace_id": "4e9504ac-39fa-4356-a99e-a6ca58187dbf",
+        "trace_id": "74d8ede8-4fe9-4d0f-b279-db389f3ba049",
         "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
         "ext_spans": 1,
-        "rag_spans": 1
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
       }
     ]
   },
   "latency": {
     "cold_observations": [
       {
-        "e2e_ms": 16052.242,
-        "extraction_ms": 3711,
-        "rag_ms": 6376
+        "e2e_ms": 17166.942,
+        "extraction_ms": 3156,
+        "rag_ms": 6907
       }
     ],
     "end_to_end": {
-      "avg_latency_ms": 8258.625,
-      "p50_latency_ms": 8069.572,
-      "p95_latency_ms": 10259.652,
-      "min_latency_ms": 6594.77,
-      "max_latency_ms": 10259.652,
+      "avg_latency_ms": 8500.346,
+      "p50_latency_ms": 7915.476,
+      "p95_latency_ms": 20400.707,
+      "min_latency_ms": 5388.518,
+      "max_latency_ms": 20400.707,
       "samples_ms": [
-        8401.687,
-        9314.306,
-        9730.715,
-        7064.323,
-        7320.002,
-        10259.652,
-        7539.394,
-        7442.689,
-        9932.012,
-        10241.856,
-        7481.574,
-        7832.116,
-        8130.851,
-        7274.392,
-        8052.642,
-        6594.77,
-        8086.503,
-        6864.405,
-        8544.391,
-        9064.221
+        8097.964,
+        8658.283,
+        7651.769,
+        9726.563,
+        8220.969,
+        20400.707,
+        8242.92,
+        7272.785,
+        10404.315,
+        10584.463,
+        8546.924,
+        7523.942,
+        10453.384,
+        6086.584,
+        7430.029,
+        7732.988,
+        5764.826,
+        5751.572,
+        5388.518,
+        6067.412
       ]
     },
     "extraction_agent": {
-      "avg_latency_ms": 2894.95,
-      "p50_latency_ms": 2957.0,
-      "p95_latency_ms": 4362,
-      "min_latency_ms": 1841,
-      "max_latency_ms": 4362,
+      "avg_latency_ms": 2694.05,
+      "p50_latency_ms": 2229.5,
+      "p95_latency_ms": 5498,
+      "min_latency_ms": 1492,
+      "max_latency_ms": 5498,
       "samples_ms": [
-        2969,
-        3497,
-        4362,
-        2945,
-        1841,
-        3019,
-        3205,
-        3507,
-        3789,
-        2252,
-        2253,
+        1707,
+        2042,
+        3200,
+        1635,
+        2766,
+        5498,
+        4657,
+        1641,
+        2761,
+        4866,
+        2417,
+        3024,
         2975,
-        2636,
-        2162,
-        2632,
-        2082,
-        4090,
-        2314,
-        3168,
-        2201
+        1817,
+        3536,
+        1975,
+        1914,
+        2036,
+        1492,
+        1922
       ]
     },
     "rag_search": {
-      "avg_latency_ms": 61.5,
-      "p50_latency_ms": 62.0,
-      "p95_latency_ms": 64,
-      "min_latency_ms": 59,
-      "max_latency_ms": 64,
+      "avg_latency_ms": 70.65,
+      "p50_latency_ms": 70.5,
+      "p95_latency_ms": 74,
+      "min_latency_ms": 66,
+      "max_latency_ms": 74,
       "samples_ms": [
-        62,
-        61,
-        63,
-        63,
-        60,
-        60,
-        61,
-        62,
-        62,
-        64,
-        59,
-        63,
-        63,
-        62,
-        61,
-        60,
-        62,
-        60,
-        59,
-        63
+        66,
+        71,
+        72,
+        69,
+        73,
+        72,
+        71,
+        70,
+        73,
+        69,
+        68,
+        73,
+        71,
+        74,
+        68,
+        70,
+        70,
+        74,
+        69,
+        70
       ]
     }
   },
   "theory": {
     "per_run_predicted_parallel_e2e_ms": [
-      8339.687,
-      9253.306,
-      9667.715,
-      7001.323,
-      7260.002,
-      10199.652,
-      7478.394,
-      7380.689,
-      9870.012,
-      10177.856,
-      7422.574,
-      7769.116,
-      8067.851,
-      7212.392,
-      7991.642,
-      6534.77,
-      8024.503,
-      6804.405,
-      8485.391,
-      9001.221
+      8031.964,
+      8587.283,
+      7579.769,
+      9657.563,
+      8147.969,
+      20328.707,
+      8171.92,
+      7202.785,
+      10331.315,
+      10515.463,
+      8478.924,
+      7450.942,
+      10382.384,
+      6012.584,
+      7362.029,
+      7662.988,
+      5694.826,
+      5677.572,
+      5319.518,
+      5997.412
     ],
-    "actual_warm_p95_ms": 10259.652,
-    "predicted_warm_p95_ms": 10199.652,
-    "theoretical_p95_improvement_pct": 0.585,
+    "actual_warm_p95_ms": 20400.707,
+    "predicted_warm_p95_ms": 20328.707,
+    "theoretical_p95_improvement_pct": 0.353,
     "formula": "actual_e2e_ms - extraction_duration_ms - rag_duration_ms + max(extraction_duration_ms, rag_duration_ms)"
   },
   "independence": {
     "data_dependency": {
       "finding": "safe",
-      "detail": "RAG query is built from scenario_type, error_type, exception_branch, and amounts; does not read extraction_result. Extraction and RAG are data-independent."
+      "detail": "RAG query is built from scenario_type, error_type, exception_branch, and amounts via _build_rag_query(); does not read extraction_result. Static code analysis confirms data independence.",
+      "source": "static_code_analysis"
     },
     "shared_state": {
       "finding": "safe",
-      "detail": "In serial runtime there is no concurrent access. For a parallel candidate, workers must receive read-only inputs and return results without modifying ReconciliationState, Trace recorder, SSE emitter, or persistent state."
+      "detail": "In serial runtime there is no concurrent access. For a parallel candidate, this assessment is conditional on workers receiving read-only inputs and returning results without modifying shared ReconciliationState, Trace recorder, SSE emitter, or persistent state. This has NOT been verified in running code.",
+      "source": "static_analysis_unverified"
     },
     "failure_order": {
       "finding": "bounded",
-      "detail": "In serial runtime, Extraction failure causes early return before RAG. In a parallel candidate, the failure of one side while the other is in-flight requires explicit fail-closed handling: both must be complete, and any failure must prevent automatic audit."
+      "detail": "In serial runtime, Extraction failure causes early return before RAG. In a parallel candidate, the failure of one side while the other is in-flight requires explicit fail-closed handling. This has NOT been verified in running code; the analysis assumes both sides are guarded.",
+      "source": "static_analysis_unverified"
     },
     "cancellation": {
       "finding": "bounded",
-      "detail": "Synchronous provider/retriever calls may not support hard interrupt. A thread pool must use bounded timeouts and guarantee no background state mutation after timeout."
+      "detail": "Synchronous provider/retriever calls may not support hard interrupt. A thread pool must use bounded timeouts and guarantee no background state mutation after timeout. This has NOT been verified in running code.",
+      "source": "static_analysis_unverified"
     },
     "resource_reclamation": {
       "finding": "safe",
-      "detail": "Thread pool resources are released via context manager. No persistent background threads or shared buffers."
+      "detail": "Thread pool context manager guarantees resource release on exit. This assessment is conditional on proper implementation.",
+      "source": "static_analysis_unverified"
     }
   },
   "usage": {
-    "provider_call_count": 20,
-    "input_tokens": 4660,
-    "output_tokens": 4537,
-    "total_tokens": 9197,
-    "per_successful_run_tokens": 459
+    "logical_agent_calls": 40,
+    "logical_tool_calls": 24,
+    "provider_transport_attempts": 40,
+    "input_tokens": 58960,
+    "output_tokens": 15293,
+    "total_tokens": 74253,
+    "per_successful_run_tokens": 3712
   },
   "cost": {
     "assumptions": "DeepSeek v4 Pro pricing: input $0.89/1M, output $3.45/1M",
-    "total_estimated_usd": "0.00597429",
-    "per_successful_run_estimated_usd": "0.0002987145",
+    "total_estimated_usd": "0.03895251",
+    "per_successful_run_estimated_usd": "0.0019476255",
     "unavailable_reason": null
   },
   "reliability": {
@@ -330,20 +437,20 @@
   },
   "decision": "no_go",
   "closed_reasons": [
-    "theory_pct_0.585_lt_20.0"
+    "theory_pct_0.353_lt_20.0"
   ]
 }
 ```
 
 ## Baseline Decision
 **Decision**: `no_go`
-**Reasons**: ['theory_pct_0.585_lt_20.0']
+**Reasons**: ['theory_pct_0.353_lt_20.0']
 
 ## Identity
 - Schema: `1.0`
 - Stage: `stage-31-trace-guided-performance`
-- Git: `0a849a8f23b71151d9182b84623cffc3e6f0cdb1`
-- Input SHA256: `f51a4070637006a640d0ea54d63fe4fd6ecc89feac7b903227380f8772b87577`
+- Git: `7c4b0a7d13f6ab437cbbb0a20815980bbf944214`
+- Input SHA256: `1f4c2ccf28d6deccfe31caac3b01737aa842f351bc75fe847ff2a89c067233a3`
 
 ## Trust
 - Trusted: `True`
@@ -356,21 +463,21 @@
 - Complete: 20
 
 ## Latency
-- E2E P95: 10259.652 ms
-- E2E P50: 8069.572 ms
+- E2E P95: 20400.707 ms
+- E2E P50: 7915.476 ms
 
 ## Theory
-- Predicted P95: 10199.652 ms
-- Actual P95: 10259.652 ms
-- Improvement: 0.585%
+- Predicted P95: 20328.707 ms
+- Actual P95: 20400.707 ms
+- Improvement: 0.353%
 
 ## Usage
-- Provider calls: 20
-- Total tokens: 9197
+- Provider calls: 0
+- Total tokens: 74253
 
 ## Cost
-- Total: 0.00597429
-- Per-run: 0.0002987145
+- Total: 0.03895251
+- Per-run: 0.0019476255
 
 ## Reliability
 - Success: 20
@@ -378,8 +485,8 @@
 - Error Rate: 0.0
 
 ## Independence Gate
-- **data_dependency**: `safe` — RAG query is built from scenario_type, error_type, exception_branch, and amounts; does not read extraction_result. Extraction and RAG are data-independent.
-- **shared_state**: `safe` — In serial runtime there is no concurrent access. For a parallel candidate, workers must receive read-only inputs and return results without modifying ReconciliationState, Trace recorder, SSE emitter, or persistent state.
-- **failure_order**: `bounded` — In serial runtime, Extraction failure causes early return before RAG. In a parallel candidate, the failure of one side while the other is in-flight requires explicit fail-closed handling: both must be complete, and any failure must prevent automatic audit.
-- **cancellation**: `bounded` — Synchronous provider/retriever calls may not support hard interrupt. A thread pool must use bounded timeouts and guarantee no background state mutation after timeout.
-- **resource_reclamation**: `safe` — Thread pool resources are released via context manager. No persistent background threads or shared buffers.
+- **data_dependency**: `safe` — RAG query is built from scenario_type, error_type, exception_branch, and amounts via _build_rag_query(); does not read extraction_result. Static code analysis confirms data independence.
+- **shared_state**: `safe` — In serial runtime there is no concurrent access. For a parallel candidate, this assessment is conditional on workers receiving read-only inputs and returning results without modifying shared ReconciliationState, Trace recorder, SSE emitter, or persistent state. This has NOT been verified in running code.
+- **failure_order**: `bounded` — In serial runtime, Extraction failure causes early return before RAG. In a parallel candidate, the failure of one side while the other is in-flight requires explicit fail-closed handling. This has NOT been verified in running code; the analysis assumes both sides are guarded.
+- **cancellation**: `bounded` — Synchronous provider/retriever calls may not support hard interrupt. A thread pool must use bounded timeouts and guarantee no background state mutation after timeout. This has NOT been verified in running code.
+- **resource_reclamation**: `safe` — Thread pool context manager guarantees resource release on exit. This assessment is conditional on proper implementation.
