@@ -515,7 +515,7 @@ TASK-31.6 runtime identity / input / environment contract
 
 ## TASK-31.6 — 修复真实 runtime identity、固定输入与 environment-gap contract
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Fixed benchmark input`、`Benchmark CLI Contract`、`CLI failure behavior`、
 `Tenant and context isolation`
 **ADR Ref**: `ADR-31.1` Decision 2、3
@@ -590,7 +590,7 @@ uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent
 
 ## TASK-31.7 — 修复 Trace eligibility、全 flow accounting 与 independence truth
 
-**Status**: pending
+**Status**: done
 **Spec Ref**: `Baseline JSON Contract`、`Trace sample eligibility`、`Independence gate`、
 `Observability truth`
 **ADR Ref**: `ADR-31.1` Decision 2、3
@@ -662,7 +662,7 @@ uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent
 
 ## TASK-31.8 — 修复 after artifact 与 comparison retention contract
 
-**Status**: pending
+**Status**: review-blocked (CPU environment identity/comparison coverage moved to TASK-31.11)
 **Spec Ref**: `Benchmark CLI Contract`、`Comparison and Retention Gate`、
 `Conditional Runtime Contract`
 **ADR Ref**: `ADR-31.1` Decision 5
@@ -734,7 +734,7 @@ uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent
 
 ## TASK-31.9 — 使用修复后的 contract 重新生成真实 baseline
 
-**Status**: pending
+**Status**: review-blocked (2026-07-14 artifact omitted required CPU identity)
 **Spec Ref**: `Phase A — Baseline contract and decision gate`、`Fixed benchmark input`、
 `Trace sample eligibility`、`Independence gate`
 **ADR Ref**: `ADR-31.1` Decision 1–3
@@ -806,7 +806,7 @@ jq '{stage, artifact_role, git_revision, input_sha256, provider, rag, run_plan, 
 
 ## TASK-31.10 — 对最终修复树重跑 Stage/PR 门禁并重写 verification
 
-**Status**: pending
+**Status**: review-blocked (awaiting TASK-31.11 and accepted TASK-31.9 rerun)
 **Spec Ref**: `Phase C — Stage verification`、全部 `Acceptance Criteria`
 **ADR Ref**: `ADR-31.1`
 
@@ -874,3 +874,69 @@ git status --short
 - Deviations From Spec
 - Risks/Follow-up
 - Commit：`docs: re-verify stage 31 after review repairs`，body 包含 `Refs: TASK-31.10`
+
+---
+
+## TASK-31.11 — 补齐 CPU environment identity 与 comparison fail-closed contract
+
+**Status**: pending
+**Spec Ref**: `Baseline JSON Contract`、`Comparison and Retention Gate`、`Observability truth`
+**ADR Ref**: `ADR-31.1` Decision 2、3、5
+
+### Goal
+
+补齐 Stage 31 artifact 必填的 CPU runtime identity，并让 schema validation 与 comparison 对缺失、空值或
+mismatch fail closed。本 task 只修复环境身份 contract；不改变 benchmark 输入、Trace、指标公式、阈值、
+runtime 或当前串行行为。完成并通过审查后，重新执行 TASK-31.9 和 TASK-31.10。
+
+### Files to Modify
+
+- Modify: `scripts/bench_agent_latency.py`
+- Modify: `tests/test_bench_agent_latency.py`
+
+### Do Not Touch
+
+- `src/bank_reconciliation_agent/`
+- `reports/`、`data/`、`rules/`、frontend、数据库 schema
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 手工修改或接受当前缺少 CPU 字段的 baseline。
+- 重跑真实 DeepSeek/bge_m3 baseline。
+- 实现并发候选、修改 Trace/usage/cost/independence 逻辑或调整任何门禁阈值。
+- 引入新依赖、读取凭据、写入主机名或其他不必要的设备标识。
+
+### Acceptance Criteria
+
+- Stage 31 baseline/after 的 `environment` 必须包含稳定、非空、已去敏的 `cpu` 字段，来源于实际运行主机，
+  不得回显 CLI 参数或硬编码开发机型号。
+- 无法取得 CPU identity 时使用明确 closed reason 并输出 `environment_gap`；不得省略字段后继续
+  `trust=true`，也不得把 `architecture` 静默复制成 CPU 型号。
+- Stage 31 schema validator 对缺失、空值、错误类型的 `environment.cpu` fail closed；Markdown 只消费
+  通过校验的同次 JSON。
+- comparison 将 CPU 纳入 baseline/after environment comparability；任一侧缺失/空值或两侧 mismatch 均
+  输出 `optimization_rejected`，即使 focused/stage flag 均为 true 也不能绕过。
+- environment/cpu 值不得包含主机名、用户名、文件路径、凭据、序列号或其他设备唯一标识。
+- 确定性测试覆盖正常 CPU identity、identity unavailable、schema 缺失/空值、comparison mismatch 和旧 CLI
+  回归；不访问真实网络、不下载模型。
+- Stage 31 benchmark、Trace schema 和 Stage 23 legacy tests 保持通过，changed-path Ruff gate 通过。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_bench_agent_latency.py -q
+uv run ruff check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- CPU Identity Source and Sanitization
+- Unavailable/Error Matrix
+- Schema and Comparison Fail-closed Proof
+- Tests Run：逐条命令、退出码和真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-31.11`
