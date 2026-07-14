@@ -128,7 +128,7 @@ function removeOrRefresh(result: ReviewResult) {
 <template>
   <PageHeader
     title="人工复核"
-    description="查看 AI 建议与 RAG 来源，确认平账或强制挂账。当前契约不提供左右流水金额面板。"
+    description="查看业务流水标识、两侧金额与 AI 审计建议，确认平账或强制挂账。"
   />
 
   <div class="review-page">

@@ -6,7 +6,7 @@ export interface AuditDecision{ flow_id:string; decision:string; risk_level:stri
 export interface ExceptionItem{ flow_id:string; status:string; error_type:string; exception_branch:string|null; bank_amount:string|null; clear_amount:string|null; amount_diff:string|null; rag_evidence:RagEvidence[]; audit_decision:AuditDecision }
 export interface ExceptionList{ task_id:string; total:number; items:ExceptionItem[] }
 export interface RagSourceRef{ source:string; score:number|null }
-export interface PendingReviewItem{ queue_id:number; error_type:string; exception_branch:string|null; risk_level:string; ai_suggestion:string; ai_confidence:number|null; ai_reason:string|null; rag_sources:RagSourceRef[]; similar_historical_cases:number; historical_approve_rate:string }
+export interface PendingReviewItem{ queue_id:number; error_type:string; exception_branch:string|null; risk_level:string; ai_suggestion:string; ai_confidence:number|null; ai_reason:string|null; rag_sources:RagSourceRef[]; similar_historical_cases:number; historical_approve_rate:string; task_id:string; flow_id:string; bank_serial_no:string|null; clearing_serial_no:string|null; bank_amount:string|null; clear_amount:string|null; discrepancy_amount:string }
 export interface PendingReviewList{ scenario_type:string; items:PendingReviewItem[]; total:number }
 export type ReviewAction = "APPROVED_MATCH" | "FORCE_HOLD"
 export interface ReviewResult{ queue_id:number; current_status:string; memory_updated:Record<string,boolean> }

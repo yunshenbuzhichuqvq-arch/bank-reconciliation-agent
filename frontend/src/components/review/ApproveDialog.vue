@@ -64,7 +64,7 @@ function submit() {
   <ElDialog v-model="visible" title="确认处置" width="520px" destroy-on-close>
     <div v-if="item && action" class="approve-dialog">
       <p class="approve-dialog__summary">
-        将对队列 <span class="cell-mono">#{{ item.queue_id }}</span>
+        将对流水 <span class="cell-mono">#{{ item.flow_id }}</span>
         执行 <strong>{{ actionLabel }}</strong>。
       </p>
       <dl>
@@ -75,6 +75,18 @@ function submit() {
         <div>
           <dt>规则分支</dt>
           <dd class="cell-mono">{{ item.exception_branch ?? "—" }}</dd>
+        </div>
+        <div>
+          <dt>银行金额</dt>
+          <dd class="cell-mono">{{ item.bank_amount ?? "无对应流水" }}</dd>
+        </div>
+        <div>
+          <dt>清算金额</dt>
+          <dd class="cell-mono">{{ item.clear_amount ?? "无对应流水" }}</dd>
+        </div>
+        <div>
+          <dt>差额</dt>
+          <dd class="cell-mono">{{ item.discrepancy_amount }}</dd>
         </div>
       </dl>
 
@@ -129,7 +141,7 @@ function submit() {
 
 dl {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
   margin: 0;
 }
