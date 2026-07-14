@@ -580,10 +580,8 @@ def _make_mock_run_item(
         if recorder is None or not isinstance(recorder, TraceRecorder):
             return state
 
-        import time as _time
-
         ext_handle = recorder.start_agent("ExtractionAgent")
-        _time.sleep(ext_dur_ms / 1000.0)
+        ext_handle._mono_start -= ext_dur_ms / 1000.0
         recorder.finish_agent(
             ext_handle,
             status="SUCCEEDED" if ext_success else "FAILED",
@@ -596,16 +594,26 @@ def _make_mock_run_item(
             recorder.finish_agent(h, status="SUCCEEDED", prompt_tokens=1, completion_tokens=1)
 
         tool_handle = recorder.start_tool("search_rules")
-        _time.sleep(rag_dur_ms / 1000.0)
+        tool_handle._mono_start -= rag_dur_ms / 1000.0
         recorder.finish_tool(
             tool_handle,
             status="SUCCEEDED" if rag_success else "FAILED",
             outcome="RESULT" if rag_success else None,
+            attempt=1,
+            retry_recovered=False,
+            recovered_error_type=None,
         )
 
         for _ in range(extra_rag_spans):
             h = recorder.start_tool("search_rules")
-            recorder.finish_tool(h, status="SUCCEEDED", outcome="RESULT")
+            recorder.finish_tool(
+                h,
+                status="SUCCEEDED",
+                outcome="RESULT",
+                attempt=1,
+                retry_recovered=False,
+                recovered_error_type=None,
+            )
 
         state["next_action"] = "AUTO_FIXED" if (ext_success and rag_success) else "PENDING_HUMAN"
         return state
@@ -652,6 +660,55 @@ def test_stage31_critical_path_incomplete_trace_no_go(monkeypatch, tmp_path: Pat
     report = json.loads(json_path.read_text(encoding="utf-8"))
     assert report["decision"] == "no_go"
     assert any("complete_count" in r for r in report["closed_reasons"])
+
+
+def test_stage31_real_identity_with_incomplete_trace_is_not_trusted(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import bank_reconciliation_agent.core.config as _cfg
+    from bank_reconciliation_agent.core.llm import provider as _provider
+    from bank_reconciliation_agent.rag import retriever as _retriever
+
+    def _init(self, **kwargs):
+        self.model = kwargs["model"]
+
+    deepseek_like = type(
+        "DeepSeekProvider",
+        (),
+        {"__module__": "bank_reconciliation_agent.core.llm.provider", "__init__": _init},
+    )
+    monkeypatch.setattr(_cfg.settings, "deepseek_api_key", "test-key")
+    monkeypatch.setattr(_provider, "DeepSeekProvider", deepseek_like)
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.workflow.run_item",
+        _make_mock_run_item(ext_success=False, rag_success=False),
+    )
+    backend = _retriever.rule_retriever.store.embedding_backend
+
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "deepseek",
+            "--embedding-backend",
+            backend,
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 0
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "no_go"
+    assert report["trust"]["trusted"] is False
+    assert "incomplete_trace_samples" in report["trust"]["reasons"]
 
 
 def test_stage31_critical_path_duplicate_extraction_spans_no_go(
@@ -779,6 +836,7 @@ _S31_REQUIRED_SECTIONS = [
     "run_plan",
     "trust",
     "trace",
+    "contract_observations",
     "latency",
     "theory",
     "independence",
@@ -936,6 +994,28 @@ def test_stage31_input_sha256_stable() -> None:
 
 
 def _make_minimal_stage31_report(overrides: dict | None = None) -> dict:
+    observations = [
+        {
+            "trace_id": f"trace-{index}",
+            "business_decision": "AUTO_FIXED",
+            "next_action": "AUTO_FIXED",
+            "rag": {
+                "outcome": "RESULT",
+                "result_count": 1,
+                "evidence_ids": ["RULE-BE-R004"],
+            },
+            "fallback": {
+                "level": 0,
+                "path": "L1",
+                "terminal_type": "FINAL",
+                "terminal_outcome": "AUTO_FIXED",
+            },
+            "trace_invariants_valid": True,
+            "agent_calls": ["ExtractionAgent", "AuditAgent"],
+            "tool_calls": ["search_rules"],
+        }
+        for index in range(20)
+    ]
     base = {
         "schema_version": "1.0",
         "stage": "stage-31-trace-guided-performance",
@@ -971,8 +1051,9 @@ def _make_minimal_stage31_report(overrides: dict | None = None) -> dict:
             "completeness_numerator": 20,
             "completeness_denominator": 20,
             "completeness_rate": 1.0,
-            "samples": [],
+            "samples": [{"trace_id": f"trace-{index}", "is_complete": True} for index in range(20)],
         },
+        "contract_observations": observations,
         "latency": {
             "end_to_end": {"p95_latency_ms": 1200.0, "p50_latency_ms": 1000.0},
             "extraction_agent": {},
@@ -984,15 +1065,34 @@ def _make_minimal_stage31_report(overrides: dict | None = None) -> dict:
             "theoretical_p95_improvement_pct": 33.33,
         },
         "independence": {
-            "data_dependency": {"finding": "safe"},
-            "shared_state": {"finding": "safe"},
-            "failure_order": {"finding": "bounded"},
-            "cancellation": {"finding": "bounded"},
-            "resource_reclamation": {"finding": "safe"},
+            "data_dependency": {
+                "finding": "safe",
+                "detail": "verified",
+                "source": "test",
+            },
+            "shared_state": {"finding": "safe", "detail": "verified", "source": "test"},
+            "failure_order": {
+                "finding": "bounded",
+                "detail": "verified",
+                "source": "test",
+            },
+            "cancellation": {
+                "finding": "bounded",
+                "detail": "verified",
+                "source": "test",
+            },
+            "resource_reclamation": {
+                "finding": "safe",
+                "detail": "verified",
+                "source": "test",
+            },
         },
         "usage": {
-            "logical_agent_calls": 20,
+            "logical_agent_calls": 40,
             "logical_tool_calls": 20,
+            "provider_transport_attempts": 40,
+            "input_tokens": 1600,
+            "output_tokens": 400,
             "total_tokens": 2000,
             "per_successful_run_tokens": 100,
         },
@@ -1557,34 +1657,97 @@ def test_stage31_fake_provider_with_deepseek_cli_not_trusted(tmp_path: Path) -> 
     assert report["provider"]["effective_provider"] == "fake"
 
 
+def test_stage31_stub_runtime_cannot_claim_deepseek_identity(monkeypatch, tmp_path: Path) -> None:
+    import bank_reconciliation_agent.core.config as _cfg
+    from bank_reconciliation_agent.core.llm import provider as _provider
+    from bank_reconciliation_agent.rag import retriever as _retriever
+
+    class StubDeepSeek:
+        def __init__(self, **kwargs):
+            self.model = kwargs["model"]
+
+    monkeypatch.setattr(_cfg.settings, "deepseek_api_key", "test-key")
+    monkeypatch.setattr(_provider, "DeepSeekProvider", StubDeepSeek)
+    backend = _retriever.rule_retriever.store.embedding_backend
+
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "deepseek",
+            "--embedding-backend",
+            backend,
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 1
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "environment_gap"
+    assert report["trust"]["trusted"] is False
+    assert report["closed_reasons"] == ["provider_identity_mismatch"]
+
+
+def test_stage31_bench_authorizer_requires_exact_context() -> None:
+    from bank_reconciliation_agent.schemas.tools import ToolContext
+
+    expected = ToolContext(
+        user_id="bench_user",
+        task_id="task-1",
+        flow_id="FLOW-BENCH-1",
+        scenario_type="BANK_ENTERPRISE",
+        exception_branch="BE-R004",
+    )
+    assert bench_agent_latency._stage31_bench_authorized(
+        expected,
+        expected_task_id="task-1",
+        expected_flow_id="FLOW-BENCH-1",
+    )
+
+    for field, value in (
+        ("user_id", "other_user"),
+        ("task_id", "other_task"),
+        ("flow_id", "other_flow"),
+        ("exception_branch", "BE-R005"),
+    ):
+        denied = expected.model_copy(update={field: value})
+        assert not bench_agent_latency._stage31_bench_authorized(
+            denied,
+            expected_task_id="task-1",
+            expected_flow_id="FLOW-BENCH-1",
+        )
+
+
 def test_stage31_canonical_input_hash_covers_execution_fields() -> None:
     import hashlib as _hl
     import json as _json
 
-    base = {
-        "scenario_type": "BANK_ENTERPRISE",
-        "exception_branch": "BE-R004",
-        "error_type": "NARRATIVE_NAME_MISMATCH",
-        "source_a_summary": "冲正退款备注待核验",
-        "source_a_remark": "原流水疑似冲正，需要抽取原始流水号",
-        "source_a_amount": "100.00",
-        "source_b_summary": "REVERSAL",
-        "bank_amount": "100.00",
-        "clear_amount": "100.00",
-        "amount_diff": "0.00",
-    }
+    base = bench_agent_latency._stage31_canonical_input()
 
     h1 = _hl.sha256(_json.dumps(base, sort_keys=True).encode()).hexdigest()
 
     changed = dict(base)
-    changed["source_a_summary"] = "different summary"
+    changed["source_a_item"] = {**base["source_a_item"], "summary": "different summary"}
     h2 = _hl.sha256(_json.dumps(changed, sort_keys=True).encode()).hexdigest()
     assert h1 != h2
 
     changed2 = dict(base)
-    changed2["bank_amount"] = "200.00"
+    changed2["math_result"] = {**base["math_result"], "bank_amount": "200.00"}
     h3 = _hl.sha256(_json.dumps(changed2, sort_keys=True).encode()).hexdigest()
     assert h1 != h3
+
+    changed3 = dict(base)
+    changed3["source_b_item"] = {**base["source_b_item"], "remark": "different remark"}
+    h4 = _hl.sha256(_json.dumps(changed3, sort_keys=True).encode()).hexdigest()
+    assert h1 != h4
 
     assert len(h1) == 64
     assert h1 != ""
@@ -1637,10 +1800,8 @@ def test_stage31_unexpected_error_not_converted_to_no_go(monkeypatch, tmp_path: 
             str(json_path),
         ]
     )
-    assert exit_code == 0
-    report = json.loads(json_path.read_text(encoding="utf-8"))
-    assert report["decision"] == "no_go"
-    assert report["reliability"]["failure_count"] > 0
+    assert exit_code == 1
+    assert not json_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1693,6 +1854,11 @@ def test_stage31_independence_findings_have_source(monkeypatch, tmp_path: Path) 
         assert "detail" in finding
         assert "source" in finding
         assert finding["finding"] in ("safe", "bounded", "unknown", "unsafe", "unbounded")
+    assert indep["shared_state"]["finding"] == "unknown"
+    assert indep["failure_order"]["finding"] == "unsafe"
+    assert indep["cancellation"]["finding"] == "unbounded"
+    assert report["decision"] == "no_go"
+    assert "independence_gate_failed" in report["closed_reasons"]
 
 
 # ---------------------------------------------------------------------------
@@ -1792,8 +1958,11 @@ def test_stage31_comparison_reject_call_count_increase(tmp_path: Path) -> None:
             "artifact_role": "after",
             "git_revision": "def456",
             "usage": {
-                "logical_agent_calls": 30,
+                "logical_agent_calls": 41,
                 "logical_tool_calls": 20,
+                "provider_transport_attempts": 41,
+                "input_tokens": 1600,
+                "output_tokens": 400,
                 "total_tokens": 2000,
                 "per_successful_run_tokens": 100,
             },
@@ -1819,6 +1988,69 @@ def test_stage31_comparison_reject_call_count_increase(tmp_path: Path) -> None:
     )
     rep = json.loads(rep_path.read_text())
     assert "agent_call_count_increased" in rep["failure_reasons"]
+
+
+def test_stage31_comparison_rejects_missing_behavior_contract(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+    baseline = _make_minimal_stage31_report()
+    after = _make_minimal_stage31_report(
+        {
+            "artifact_role": "after",
+            "git_revision": "def456",
+            "contract_observations": [],
+        }
+    )
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    report = bench_agent_latency.run_stage31_comparison(b_path, a_path, True, True)
+    assert report["outcome"] == "optimization_rejected"
+    assert report["contract_gates"]["behavior_contract_equivalent"] is False
+    assert "after_contract_observations_invalid" in report["failure_reasons"]
+
+
+def test_stage31_comparison_rejects_business_behavior_change(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+    baseline = _make_minimal_stage31_report()
+    changed = [dict(item) for item in baseline["contract_observations"]]
+    changed[0] = {**changed[0], "next_action": "PENDING_HUMAN"}
+    after = _make_minimal_stage31_report(
+        {
+            "artifact_role": "after",
+            "git_revision": "def456",
+            "contract_observations": changed,
+        }
+    )
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    report = bench_agent_latency.run_stage31_comparison(b_path, a_path, True, True)
+    assert report["outcome"] == "optimization_rejected"
+    assert "behavior_contract_mismatch" in report["failure_reasons"]
+
+
+def test_stage31_comparison_rejects_effective_model_mismatch(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+    baseline = _make_minimal_stage31_report()
+    after = _make_minimal_stage31_report(
+        {
+            "artifact_role": "after",
+            "git_revision": "def456",
+            "provider": {
+                **baseline["provider"],
+                "effective_model": "different-model",
+            },
+        }
+    )
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    report = bench_agent_latency.run_stage31_comparison(b_path, a_path, True, True)
+    assert report["outcome"] == "optimization_rejected"
+    assert "effective_model_mismatch" in report["failure_reasons"]
 
 
 def test_stage31_comparison_reject_missing_git_revision(tmp_path: Path) -> None:

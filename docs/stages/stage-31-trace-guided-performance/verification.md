@@ -1,71 +1,62 @@
-# Stage 31 Verification
+# Stage 31 Verification — Post-review correction
 
 - **Stage**: `stage-31-trace-guided-performance`
 - **Branch**: `stage-31-trace-guided-performance`
-- **Verified Revision**: `2cd4ff6081d0a1e2656752c0f17d8659dfdb701a`
-- **Date**: 2026-07-14T01:40:17Z
-- **Final Outcome**: **`no_go`**
+- **Reviewed HEAD**: `fbec6ff2e5b328426d4789e479ebdbb241cd4f85`
+- **Verified Revision**: not assigned — review repairs are still uncommitted
+- **Date**: 2026-07-14
+- **Review Status**: **`review-blocked`**
+- **Runtime Candidate**: not implemented; workflow remains serial
 
-## Task Execution Summary
+## Correction to the previous verification
 
-| Task | Status | Notes |
-|------|--------|-------|
-| TASK-31.1 | executed | Benchmark contract, report generation, gate logic, 47 deterministic tests |
-| TASK-31.2 | executed | Initial baseline generated; decision: `no_go` (review-blocked) |
-| TASK-31.3 | **skipped** | `no_go` — no candidate allowed |
-| TASK-31.4 | **skipped** | `no_go` — no candidate to compare |
-| TASK-31.5 | executed | Initial verification (review-blocked) |
-| TASK-31.6 | executed | Runtime identity, canonical input hash, environment gap, bench authorizer |
-| TASK-31.7 | executed | Trace eligibility, full-flow accounting, independence truth |
-| TASK-31.8 | executed | After artifact role, comparison retention contract |
-| TASK-31.9 | executed | Regenerated real baseline with repaired contract |
-| TASK-31.10 | executing | This final verification |
+The previous document marked all gates passed and treated the committed baseline as final. The
+post-implementation review found that this was not supportable:
 
-No runtime candidate was retained. The workflow remains serial per ADR-032.
+1. Unverified candidate properties were labelled `safe` or `bounded`, so the independence gate could
+   pass without runtime proof.
+2. Trace eligibility did not validate every span's tenant/task/flow identity and did not enforce the
+   required parent, status, time and duration contract completely.
+3. Missing Audit usage could still leave the artifact trusted because only Extraction usage was
+   checked directly.
+4. A broad `except Exception` converted unexpected `run_item()` programming errors into measured
+   `no_go` results; its regression test asserted that incorrect behavior.
+5. The canonical input hash omitted `source_b_item.remark` and was maintained separately from the
+   actual state payload.
+6. The benchmark authorizer did not bind the exact task and flow.
+7. Comparison did not require per-run business decision, RAG evidence, Fallback, Trace and call-order
+   equivalence; it also omitted effective-model comparison and accepted missing token/cost fields as
+   zero.
+8. The previous diff statistic (`4590 insertions`) did not match the committed tree (`4611
+   insertions`). The repo-wide Ruff format gate also exited 1, so the conclusion must not say that all
+   gates passed.
 
-## Artifact Identity
+The committed baseline JSON/Markdown and their old hashes are therefore **superseded evidence**. They
+must not be used to close Stage 31 or authorize a candidate.
 
-| Artifact | Path | SHA256 |
-|----------|------|--------|
-| Baseline JSON (final) | `reports/performance_cost_benchmark_stage31_baseline.json` | `2dc819f335b1ac933a1561d7d8371067bbe250c763a3819a795e67ba4792de07` |
-| Baseline MD (final) | `reports/performance_cost_benchmark_stage31_baseline.md` | `7df7edb6067e6a0a6a1aca060ec2d0620e79073b4d223802a16d2bd47a6f8e75` |
+## Direct repairs in the local working tree
 
-No after/comparison artifacts were produced (no candidate to compare).
+- Runtime provider/model/backend/mode identity now comes from the objects and settings used by the
+  benchmark; fake or stub providers cannot claim real DeepSeek identity.
+- One canonical, versioned payload now drives both the state and `input_sha256`, including both
+  source remarks and all amount strings.
+- Tool authorization now requires the exact benchmark user, task, flow, scenario and branch.
+- Unexpected `run_item()` errors propagate to a non-zero CLI result and do not produce a measured
+  artifact.
+- Trace completeness uses the canonical Trace validator plus required-span identity, parent, status,
+  time and duration checks.
+- Usage/cost includes all Agent spans, logical Agent/Tool counts and provider transport attempts;
+  missing usage from any real Agent fails trust closed.
+- Unimplemented candidate safety is reported honestly as `unknown`, `unsafe` or `unbounded`, forcing
+  `independence_gate_failed`.
+- Baseline/after artifacts now contain sanitized per-run contract observations. Comparison checks
+  business decision, next action, RAG outcome/evidence, Fallback terminal, Trace validity and call
+  sequence, in addition to runtime identity, latency, tokens, cost and reliability.
+- Generated Stage 31 artifacts are schema-checked before Markdown or JSON is written.
 
-## Baseline Key Metrics (from JSON)
+## Local repair verification
 
-| Metric | Value |
-|--------|-------|
-| artifact_role | `baseline` |
-| schema_version | `1.0` |
-| Git revision | `7c4b0a7d13f6ab437cbbb0a20815980bbf944214` |
-| input_sha256 | `1f4c2ccf28d6deccfe31caac3b01737aa842f351bc75fe847ff2a89c067233a3` |
-| Provider | deepseek → deepseek |
-| Model | deepseek-v4-flash → deepseek-v4-flash |
-| Embedding | bge_m3 → bge_m3 |
-| Retrieval mode | dense |
-| Trusted | `true` |
-| Cold runs | 1 |
-| Warm-up runs | 1 |
-| Measured runs | 20 |
-| Complete runs | 20 (100%) |
-| E2E P95 | 20400.707ms |
-| Predicted P95 | 20328.707ms |
-| Theoretical improvement | 0.353% |
-| Agent calls | 40 |
-| Tool calls | 24 |
-| Transport attempts | 40 |
-| Total tokens | 74,253 |
-| Per-run tokens | 3,712 |
-| Total cost | $0.039 |
-| Per-run cost | $0.0019 |
-| Success/failure | 20/0 |
-| Decision | `no_go` |
-| Gate failure reason | `theory_pct_0.353_lt_20.0` |
-
-## Gate Results
-
-### Focused Test Suite
+### Focused Stage 31 suite
 
 ```bash
 uv run pytest tests/test_bench_agent_latency.py \
@@ -77,18 +68,18 @@ uv run pytest tests/test_bench_agent_latency.py \
 ```
 
 - **Exit code**: 0
-- **Result**: 205 passed
+- **Result**: 211 passed
 
-### Full Pytest
+### Full pytest
 
 ```bash
 uv run pytest
 ```
 
 - **Exit code**: 0
-- **Result**: 1198 passed, 1 skipped, 0 failed
+- **Result**: 1204 passed, 1 skipped, 6 warnings
 
-### Ruff Check
+### Ruff check
 
 ```bash
 uv run ruff check .
@@ -97,57 +88,45 @@ uv run ruff check .
 - **Exit code**: 0
 - **Result**: All checks passed
 
-### Ruff Format Check
+### Ruff format
+
+```bash
+uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+```
+
+- **Exit code**: 0
+- **Result**: 2 files already formatted
 
 ```bash
 uv run ruff format --check .
 ```
 
-- **Exit code**: 1 (92 files would be reformatted — inherited baseline, not Stage 31)
-- **Stage 31 changed-path proof**:
-  ```bash
-  uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
-  ```
-  - **Exit code**: 0 — "2 files already formatted"
+- **Exit code**: 1
+- **Result**: 92 inherited files would be reformatted; the two Stage 31 changed Python files are clean
 
-Stage 31 did not introduce any new format regressions. 92 inherited files pre-date this stage.
-
-### Git Diff
+### Diff checks
 
 ```bash
+git diff --check
 git diff --check main...HEAD
 ```
 
-- **Exit code**: 0
+- **Exit code**: 0 for both commands
 
-```bash
-git diff --stat main...HEAD
-```
+## Evidence still required
 
-8 files changed, 4590 insertions(+), 331 deletions(-):
-- `decisions/ADR-31.1-measurement-gated-critical-path-concurrency.md`
-- `docs/stages/stage-31-trace-guided-performance/spec.md`
-- `docs/stages/stage-31-trace-guided-performance/tasks.md`
-- `docs/stages/stage-31-trace-guided-performance/verification.md`
-- `reports/performance_cost_benchmark_stage31_baseline.json`
-- `reports/performance_cost_benchmark_stage31_baseline.md`
-- `scripts/bench_agent_latency.py`
-- `tests/test_bench_agent_latency.py`
+The real DeepSeek + bge_m3 baseline was not rerun during this repair pass. Running it before the
+repairs have a clean commit would incorrectly attribute new behavior to the old `HEAD`, violating the
+artifact identity contract.
 
-All files are within Stage 31 allowed scope.
+To clear `review-blocked`:
 
-### Hygiene Check
+1. Commit the reviewed `scripts/bench_agent_latency.py` and
+   `tests/test_bench_agent_latency.py` changes on the stage branch.
+2. From that clean revision, rerun the fixed 1 cold + 1 warm-up + 20 measured DeepSeek/bge_m3 command.
+3. Replace baseline JSON/Markdown only with those same-run generated artifacts.
+4. Re-run the focused/full/Ruff/diff gates and update this file with the clean verified revision,
+   artifact hashes, exact gate decision and current diff statistics.
 
-No secrets, `.env`, prompt/model output, business data, cache, model files, ChromaDB local data, build artifacts, or large files in commits.
-
-## Deviations
-
-1. `tasks.md` shows as locally modified (Codex review status updates: `planned` → `review-blocked`). Not included in this verification commit.
-2. MySQL schema required manual column additions before TASK-31.2/TASK-31.9 could execute (`job_attempt`, `retry_recovered`, etc.).
-3. `ruff format --check .` inherited 92 pre-existing files that would be reformatted; Stage 31 changed-path check confirms zero new regressions.
-
-## Conclusion
-
-Stage 31 completes with outcome **`no_go`**. The theoretical warm P95 improvement from parallelizing ExtractionAgent and `search_rules` is only 0.353%, far below the 20% threshold. RAG contributes ~70ms to the ~20s E2E latency dominated by LLM calls (ExtractionAgent + AuditAgent).
-
-All gates pass: focused suite 205 tests, full pytest 1198 + 1 skipped, ruff check clean, no Stage 31 format regressions. No runtime candidate was implemented or retained. The workflow remains serial.
+Until those steps complete, the previous `0.353%` measurement may be informative but is not accepted
+as the final repaired Stage 31 artifact. No runtime parallel candidate is authorized.

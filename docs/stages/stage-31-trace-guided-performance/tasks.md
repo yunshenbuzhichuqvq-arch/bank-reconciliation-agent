@@ -4,7 +4,7 @@
 - **Branch**: `stage-31-trace-guided-performance`
 - **Spec**: `docs/stages/stage-31-trace-guided-performance/spec.md`
 - **ADR**: `decisions/ADR-31.1-measurement-gated-critical-path-concurrency.md`
-- **Status**: planned
+- **Status**: review-blocked
 - **Date**: 2026-07-13
 
 ## Execution Rules
@@ -45,7 +45,7 @@ TASK-31.3 和 TASK-31.4 标记为 `out-of-scope`；opencode 不得自行进入�
 
 ## TASK-31.1 — 建立 Stage 31 benchmark、报告与 fail-closed gate contract
 
-**Status**: pending
+**Status**: review-blocked
 **Spec Ref**: `Benchmark CLI Contract`、`Baseline JSON Contract`、`Measurement and Gate Semantics`、
 `Comparison and Retention Gate`
 **ADR Ref**: `ADR-31.1` Decision 2、3、5
@@ -130,7 +130,7 @@ uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent
 
 ## TASK-31.2 — 生成真实 Stage 31 baseline 并冻结入口结论
 
-**Status**: pending
+**Status**: review-blocked
 **Spec Ref**: `Phase A — Baseline contract and decision gate`、`Fixed benchmark input`、
 `Trace sample eligibility`、`Independence gate`
 **ADR Ref**: `ADR-31.1` Decision 1–3
@@ -417,7 +417,7 @@ jq '{trust, success, outcome, failure_reasons, latency, usage, cost, reliability
 
 ## TASK-31.5 — 运行 Stage/PR 全量门禁并记录 verification
 
-**Status**: pending
+**Status**: review-blocked
 **Spec Ref**: `Phase C — Stage verification`、全部 `Acceptance Criteria`
 **ADR Ref**: `ADR-31.1`
 
@@ -488,3 +488,389 @@ git status --short
 - Deviations From Spec
 - Risks/Follow-up
 - Commit：`docs: record stage 31 verification`，body 包含 `Refs: TASK-31.5`
+
+---
+
+## Review Repair Order（2026-07-13）
+
+整体审查确认当前 `no_go` 的方向很可能成立，但现有 baseline contract 尚不能证明自身的
+`trusted=true`、`20/20 complete`、完整 usage/cost 和 conditional comparison 结论。因此当前
+`TASK-31.2` 的 gate 尚未被 Codex 接受，`TASK-31.3` 和 `TASK-31.4` 继续保持 conditional pending，
+不得把本次跳过固化为最终 `out-of-scope`。
+
+修复顺序：
+
+```text
+TASK-31.6 runtime identity / input / environment contract
+  → TASK-31.7 Trace / accounting / independence truth
+    → TASK-31.8 after / comparison retention contract
+      → TASK-31.9 regenerate real baseline
+          ├─ candidate_allowed → TASK-31.3 → TASK-31.4 → TASK-31.10
+          └─ no_go | environment_gap → skip TASK-31.3–31.4 → TASK-31.10
+```
+
+旧 `verification.md` 在 `TASK-31.10` 重写前属于 review-blocked 证据，不代表 Stage 已通过。
+
+---
+
+## TASK-31.6 — 修复真实 runtime identity、固定输入与 environment-gap contract
+
+**Status**: pending
+**Spec Ref**: `Fixed benchmark input`、`Benchmark CLI Contract`、`CLI failure behavior`、
+`Tenant and context isolation`
+**ADR Ref**: `ADR-31.1` Decision 2、3
+
+### Goal
+
+让 Stage 31 baseline 的 requested/effective provider、model、embedding backend 和输入 hash 来自实际
+执行路径，而不是回显 CLI 参数；同时收紧 benchmark Tool 授权边界，并把环境失败与 measured
+`no_go` 严格区分。本 task 不修改 Trace eligibility、usage 汇总或 comparison 算法。
+
+### Files to Modify
+
+- Modify: `scripts/bench_agent_latency.py`
+- Modify: `tests/test_bench_agent_latency.py`
+
+### Do Not Touch
+
+- `src/bank_reconciliation_agent/`
+- `reports/`、`data/`、`rules/`、frontend、数据库 schema
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 重跑真实 DeepSeek/bge_m3 baseline。
+- 修改 workflow、provider、retriever、Tool executor 或 tenant 数据。
+- 修复 Trace 结构/accounting 或 conditional comparison contract。
+- 实现并发候选。
+
+### Acceptance Criteria
+
+- Stage 31 runner 从实际传给 `run_item()` 的 Agent/provider 和 retriever/store 读取或验证 effective
+  provider、model、embedding backend 与 retrieval mode；CLI requested 值不等于实际值或发生 fallback
+  时必须输出 `environment_gap`，不得仅按参数把 artifact 标为 trusted。
+- Fake/stub runtime 即使传入 `--provider deepseek --embedding-backend bge_m3` 也不能得到
+  `trusted=true` 或 `candidate_allowed`；有确定性回归测试证明。
+- 固定输入使用一个版本化 canonical payload；`input_sha256` 覆盖所有会改变执行路径或 LLM/RAG 输入的
+  固定字段，包括 summary、remark、金额字符串、scenario/error/branch。每 run 的 task/flow 随机 identity
+  不进入 hash；任一行为字段变化都会改变 hash。
+- baseline 只有 `cold_runs>=1`、`warmup_runs>=1`、`measured_runs>=20` 时才可能
+  `candidate_allowed`；少样本真实 stub 必须 fail closed。
+- 缺 key、provider/network/model/backend 不可用或 fallback 时生成 Stage 31 schema 的全新
+  `environment_gap` JSON/Markdown 并返回非零；不得复用 Stage 23 gap schema。
+- 未预期的编程错误、非法参数、schema/write 失败返回非零且不得被宽泛 `except Exception` 转成 measured
+  `no_go`；测试能观察到失败类别而不是空 Trace。
+- 移除无条件 `lambda ctx: True` 授权；如 benchmark 需要专用 authorizer，只允许固定 benchmark
+  user/task/flow/scenario/branch，其他 tenant 或 Tool context 必须拒绝并有测试。
+- Stage 31 的 `run_item` test double 接受真实调用签名（含显式依赖）；测试必须断言 mock 确实被调用并
+  产生预期 spans，不能因 `TypeError` 被吞掉后仍通过。
+- Stage 23 legacy CLI、JSON/Markdown 和现有测试保持兼容。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_bench_agent_latency.py -q
+uv run ruff check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Runtime Identity Proof：requested/effective 值如何绑定到实际对象
+- Canonical Input Hash Coverage
+- Environment-gap and Unexpected-error Matrix
+- Benchmark Authorization Boundary
+- Tests Run：逐条命令、退出码和真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-31.6`
+
+---
+
+## TASK-31.7 — 修复 Trace eligibility、全 flow accounting 与 independence truth
+
+**Status**: pending
+**Spec Ref**: `Baseline JSON Contract`、`Trace sample eligibility`、`Independence gate`、
+`Observability truth`
+**ADR Ref**: `ADR-31.1` Decision 2、3
+
+### Goal
+
+使 `complete`、usage/cost 和 independence 结论可由同一 canonical Trace 复核，消除只数
+Extraction/RAG span、只统计 Extraction token，以及硬编码候选安全结论的问题。本 task 不改变 runtime
+identity 或 comparison contract。
+
+### Files to Modify
+
+- Modify: `scripts/bench_agent_latency.py`
+- Modify: `tests/test_bench_agent_latency.py`
+
+### Do Not Touch
+
+- `src/bank_reconciliation_agent/`
+- `reports/`、`data/`、`rules/`、frontend、数据库 schema
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 重跑真实 baseline 或修改旧 artifact。
+- 实现候选并发、线程池或 runtime side-effect 处理。
+- 修改 workflow/Trace schema/provider/retriever。
+- after/comparison 的保留门禁。
+
+### Acceptance Criteria
+
+- 每个 measured run 调用 canonical Trace validator 或等价完整校验：恰好一个 root、一个
+  `FINAL|FALLBACK` terminal、一个 Extraction、一个 `search_rules`，sequence 连续唯一、parent/identity
+  合法、required status/duration/time 合法且全部属于同一 trace/user/task/flow。
+- `trace.samples` 记录可复核的 root/terminal/Extraction/RAG counts 和稳定失败 reason；缺 terminal、重复
+  terminal、坏 parent、断裂 sequence、错 identity、failed status 或非法 duration 均不得 complete。
+- `complete` 同时要求真实 `run_item()` 成功结束、provider/tool 最终成功、无 backend fallback；失败和慢
+  样本继续保留在 measured arrays 与 reliability，不能静默删除。
+- usage/cost 汇总同一完整 flow 的所有 LLM Agent spans，至少包含 Extraction 与 Audit；分别报告逻辑
+  Agent/Tool 调用数和 provider transport attempt 数，不能用 `success_count` 代替 call count。
+- token、cost 与 per-success 值来自完整 flow accounting；缺少任一真实 Agent usage 时 trust fail closed，
+  不得把部分成本标为完整成本。
+- independence 五类 finding 必须来自明确的静态/动态检查或诚实的 `unknown|unsafe|unbounded`；不得在尚未
+  实现候选时声称“线程池 context manager 已回收”。任一未证明项继续强制 `no_go`。
+- JSON 在写入前校验 required sections/field types/closed tokens；Markdown 只消费校验后的同一 JSON。
+- 测试覆盖上述每种 Trace 破坏、Audit usage 纳入、transport attempt、缺 usage 和 independence fail-closed。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_bench_agent_latency.py \
+  tests/test_trace_recorder.py tests/test_trace_schema.py -q
+uv run ruff check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Trace Eligibility Matrix
+- Full-flow Usage/Cost/Call-count Accounting
+- Independence Evidence and Fail-closed Tokens
+- Schema/Markdown Generation Summary
+- Tests Run：逐条命令、退出码和真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-31.7`
+
+---
+
+## TASK-31.8 — 修复 after artifact 与 comparison retention contract
+
+**Status**: pending
+**Spec Ref**: `Benchmark CLI Contract`、`Comparison and Retention Gate`、
+`Conditional Runtime Contract`
+**ADR Ref**: `ADR-31.1` Decision 5
+
+### Goal
+
+让同一 runner 能显式生成可比较的 `after` artifact，并让 comparison 对 spec 要求的 identity、质量、
+安全、调用数、成本和错误率门禁逐项 fail closed。本 task 不执行真实 after，也不实现 runtime candidate。
+
+### Files to Modify
+
+- Modify: `scripts/bench_agent_latency.py`
+- Modify: `tests/test_bench_agent_latency.py`
+
+### Do Not Touch
+
+- `src/bank_reconciliation_agent/`
+- `reports/`、`data/`、`rules/`、frontend、数据库 schema
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 生成真实 after/comparison artifact。
+- 实现、保留或回滚并发候选。
+- 调整 20%/105%/5pp 阈值或 benchmark 输入。
+- 用新的第二套 comparison 脚本绕过现有 CLI。
+
+### Acceptance Criteria
+
+- critical-path CLI 以显式参数生成 `artifact_role=baseline|after`；TASK-31.4 的 after 命令能得到
+  `after`，不得根据输出文件名猜测，也不得永远写成 `baseline`。
+- comparison 先校验双方 Stage 31 schema、role、trust、baseline `decision=candidate_allowed`、非空且不同
+  revision、完整 canonical input hash、全部 run counts 和 Trace completeness。
+- comparability 覆盖 requested/effective provider、model、embedding backend、retrieval mode、OS、arch、
+  Python 和其他已声明关键环境字段；缺字段、类型错误或 mismatch 一律 reject，不以默认 `0`/空值通过。
+- baseline/after 包含不泄露 prompt/query/金额/规则正文的 per-run contract observation；comparison 自动
+  检查业务 decision/next action、RAG result/evidence identity、Fallback、Trace invariant 和逻辑
+  Agent/Tool call counts 等价。
+- `--focused-gates-passed` 与 `--stage-gates-passed` 不能替代 artifact contract gates；即使两个 flag 均为
+  true，缺少业务/RAG/Trace/call-count 证据仍必须 `optimization_rejected`。
+- token/cost `<=105%`、error rate `<= baseline+5pp`、无新未知错误和 actual warm P95 `>=20%` 逐项输出
+  closed result；任一缺失或失败都 `success=false`。
+- comparison JSON 包含 schema/stage/role、baseline/after revision 与 input hash、全部 gate result 和唯一
+  outcome；Markdown 只从该 JSON 生成。
+- 测试覆盖真实 CLI 可生成 after、每类 identity mismatch、缺 contract evidence、call-count 回归、
+  token/cost/error 边界以及完整 accept/reject 路径。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_bench_agent_latency.py -q
+uv run ruff check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+uv run ruff format --check scripts/bench_agent_latency.py tests/test_bench_agent_latency.py
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Baseline/After Role Contract
+- Comparability Matrix
+- Business/RAG/Trace/Call-count Retention Gates
+- Threshold Boundary Tests
+- Tests Run：逐条命令、退出码和真实结果
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-31.8`
+
+---
+
+## TASK-31.9 — 使用修复后的 contract 重新生成真实 baseline
+
+**Status**: pending
+**Spec Ref**: `Phase A — Baseline contract and decision gate`、`Fixed benchmark input`、
+`Trace sample eligibility`、`Independence gate`
+**ADR Ref**: `ADR-31.1` Decision 1–3
+
+### Goal
+
+在 `TASK-31.6`–`TASK-31.8` 通过审查后，用真实 DeepSeek、真实 bge_m3 和固定输入替换当前
+review-blocked baseline，并重新冻结唯一入口结论。本 task 只生成报告，不修改 Python 或 runtime。
+
+### Files to Modify
+
+- Modify: `reports/performance_cost_benchmark_stage31_baseline.json`
+- Modify: `reports/performance_cost_benchmark_stage31_baseline.md`
+
+### Do Not Touch
+
+- `src/`、`scripts/`、`tests/`、`rules/`、`data/`
+- Stage 31 after/comparison reports
+- spec、tasks、ADR、verification 和项目级文档
+
+### Out of Scope
+
+- 手工修正 artifact、复用旧 samples 或降低门禁。
+- 修改本地/生产数据库 schema 迁就 runner；环境不满足时诚实输出 `environment_gap`。
+- 实现候选或直接进入 Stage verification。
+
+### Acceptance Criteria
+
+- 完整运行 spec 固定命令，使用 corrected baseline role、1 cold、1 warm-up、20 measured；旧 JSON/Markdown
+  被同次新产物替换，不手工改指标。
+- requested/effective runtime identity、canonical input hash、完整 Trace、full-flow usage/cost/call counts、
+  reliability 和 independence findings 满足修复后的 schema，可从 JSON 复核。
+- JSON/Markdown hash、Git revision、环境和命令退出码记录在 Report Back；不记录凭据。
+- `candidate_allowed` 仅在全部门禁成立时允许 TASK-31.3；`no_go|environment_gap` 明确禁止
+  TASK-31.3–31.4。不得沿用旧 `0.585%`，除非新测量独立得到相同值。
+- 无 prompt/model output、RAG query、金额、规则正文、Tool args/result、traceback、key、DSN 或本地模型
+  文件进入提交。
+
+### Verification Commands
+
+```bash
+uv run python -m scripts.bench_agent_latency \
+  --scenario stage31-critical-path \
+  --provider deepseek \
+  --embedding-backend bge_m3 \
+  --cold-runs 1 \
+  --warmup-runs 1 \
+  --runs 20 \
+  --report reports/performance_cost_benchmark_stage31_baseline.md \
+  --json-report reports/performance_cost_benchmark_stage31_baseline.json
+
+jq '{stage, artifact_role, git_revision, input_sha256, provider, rag, run_plan, trust, trace, theory, independence, usage, cost, reliability, decision, closed_reasons}' \
+  reports/performance_cost_benchmark_stage31_baseline.json
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Exact Commands and Exit Codes
+- Runtime Environment and Artifact Identity
+- Trace/Usage/Cost/Independence Summary
+- Gate Decision and Closed Reasons
+- Sensitive-data Check
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：Conventional Commit，body 包含 `Refs: TASK-31.9`
+
+---
+
+## TASK-31.10 — 对最终修复树重跑 Stage/PR 门禁并重写 verification
+
+**Status**: pending
+**Spec Ref**: `Phase C — Stage verification`、全部 `Acceptance Criteria`
+**ADR Ref**: `ADR-31.1`
+
+### Goal
+
+在修复后的 baseline 被 Codex 接受，并按新 gate 执行或跳过 conditional tasks 后，对最终树重跑全部
+门禁并替换旧 review-blocked `verification.md`。本 task 不修复实现或改变 benchmark verdict。
+
+### Files to Modify
+
+- Modify: `docs/stages/stage-31-trace-guided-performance/verification.md`
+
+### Do Not Touch
+
+- `src/`、`scripts/`、`tests/`、`reports/`、`data/`、`rules/`、frontend
+- spec、tasks、ADR、README、架构/PRD 和其他项目级文档
+
+### Out of Scope
+
+- 修复失败门禁、修改报告或重跑不同输入追逐指标。
+- push、PR、merge、ADR closeout 或修改 task 状态。
+
+### Acceptance Criteria
+
+- 旧 verification 全面替换；记录 `Verified Revision`（明确是 verification 文档 commit 前的最终树）、日期、
+  环境和唯一 outcome，不把该 revision 错写成文档 commit 后的 HEAD。
+- 记录 TASK-31.1–31.10 的执行/repair/skipped 状态及 gate 原因；conditional tasks 只按 accepted
+  TASK-31.9 决策处理。
+- artifact path/hash、revision、input hash、runtime identity、trust、Trace、usage/cost、independence 和关键
+  gate 值直接来自最终 JSON。
+- focused、全量 pytest、Ruff check/format、diff/scope/status/hygiene 均重新运行并记录命令、退出码和结果。
+- repo-wide inherited format failure如仍存在，记录真实 exit 1，并以 Stage 31 changed-path check 证明无新增；
+  不得称为“All gates passed”。
+- `git diff --stat main...HEAD` 包含最终 verification 在内的真实文件数/行数；`git status --short` 在提交前
+  只允许本 verification 修改，提交后 Report Back 必须 clean。
+- 任一 required gate 或证据 contract 失败时保持 review-blocked，不标记 Stage 完成。
+
+### Verification Commands
+
+```bash
+uv run pytest tests/test_bench_agent_latency.py \
+  tests/test_workflow.py \
+  tests/test_workflow_fallback.py \
+  tests/test_trace_workflow.py \
+  tests/test_trace_recorder.py \
+  tests/test_trace_schema.py -q
+
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+git diff --check main...HEAD
+git diff --stat main...HEAD
+git status --short
+```
+
+### Report Back Requirements
+
+- Changed Files
+- Final Stage Outcome
+- Verified Revision and Verification Commit
+- Full Gate Results：逐条命令、退出码和 passed/failed
+- Conditional Task Summary
+- Final Artifact Identity and Metrics Summary
+- Scope/Secret/Large-file Check
+- Deviations From Spec
+- Risks/Follow-up
+- Commit：`docs: re-verify stage 31 after review repairs`，body 包含 `Refs: TASK-31.10`

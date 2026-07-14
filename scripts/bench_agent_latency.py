@@ -64,6 +64,69 @@ def _latency_stats(samples: list[float]) -> dict[str, Any]:
     }
 
 
+def _stage31_retrieval_mode(settings: Any) -> str:
+    if settings.enable_rag_hybrid and settings.enable_rag_reranker:
+        return "hybrid_rerank"
+    if settings.enable_rag_hybrid:
+        return "hybrid"
+    return "dense"
+
+
+def _stage31_canonical_input() -> dict[str, Any]:
+    return {
+        "version": "stage31-be-r004-v1",
+        "scenario_type": "BANK_ENTERPRISE",
+        "exception_branch": "BE-R004",
+        "error_type": "NARRATIVE_NAME_MISMATCH",
+        "source_a_item": {
+            "summary": "冲正退款备注待核验",
+            "remark": "原流水疑似冲正，需要抽取原始流水号",
+            "amount": "100.00",
+        },
+        "source_b_item": {
+            "summary": "REVERSAL",
+            "remark": "remark",
+        },
+        "math_result": {
+            "bank_amount": "100.00",
+            "clear_amount": "100.00",
+            "amount_diff": "0.00",
+        },
+    }
+
+
+def _stage31_provider_identity(provider: Any) -> tuple[str, str | None]:
+    provider_type = type(provider)
+    if (
+        provider_type.__module__ == "bank_reconciliation_agent.core.llm.provider"
+        and provider_type.__name__ == "DeepSeekProvider"
+    ):
+        return "deepseek", getattr(provider, "model", None)
+    if (
+        provider_type.__module__ == "bank_reconciliation_agent.core.llm.provider"
+        and provider_type.__name__ == "FakeLLMProvider"
+    ):
+        return "fake", "fake-llm"
+    return "stub", getattr(provider, "model", None)
+
+
+def _stage31_bench_authorized(
+    context: Any,
+    *,
+    expected_task_id: str | None,
+    expected_flow_id: str | None,
+) -> bool:
+    return bool(
+        expected_task_id
+        and expected_flow_id
+        and getattr(context, "user_id", None) == "bench_user"
+        and getattr(context, "task_id", None) == expected_task_id
+        and getattr(context, "flow_id", None) == expected_flow_id
+        and getattr(context, "scenario_type", None) == "BANK_ENTERPRISE"
+        and getattr(context, "exception_branch", None) == "BE-R004"
+    )
+
+
 def get_git_revision() -> str:
     try:
         return (
@@ -258,7 +321,7 @@ def run_stage31_critical_path(
     from bank_reconciliation_agent.core.config import settings
     from bank_reconciliation_agent.core.llm.cost import compute_cost
     from bank_reconciliation_agent.services.workflow import run_item
-    from bank_reconciliation_agent.services.trace import TraceRecorder
+    from bank_reconciliation_agent.services.trace import TraceRecorder, validate_trace_snapshot
     from bank_reconciliation_agent.core.llm.provider import (
         DeepSeekProvider,
         FakeLLMProvider,
@@ -295,14 +358,13 @@ def run_stage31_critical_path(
                 base_url=settings.deepseek_base_url,
                 timeout=settings.llm_timeout_seconds,
             )
-            effective_provider = "deepseek"
-            effective_model = llm_provider.model
     elif provider_name == "fake":
         llm_provider = FakeLLMProvider()
-        effective_provider = "fake"
-        effective_model = "fake-llm"
     else:
         raise ValueError(f"Unsupported provider: {provider_name}. Use 'fake' or 'deepseek'.")
+
+    if not env_gap:
+        effective_provider, effective_model = _stage31_provider_identity(llm_provider)
 
     if not env_gap:
         extraction_agent = ExtractionAgent(provider=llm_provider)
@@ -314,6 +376,8 @@ def run_stage31_critical_path(
     requested_backend = embedding_backend
     effective_backend = getattr(rule_retriever.store, "embedding_backend", "unknown")
 
+    effective_retrieval_mode = _stage31_retrieval_mode(settings)
+
     if requested_backend != effective_backend and not env_gap and effective_provider != "fake":
         env_gap = {
             "reason": "embedding_backend_mismatch",
@@ -323,8 +387,6 @@ def run_stage31_critical_path(
                 f"to a different backend."
             ),
         }
-        effective_provider = None
-        effective_model = None
 
     # -- Validate provider identity ----------------------------------------
 
@@ -343,14 +405,14 @@ def run_stage31_critical_path(
 
     # -- Bench authorizer --------------------------------------------------
 
+    authorized_context: dict[str, str | None] = {"task_id": None, "flow_id": None}
+
     def _bench_authorizer(ctx):
-        try:
-            uid = getattr(ctx, "user_id", "")
-            st = getattr(ctx, "scenario_type", "")
-            eb = getattr(ctx, "exception_branch", "")
-            return uid == "bench_user" and st == "BANK_ENTERPRISE" and eb == "BE-R004"
-        except Exception:
-            return False
+        return _stage31_bench_authorized(
+            ctx,
+            expected_task_id=authorized_context["task_id"],
+            expected_flow_id=authorized_context["flow_id"],
+        )
 
     bench_tool_executor = ToolExecutor(
         build_default_registry(),
@@ -359,18 +421,7 @@ def run_stage31_critical_path(
 
     # -- Canonical input hash ----------------------------------------------
 
-    canonical_input = {
-        "scenario_type": "BANK_ENTERPRISE",
-        "exception_branch": "BE-R004",
-        "error_type": "NARRATIVE_NAME_MISMATCH",
-        "source_a_summary": "冲正退款备注待核验",
-        "source_a_remark": "原流水疑似冲正，需要抽取原始流水号",
-        "source_a_amount": "100.00",
-        "source_b_summary": "REVERSAL",
-        "bank_amount": "100.00",
-        "clear_amount": "100.00",
-        "amount_diff": "0.00",
-    }
+    canonical_input = _stage31_canonical_input()
     input_sha256 = hashlib.sha256(json.dumps(canonical_input, sort_keys=True).encode()).hexdigest()
 
     # -- Run plan gate -----------------------------------------------------
@@ -402,6 +453,7 @@ def run_stage31_critical_path(
     failure_count = 0
 
     trace_completeness = []
+    contract_observations = []
     error_distribution: dict[str, int] = {}
 
     if not env_gap:
@@ -412,37 +464,32 @@ def run_stage31_critical_path(
             is_cold = i < cold_runs
             is_measured = i >= cold_runs + warmup_runs
             flow_id = f"FLOW-BENCH-{base_time}-{i:03d}"
+            task_id = f"task-{base_time}-{i:03d}"
+            authorized_context.update(task_id=task_id, flow_id=flow_id)
 
             recorder = TraceRecorder(
                 user_id="bench_user",
-                task_id=f"task-{base_time}-{i:03d}",
+                task_id=task_id,
                 flow_id=flow_id,
             )
 
             state = {
-                "task_id": f"task-{base_time}-{i:03d}",
+                "task_id": task_id,
                 "user_id": "bench_user",
                 "thread_id": "thread-bench",
                 "scenario_type": "BANK_ENTERPRISE",
                 "current_queue_id": 12345,
                 "source_a_item": {
                     "flow_id": flow_id,
-                    "summary": "冲正退款备注待核验",
-                    "remark": "原流水疑似冲正，需要抽取原始流水号",
-                    "amount": "100.00",
+                    **canonical_input["source_a_item"],
                 },
                 "source_b_item": {
                     "flow_id": flow_id,
-                    "summary": "REVERSAL",
-                    "remark": "remark",
+                    **canonical_input["source_b_item"],
                 },
-                "error_type": "NARRATIVE_NAME_MISMATCH",
-                "exception_branch": "BE-R004",
-                "math_result": {
-                    "bank_amount": "100.00",
-                    "clear_amount": "100.00",
-                    "amount_diff": "0.00",
-                },
+                "error_type": canonical_input["error_type"],
+                "exception_branch": canonical_input["exception_branch"],
+                "math_result": dict(canonical_input["math_result"]),
                 "extraction_result": {},
                 "rag_context": [],
                 "audit_decision": {},
@@ -456,24 +503,20 @@ def run_stage31_critical_path(
             }
 
             started = time.perf_counter()
-            try:
-                final_state = run_item(
-                    state,
-                    extraction_agent=extraction_agent,
-                    audit_agent=audit_agent,
-                    trace_agent=trace_agent,
-                    tool_executor=bench_tool_executor,
-                )
-                root_status = "SUCCEEDED"
-            except Exception:
-                root_status = "FAILED"
-                final_state = state
+            final_state = run_item(
+                state,
+                extraction_agent=extraction_agent,
+                audit_agent=audit_agent,
+                trace_agent=trace_agent,
+                tool_executor=bench_tool_executor,
+            )
 
             recorder.close_root(
-                status=root_status,
+                status="SUCCEEDED",
                 outcome=final_state.get("next_action") or "PENDING_HUMAN",
             )
             spans = recorder.snapshot()
+            validate_trace_snapshot(spans)
             e2e_ms = (time.perf_counter() - started) * 1000
 
             root_spans = [s for s in spans if s.span_type == "WORKFLOW" and not s.parent_span_id]
@@ -503,21 +546,19 @@ def run_stage31_critical_path(
                 ext = ext_spans[0]
                 rag = rag_spans[0]
 
-                seqs = {s.sequence_no for s in spans}
-                if len(seqs) != len(spans):
-                    trace_failure_reason = "duplicate_sequence"
-                elif max(seqs) - min(seqs) + 1 != len(seqs):
-                    trace_failure_reason = "broken_sequence"
-                elif terminal.parent_span_id != root.span_id:
-                    trace_failure_reason = "bad_terminal_parent"
-                elif ext.parent_span_id not in (root.span_id, terminal.span_id):
-                    trace_failure_reason = "bad_extraction_parent"
-                elif root.trace_id != ext.trace_id or root.trace_id != rag.trace_id:
+                expected_identity = (root.trace_id, "bench_user", task_id, flow_id)
+                if any(
+                    (s.trace_id, s.user_id, s.task_id, s.flow_id) != expected_identity
+                    for s in spans
+                ):
                     trace_failure_reason = "identity_mismatch"
-                elif root.user_id != "bench_user":
-                    trace_failure_reason = "wrong_user"
-                elif root.duration_ms < 0:
-                    trace_failure_reason = "negative_duration"
+                elif any(
+                    s.duration_ms < 0 or s.ended_at < s.started_at
+                    for s in (root, terminal, ext, rag)
+                ):
+                    trace_failure_reason = "invalid_time_or_duration"
+                elif any(s.parent_span_id != root.span_id for s in (terminal, ext, rag)):
+                    trace_failure_reason = "invalid_required_parent"
                 elif (
                     root.status != "SUCCEEDED"
                     or terminal.status != "SUCCEEDED"
@@ -525,19 +566,27 @@ def run_stage31_critical_path(
                     or rag.status != "SUCCEEDED"
                 ):
                     trace_failure_reason = "non_succeeded_status"
+                elif any(
+                    s.status != "SUCCEEDED" for s in spans if s.span_type in ("AGENT", "TOOL")
+                ):
+                    trace_failure_reason = "flow_call_failed"
                 elif effective_provider == "fake":
                     trace_failure_reason = "fake_provider"
                 else:
                     is_complete = True
 
             if is_complete:
-                ext_tok_prompt = ext_spans[0].prompt_tokens or 0
-                if effective_provider != "fake" and ext_tok_prompt == 0:
+                agent_spans = [s for s in spans if s.span_type == "AGENT"]
+                if effective_provider != "fake" and any(
+                    s.model_name != effective_model
+                    or s.prompt_tokens is None
+                    or s.prompt_tokens <= 0
+                    or s.completion_tokens is None
+                    or s.completion_tokens < 0
+                    or s.attempt < 1
+                    for s in agent_spans
+                ):
                     token_usage_unavailable = True
-            else:
-                error_distribution[trace_failure_reason] = (
-                    error_distribution.get(trace_failure_reason, 0) + 1
-                )
 
             ext_dur = ext_spans[0].duration_ms if ext_spans else 0
             rag_dur = rag_spans[0].duration_ms if rag_spans else 0
@@ -560,14 +609,9 @@ def run_stage31_critical_path(
                     total_transport_attempts += sum((s.attempt or 0) for s in agent_spans)
                 else:
                     failure_count += 1
-                    err_key = "incomplete_trace"
-                    if len(root_spans) != 1:
-                        err_key = "missing_or_duplicate_root"
-                    elif len(ext_spans) != 1:
-                        err_key = "missing_or_duplicate_extraction"
-                    elif len(rag_spans) != 1:
-                        err_key = "missing_or_duplicate_rag"
-                    error_distribution[err_key] = error_distribution.get(err_key, 0) + 1
+                    error_distribution[trace_failure_reason] = (
+                        error_distribution.get(trace_failure_reason, 0) + 1
+                    )
 
                 trace_completeness.append(
                     {
@@ -580,6 +624,42 @@ def run_stage31_critical_path(
                         "rag_spans": len(rag_spans),
                         "agent_count": len([s for s in spans if s.span_type == "AGENT"]),
                         "tool_count": len([s for s in spans if s.span_type == "TOOL"]),
+                    }
+                )
+
+                audit_decision = final_state.get("audit_decision")
+                business_decision = (
+                    audit_decision.get("decision") if isinstance(audit_decision, dict) else None
+                )
+                contract_observations.append(
+                    {
+                        "trace_id": root_spans[0].trace_id if root_spans else "unknown",
+                        "business_decision": business_decision,
+                        "next_action": final_state.get("next_action") or None,
+                        "rag": {
+                            "outcome": rag_spans[0].outcome if len(rag_spans) == 1 else None,
+                            "result_count": (
+                                rag_spans[0].result_count if len(rag_spans) == 1 else None
+                            ),
+                            "evidence_ids": (
+                                sorted(rag_spans[0].evidence_ids) if len(rag_spans) == 1 else []
+                            ),
+                        },
+                        "fallback": {
+                            "level": final_state.get("fallback_level"),
+                            "path": final_state.get("fallback_path"),
+                            "terminal_type": (
+                                str(terminal_spans[0].span_type)
+                                if len(terminal_spans) == 1
+                                else None
+                            ),
+                            "terminal_outcome": (
+                                terminal_spans[0].outcome if len(terminal_spans) == 1 else None
+                            ),
+                        },
+                        "trace_invariants_valid": is_complete,
+                        "agent_calls": [s.name for s in spans if s.span_type == "AGENT"],
+                        "tool_calls": [s.name for s in spans if s.span_type == "TOOL"],
                     }
                 )
 
@@ -609,6 +689,9 @@ def run_stage31_critical_path(
         trusted = False
     elif effective_provider == "fake":
         trusted = False
+    elif complete_count != runs:
+        trusted = False
+        trust_reasons.append("incomplete_trace_samples")
     elif total_agent_calls < 2 * success_count:
         trusted = False
         trust_reasons.append("incomplete_agent_accounting")
@@ -634,7 +717,7 @@ def run_stage31_critical_path(
             "source": "static_code_analysis",
         },
         "shared_state": {
-            "finding": "safe",
+            "finding": "unknown",
             "detail": (
                 "In serial runtime there is no concurrent access. For a parallel "
                 "candidate, this assessment is conditional on workers receiving "
@@ -645,29 +728,29 @@ def run_stage31_critical_path(
             "source": "static_analysis_unverified",
         },
         "failure_order": {
-            "finding": "bounded",
+            "finding": "unsafe",
             "detail": (
                 "In serial runtime, Extraction failure causes early return before RAG. "
                 "In a parallel candidate, the failure of one side while the other is "
-                "in-flight requires explicit fail-closed handling. This has NOT been "
-                "verified in running code; the analysis assumes both sides are guarded."
+                "in-flight changes the current side-effect order. No candidate exists "
+                "to prove fail-closed handling."
             ),
             "source": "static_analysis_unverified",
         },
         "cancellation": {
-            "finding": "bounded",
+            "finding": "unbounded",
             "detail": (
                 "Synchronous provider/retriever calls may not support hard interrupt. "
-                "A thread pool must use bounded timeouts and guarantee no background "
-                "state mutation after timeout. This has NOT been verified in running code."
+                "No candidate demonstrates bounded cancellation or proves that work has "
+                "stopped before run_item returns."
             ),
             "source": "static_analysis_unverified",
         },
         "resource_reclamation": {
-            "finding": "safe",
+            "finding": "unknown",
             "detail": (
-                "Thread pool context manager guarantees resource release on exit. "
-                "This assessment is conditional on proper implementation."
+                "No candidate thread lifecycle exists, so resource reclamation and the "
+                "absence of cross-flow background work are not yet proven."
             ),
             "source": "static_analysis_unverified",
         },
@@ -685,10 +768,10 @@ def run_stage31_critical_path(
     if env_gap:
         decision = "environment_gap"
         closed_reasons.append(env_gap.get("reason", "environment_gap"))
-    elif any_unsafe:
-        decision = "no_go"
-        closed_reasons.append("independence_gate_failed")
     else:
+        if any_unsafe:
+            decision = "no_go"
+            closed_reasons.append("independence_gate_failed")
         if not trusted:
             decision = "no_go"
             closed_reasons.append("not_trusted")
@@ -711,7 +794,7 @@ def run_stage31_critical_path(
 
     # -- Report ------------------------------------------------------------
 
-    return {
+    report = {
         "schema_version": "1.0",
         "stage": "stage-31-trace-guided-performance",
         "artifact_role": artifact_role,
@@ -734,12 +817,8 @@ def run_stage31_critical_path(
         },
         "rag": {
             "requested_embedding_backend": requested_backend,
-            "effective_embedding_backend": (
-                effective_backend
-                if not env_gap or env_gap.get("reason") != "embedding_backend_mismatch"
-                else None
-            ),
-            "retrieval_mode": "dense",
+            "effective_embedding_backend": effective_backend,
+            "retrieval_mode": effective_retrieval_mode,
         },
         "run_plan": {
             "cold_runs": cold_runs,
@@ -758,6 +837,7 @@ def run_stage31_critical_path(
             "completeness_rate": round(complete_count / runs, 3) if runs else 0,
             "samples": trace_completeness,
         },
+        "contract_observations": contract_observations,
         "latency": {
             "cold_observations": cold_observations,
             "end_to_end": _latency_stats(warm_e2e),
@@ -815,178 +895,552 @@ def run_stage31_critical_path(
         "decision": decision,
         "closed_reasons": closed_reasons,
     }
+    validation_reasons = _stage31_artifact_validation_reasons(
+        report,
+        expected_role=artifact_role,
+    )
+    if validation_reasons:
+        raise ValueError(f"invalid Stage 31 report: {','.join(validation_reasons)}")
+    return report
+
+
+def _stage31_artifact_validation_reasons(
+    data: Any,
+    *,
+    expected_role: str,
+) -> list[str]:
+    prefix = expected_role
+    if not isinstance(data, dict):
+        return [f"{prefix}_artifact_not_object"]
+
+    reasons: list[str] = []
+    if data.get("schema_version") != "1.0":
+        reasons.append(f"{prefix}_schema_version_invalid")
+    if data.get("stage") != "stage-31-trace-guided-performance":
+        reasons.append(f"{prefix}_stage_invalid")
+    if data.get("artifact_role") != expected_role:
+        reasons.append(f"{prefix}_role_invalid")
+    if data.get("decision") not in {"candidate_allowed", "no_go", "environment_gap"}:
+        reasons.append(f"{prefix}_decision_invalid")
+
+    for key in (
+        "environment",
+        "provider",
+        "rag",
+        "run_plan",
+        "trust",
+        "trace",
+        "latency",
+        "theory",
+        "independence",
+        "usage",
+        "cost",
+        "reliability",
+    ):
+        if not isinstance(data.get(key), dict):
+            reasons.append(f"{prefix}_{key}_invalid")
+
+    if (
+        not isinstance(data.get("git_revision"), str)
+        or not data.get("git_revision")
+        or data.get("git_revision") == "unknown"
+    ):
+        reasons.append(f"{prefix}_revision_invalid")
+    input_sha256 = data.get("input_sha256")
+    if not isinstance(input_sha256, str) or len(input_sha256) != 64:
+        reasons.append(f"{prefix}_input_sha256_invalid")
+    if not isinstance(data.get("closed_reasons"), list) or not all(
+        isinstance(reason, str) for reason in data.get("closed_reasons", [])
+    ):
+        reasons.append(f"{prefix}_closed_reasons_invalid")
+
+    plan = data.get("run_plan")
+    trace = data.get("trace")
+    reliability = data.get("reliability")
+    if isinstance(plan, dict):
+        run_values = [
+            plan.get("cold_runs"),
+            plan.get("warmup_runs"),
+            plan.get("measured_runs"),
+            plan.get("complete_measured_count"),
+        ]
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in run_values
+        ):
+            reasons.append(f"{prefix}_run_plan_values_invalid")
+        elif isinstance(trace, dict):
+            if trace.get("completeness_numerator") != plan["complete_measured_count"]:
+                reasons.append(f"{prefix}_trace_numerator_invalid")
+            if trace.get("completeness_denominator") != plan["measured_runs"]:
+                reasons.append(f"{prefix}_trace_denominator_invalid")
+            samples = trace.get("samples")
+            if not isinstance(samples, list) or (
+                data.get("decision") != "environment_gap" and len(samples) != plan["measured_runs"]
+            ):
+                reasons.append(f"{prefix}_trace_samples_invalid")
+        if isinstance(reliability, dict) and data.get("decision") != "environment_gap":
+            success_count = reliability.get("success_count")
+            failure_count = reliability.get("failure_count")
+            if (
+                not isinstance(success_count, int)
+                or not isinstance(failure_count, int)
+                or success_count + failure_count != plan.get("measured_runs")
+            ):
+                reasons.append(f"{prefix}_reliability_counts_invalid")
+
+    trust = data.get("trust")
+    if isinstance(trust, dict):
+        if not isinstance(trust.get("trusted"), bool):
+            reasons.append(f"{prefix}_trusted_flag_invalid")
+        if not isinstance(trust.get("reasons"), list):
+            reasons.append(f"{prefix}_trust_reasons_invalid")
+
+    provider = data.get("provider")
+    rag = data.get("rag")
+    environment = data.get("environment")
+    if isinstance(trust, dict) and trust.get("trusted") is True:
+        identity_values = []
+        if isinstance(provider, dict):
+            identity_values.extend(
+                provider.get(key)
+                for key in (
+                    "requested_provider",
+                    "effective_provider",
+                    "requested_model",
+                    "effective_model",
+                )
+            )
+        if isinstance(rag, dict):
+            identity_values.extend(
+                rag.get(key)
+                for key in (
+                    "requested_embedding_backend",
+                    "effective_embedding_backend",
+                    "retrieval_mode",
+                )
+            )
+        if isinstance(environment, dict):
+            identity_values.extend(
+                environment.get(key) for key in ("os", "architecture", "python", "boundary")
+            )
+        if not identity_values or any(
+            not isinstance(value, str) or not value for value in identity_values
+        ):
+            reasons.append(f"{prefix}_runtime_identity_invalid")
+
+    independence = data.get("independence")
+    required_independence = {
+        "data_dependency",
+        "shared_state",
+        "failure_order",
+        "cancellation",
+        "resource_reclamation",
+    }
+    if isinstance(independence, dict):
+        if set(independence) != required_independence:
+            reasons.append(f"{prefix}_independence_keys_invalid")
+        for finding in independence.values():
+            if (
+                not isinstance(finding, dict)
+                or finding.get("finding")
+                not in {"safe", "bounded", "unknown", "unsafe", "unbounded"}
+                or not isinstance(finding.get("detail"), str)
+                or not isinstance(finding.get("source"), str)
+            ):
+                reasons.append(f"{prefix}_independence_finding_invalid")
+                break
+
+    observations = data.get("contract_observations")
+    measured_runs = plan.get("measured_runs") if isinstance(plan, dict) else None
+    if not isinstance(observations, list) or (
+        data.get("decision") != "environment_gap"
+        and isinstance(measured_runs, int)
+        and len(observations) != measured_runs
+    ):
+        reasons.append(f"{prefix}_contract_observations_invalid")
+    elif isinstance(observations, list):
+        for observation in observations:
+            rag_observation = observation.get("rag") if isinstance(observation, dict) else None
+            fallback_observation = (
+                observation.get("fallback") if isinstance(observation, dict) else None
+            )
+            if (
+                not isinstance(observation, dict)
+                or not isinstance(observation.get("trace_id"), str)
+                or not isinstance(rag_observation, dict)
+                or rag_observation.get("outcome") not in {"RESULT", "EMPTY", None}
+                or not (
+                    isinstance(rag_observation.get("result_count"), int)
+                    or rag_observation.get("result_count") is None
+                )
+                or not isinstance(rag_observation.get("evidence_ids"), list)
+                or not all(
+                    isinstance(evidence_id, str)
+                    for evidence_id in rag_observation.get("evidence_ids", [])
+                )
+                or not isinstance(fallback_observation, dict)
+                or fallback_observation.get("terminal_type") not in {"FINAL", "FALLBACK"}
+                or fallback_observation.get("terminal_outcome")
+                not in {"AUTO_FIXED", "PENDING_HUMAN", "UNRESOLVED"}
+                or not isinstance(observation.get("trace_invariants_valid"), bool)
+                or not isinstance(observation.get("agent_calls"), list)
+                or not isinstance(observation.get("tool_calls"), list)
+                or not all(isinstance(name, str) for name in observation.get("agent_calls", []))
+                or not all(isinstance(name, str) for name in observation.get("tool_calls", []))
+            ):
+                reasons.append(f"{prefix}_contract_observation_shape_invalid")
+                break
+            if (
+                isinstance(trust, dict)
+                and trust.get("trusted") is True
+                and (
+                    not isinstance(observation.get("business_decision"), str)
+                    or not isinstance(observation.get("next_action"), str)
+                    or rag_observation.get("outcome") not in {"RESULT", "EMPTY"}
+                    or not isinstance(rag_observation.get("result_count"), int)
+                    or observation.get("trace_invariants_valid") is not True
+                )
+            ):
+                reasons.append(f"{prefix}_contract_observation_incomplete")
+                break
+
+    usage = data.get("usage")
+    cost = data.get("cost")
+    if isinstance(trust, dict) and trust.get("trusted") is True:
+        if isinstance(usage, dict) and any(
+            not isinstance(usage.get(key), int) or isinstance(usage.get(key), bool)
+            for key in (
+                "logical_agent_calls",
+                "logical_tool_calls",
+                "provider_transport_attempts",
+                "input_tokens",
+                "output_tokens",
+                "total_tokens",
+                "per_successful_run_tokens",
+            )
+        ):
+            reasons.append(f"{prefix}_usage_values_invalid")
+        if isinstance(cost, dict):
+            try:
+                Decimal(cost["total_estimated_usd"])
+                Decimal(cost["per_successful_run_estimated_usd"])
+            except (KeyError, TypeError, ValueError):
+                reasons.append(f"{prefix}_cost_values_invalid")
+
+        latency = data.get("latency")
+        end_to_end = latency.get("end_to_end") if isinstance(latency, dict) else None
+        if not isinstance(end_to_end, dict) or not isinstance(
+            end_to_end.get("p95_latency_ms"), (int, float)
+        ):
+            reasons.append(f"{prefix}_latency_values_invalid")
+        if not isinstance(trace, dict) or trace.get("completeness_rate") != 1.0:
+            reasons.append(f"{prefix}_trace_completeness_invalid")
+        if not isinstance(reliability, dict) or (
+            not isinstance(reliability.get("error_rate"), (int, float))
+            or not isinstance(reliability.get("error_distribution"), dict)
+        ):
+            reasons.append(f"{prefix}_reliability_values_invalid")
+
+    if data.get("decision") == "candidate_allowed":
+        unsafe = isinstance(independence, dict) and any(
+            finding.get("finding") in {"unknown", "unsafe", "unbounded"}
+            for finding in independence.values()
+            if isinstance(finding, dict)
+        )
+        theory_pct = (
+            data.get("theory", {}).get("theoretical_p95_improvement_pct")
+            if isinstance(data.get("theory"), dict)
+            else None
+        )
+        if (
+            not isinstance(trust, dict)
+            or trust.get("trusted") is not True
+            or unsafe
+            or not isinstance(theory_pct, (int, float))
+            or theory_pct < 20.0
+        ):
+            reasons.append(f"{prefix}_candidate_gate_inconsistent")
+
+    return reasons
+
+
+def _stage31_normalize_observations(observations: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(observations, list):
+        return None
+    normalized = []
+    for observation in observations:
+        if not isinstance(observation, dict):
+            return None
+        normalized.append({key: value for key, value in observation.items() if key != "trace_id"})
+    return normalized
 
 
 def run_stage31_comparison(
-    baseline_path: Path,
-    after_path: Path,
+    baseline_path: Path | None,
+    after_path: Path | None,
     focused_gates_passed: bool,
     stage_gates_passed: bool,
 ) -> dict[str, Any]:
+    if baseline_path is None or after_path is None:
+        raise ValueError("stage31-comparison requires --baseline-json and --after-json")
     with open(baseline_path, "r", encoding="utf-8") as f:
         baseline = json.load(f)
     with open(after_path, "r", encoding="utf-8") as f:
         after = json.load(f)
 
-    reasons: list[str] = []
+    reasons = _stage31_artifact_validation_reasons(
+        baseline, expected_role="baseline"
+    ) + _stage31_artifact_validation_reasons(after, expected_role="after")
 
-    # Schema validation
-    for role, data in [("baseline", baseline), ("after", after)]:
-        if data.get("schema_version") != "1.0":
-            reasons.append(f"{role}_schema_version_invalid")
-        if data.get("stage") != "stage-31-trace-guided-performance":
-            reasons.append(f"{role}_stage_invalid")
+    b_plan = baseline.get("run_plan", {}) if isinstance(baseline, dict) else {}
+    a_plan = after.get("run_plan", {}) if isinstance(after, dict) else {}
+    b_trace = baseline.get("trace", {}) if isinstance(baseline, dict) else {}
+    a_trace = after.get("trace", {}) if isinstance(after, dict) else {}
+    b_prov = baseline.get("provider", {}) if isinstance(baseline, dict) else {}
+    a_prov = after.get("provider", {}) if isinstance(after, dict) else {}
+    b_rag = baseline.get("rag", {}) if isinstance(baseline, dict) else {}
+    a_rag = after.get("rag", {}) if isinstance(after, dict) else {}
+    b_env = baseline.get("environment", {}) if isinstance(baseline, dict) else {}
+    a_env = after.get("environment", {}) if isinstance(after, dict) else {}
+    b_usage = baseline.get("usage", {}) if isinstance(baseline, dict) else {}
+    a_usage = after.get("usage", {}) if isinstance(after, dict) else {}
+    b_rel = baseline.get("reliability", {}) if isinstance(baseline, dict) else {}
+    a_rel = after.get("reliability", {}) if isinstance(after, dict) else {}
 
-    # Artifact role validation
-    if baseline.get("artifact_role") != "baseline":
-        reasons.append("baseline_role_invalid")
-    if after.get("artifact_role") != "after":
-        reasons.append("after_role_invalid")
-
-    # Baseline must have candidate_allowed
-    if baseline.get("decision") != "candidate_allowed":
+    baseline_allowed = baseline.get("decision") == "candidate_allowed"
+    if not baseline_allowed:
         reasons.append(f"baseline_decision_not_allowed_{baseline.get('decision')}")
 
-    # Trust validation
-    if not baseline.get("trust", {}).get("trusted"):
+    artifacts_trusted = bool(
+        baseline.get("trust", {}).get("trusted") is True
+        and after.get("trust", {}).get("trusted") is True
+    )
+    if baseline.get("trust", {}).get("trusted") is not True:
         reasons.append("baseline_not_trusted")
-    if not after.get("trust", {}).get("trusted"):
+    if after.get("trust", {}).get("trusted") is not True:
         reasons.append("after_not_trusted")
 
-    # Input identity match
-    if baseline.get("input_sha256") != after.get("input_sha256"):
+    input_match = bool(
+        baseline.get("input_sha256") and baseline.get("input_sha256") == after.get("input_sha256")
+    )
+    if not input_match:
         reasons.append("input_mismatch")
 
-    # Provider/model/backend match
-    b_prov = baseline.get("provider", {})
-    a_prov = after.get("provider", {})
+    runtime_identity_match = bool(
+        b_prov.get("requested_provider") == a_prov.get("requested_provider")
+        and b_prov.get("effective_provider") == a_prov.get("effective_provider")
+        and b_prov.get("requested_model") == a_prov.get("requested_model")
+        and b_prov.get("effective_model") == a_prov.get("effective_model")
+        and b_rag.get("requested_embedding_backend") == a_rag.get("requested_embedding_backend")
+        and b_rag.get("effective_embedding_backend") == a_rag.get("effective_embedding_backend")
+        and b_rag.get("retrieval_mode") == a_rag.get("retrieval_mode")
+    )
+    if not runtime_identity_match:
+        reasons.append("runtime_identity_mismatch")
     if b_prov.get("requested_provider") != a_prov.get("requested_provider"):
         reasons.append("provider_mismatch")
     if b_prov.get("effective_provider") != a_prov.get("effective_provider"):
         reasons.append("effective_provider_mismatch")
     if b_prov.get("requested_model") != a_prov.get("requested_model"):
         reasons.append("model_mismatch")
+    if b_prov.get("effective_model") != a_prov.get("effective_model"):
+        reasons.append("effective_model_mismatch")
 
-    b_rag = baseline.get("rag", {})
-    a_rag = after.get("rag", {})
-    if b_rag.get("requested_embedding_backend") != a_rag.get("requested_embedding_backend"):
-        reasons.append("embedding_backend_mismatch")
-    if b_rag.get("effective_embedding_backend") != a_rag.get("effective_embedding_backend"):
-        reasons.append("effective_embedding_mismatch")
-    if b_rag.get("retrieval_mode") != a_rag.get("retrieval_mode"):
-        reasons.append("retrieval_mode_mismatch")
+    environment_match = bool(
+        b_env.get("os") == a_env.get("os")
+        and b_env.get("architecture") == a_env.get("architecture")
+        and b_env.get("python") == a_env.get("python")
+        and b_env.get("boundary") == a_env.get("boundary")
+    )
+    if not environment_match:
+        reasons.append("environment_mismatch")
 
-    # Environment consistency
-    b_env = baseline.get("environment", {})
-    a_env = after.get("environment", {})
-    if b_env.get("os") != a_env.get("os"):
-        reasons.append("os_mismatch")
-    if b_env.get("architecture") != a_env.get("architecture"):
-        reasons.append("arch_mismatch")
-    if b_env.get("python") != a_env.get("python"):
-        reasons.append("python_version_mismatch")
-
-    # Run plan match
-    b_plan = baseline.get("run_plan", {})
-    a_plan = after.get("run_plan", {})
-    if b_plan.get("measured_runs") != a_plan.get("measured_runs"):
+    run_plan_match = bool(
+        b_plan.get("cold_runs") == a_plan.get("cold_runs")
+        and b_plan.get("warmup_runs") == a_plan.get("warmup_runs")
+        and b_plan.get("measured_runs") == a_plan.get("measured_runs")
+    )
+    if not run_plan_match:
         reasons.append("run_plan_mismatch")
-    if b_plan.get("cold_runs") != a_plan.get("cold_runs"):
-        reasons.append("cold_runs_mismatch")
-    if b_plan.get("warmup_runs") != a_plan.get("warmup_runs"):
-        reasons.append("warmup_runs_mismatch")
 
-    # Git revision must be different
-    if baseline.get("git_revision") == after.get("git_revision"):
-        reasons.append("same_revision")
+    revisions_valid = bool(
+        baseline.get("git_revision")
+        and after.get("git_revision")
+        and baseline.get("git_revision") != after.get("git_revision")
+    )
     if not baseline.get("git_revision") or not after.get("git_revision"):
         reasons.append("missing_revision")
+    elif baseline.get("git_revision") == after.get("git_revision"):
+        reasons.append("same_revision")
 
-    # Complete count requirements
-    b_complete = b_plan.get("complete_measured_count", 0)
-    a_complete = a_plan.get("complete_measured_count", 0)
-    if b_complete < 20:
-        reasons.append(f"baseline_insufficient_complete_{b_complete}")
-    if a_complete < 20:
-        reasons.append(f"after_insufficient_complete_{a_complete}")
+    trace_complete = bool(
+        isinstance(b_plan.get("complete_measured_count"), int)
+        and isinstance(a_plan.get("complete_measured_count"), int)
+        and b_plan.get("complete_measured_count") == b_plan.get("measured_runs")
+        and a_plan.get("complete_measured_count") == a_plan.get("measured_runs")
+        and b_plan.get("complete_measured_count", 0) >= 20
+        and a_plan.get("complete_measured_count", 0) >= 20
+        and b_trace.get("completeness_rate") == 1.0
+        and a_trace.get("completeness_rate") == 1.0
+    )
+    if not trace_complete:
+        reasons.append("trace_completeness_failed")
+        if (
+            isinstance(b_plan.get("complete_measured_count"), int)
+            and b_plan.get("complete_measured_count", 0) < 20
+        ):
+            reasons.append(
+                f"baseline_insufficient_complete_{b_plan.get('complete_measured_count')}"
+            )
+        if (
+            isinstance(a_plan.get("complete_measured_count"), int)
+            and a_plan.get("complete_measured_count", 0) < 20
+        ):
+            reasons.append(f"after_insufficient_complete_{a_plan.get('complete_measured_count')}")
 
-    # Trace completeness
-    b_trace = baseline.get("trace", {})
-    a_trace = after.get("trace", {})
-    if b_trace.get("completeness_rate", 0) != 1.0:
-        reasons.append("baseline_trace_incomplete")
-    if a_trace.get("completeness_rate", 0) != 1.0:
-        reasons.append("after_trace_incomplete")
+    b_observations = _stage31_normalize_observations(baseline.get("contract_observations"))
+    a_observations = _stage31_normalize_observations(after.get("contract_observations"))
+    behavior_equivalent = bool(
+        b_observations is not None
+        and a_observations is not None
+        and b_observations == a_observations
+    )
+    if not behavior_equivalent:
+        reasons.append("behavior_contract_mismatch")
 
-    # Focused and stage gates — cannot substitute artifact contract gates
+    b_p95 = baseline.get("latency", {}).get("end_to_end", {}).get("p95_latency_ms")
+    a_p95 = after.get("latency", {}).get("end_to_end", {}).get("p95_latency_ms")
+    actual_improvement_pct = 0.0
+    if isinstance(b_p95, (int, float)) and isinstance(a_p95, (int, float)) and b_p95 > 0:
+        actual_improvement_pct = round(((b_p95 - a_p95) / b_p95) * 100, 3)
+    latency_gate = actual_improvement_pct >= 20.0
+    if not latency_gate:
+        reasons.append(f"actual_improvement_{actual_improvement_pct}_lt_20.0")
+
+    b_agent_calls = b_usage.get("logical_agent_calls")
+    a_agent_calls = a_usage.get("logical_agent_calls")
+    b_tool_calls = b_usage.get("logical_tool_calls")
+    a_tool_calls = a_usage.get("logical_tool_calls")
+    call_count_gate = bool(
+        isinstance(b_agent_calls, int)
+        and isinstance(a_agent_calls, int)
+        and isinstance(b_tool_calls, int)
+        and isinstance(a_tool_calls, int)
+        and a_agent_calls <= b_agent_calls
+        and a_tool_calls <= b_tool_calls
+    )
+    if not call_count_gate:
+        reasons.append("agent_or_tool_call_count_increased_or_missing")
+        if (
+            isinstance(a_agent_calls, int)
+            and isinstance(b_agent_calls, int)
+            and a_agent_calls > b_agent_calls
+        ):
+            reasons.append("agent_call_count_increased")
+        if (
+            isinstance(a_tool_calls, int)
+            and isinstance(b_tool_calls, int)
+            and a_tool_calls > b_tool_calls
+        ):
+            reasons.append("tool_call_count_increased")
+
+    b_per_run_tokens = b_usage.get("per_successful_run_tokens")
+    a_per_run_tokens = a_usage.get("per_successful_run_tokens")
+    token_gate = bool(
+        isinstance(b_per_run_tokens, int)
+        and isinstance(a_per_run_tokens, int)
+        and a_per_run_tokens <= b_per_run_tokens * 1.05
+    )
+    if not token_gate:
+        reasons.append("per_run_tokens_missing_or_increased_gt_105pct")
+
+    try:
+        b_cost = Decimal(baseline.get("cost", {})["per_successful_run_estimated_usd"])
+        a_cost = Decimal(after.get("cost", {})["per_successful_run_estimated_usd"])
+        cost_gate = a_cost <= b_cost * Decimal("1.05")
+    except (KeyError, TypeError, ValueError):
+        b_cost = Decimal(0)
+        a_cost = Decimal(0)
+        cost_gate = False
+    if not cost_gate:
+        reasons.append("per_run_cost_missing_or_increased_gt_105pct")
+
+    b_err = b_rel.get("error_rate")
+    a_err = a_rel.get("error_rate")
+    error_rate_gate = bool(
+        isinstance(b_err, (int, float))
+        and isinstance(a_err, (int, float))
+        and a_err <= b_err + 0.05
+    )
+    if not error_rate_gate:
+        reasons.append("error_rate_missing_or_increased_gt_5pp")
+
+    b_err_dist = b_rel.get("error_distribution")
+    a_err_dist = a_rel.get("error_distribution")
+    no_new_error_types = bool(
+        isinstance(b_err_dist, dict)
+        and isinstance(a_err_dist, dict)
+        and not (set(a_err_dist) - set(b_err_dist))
+    )
+    if not no_new_error_types:
+        reasons.append("new_or_invalid_error_types")
+        if isinstance(b_err_dist, dict) and isinstance(a_err_dist, dict):
+            new_error_types = sorted(set(a_err_dist) - set(b_err_dist))
+            if new_error_types:
+                reasons.append(f"new_error_types_{new_error_types}")
+
+    def _independence_safe(report: dict[str, Any]) -> bool:
+        findings = report.get("independence")
+        return bool(
+            isinstance(findings, dict)
+            and findings
+            and all(
+                isinstance(finding, dict)
+                and finding.get("finding") not in {"unknown", "unsafe", "unbounded"}
+                for finding in findings.values()
+            )
+        )
+
+    independence_safe = _independence_safe(baseline) and _independence_safe(after)
+    if not independence_safe:
+        reasons.append("independence_gate_failed")
+
+    contract_gates = {
+        "artifacts_schema_valid": not any(
+            reason.startswith("baseline_") or reason.startswith("after_")
+            for reason in reasons
+            if reason.endswith("invalid")
+            or "_invalid" in reason
+            or "_inconsistent" in reason
+            or "_artifact_not_object" in reason
+        ),
+        "baseline_candidate_allowed": baseline_allowed,
+        "artifacts_trusted": artifacts_trusted,
+        "input_match": input_match,
+        "runtime_identity_match": runtime_identity_match,
+        "environment_match": environment_match,
+        "run_plan_match": run_plan_match,
+        "revisions_valid": revisions_valid,
+        "trace_complete": trace_complete,
+        "behavior_contract_equivalent": behavior_equivalent,
+        "call_counts_not_increased": call_count_gate,
+        "tokens_within_105_pct": token_gate,
+        "cost_within_105_pct": cost_gate,
+        "error_rate_within_5pp": error_rate_gate,
+        "no_new_error_types": no_new_error_types,
+        "independence_safe": independence_safe,
+        "warm_p95_improvement_at_least_20_pct": latency_gate,
+        "focused_gates_passed": focused_gates_passed,
+        "stage_gates_passed": stage_gates_passed,
+    }
     if not focused_gates_passed:
         reasons.append("focused_gates_failed")
     if not stage_gates_passed:
         reasons.append("stage_gates_failed")
 
-    # Even with gates passed, artifact evidence must exist
-    if focused_gates_passed and stage_gates_passed:
-        pass  # These flags are checked, but contract evidence below is required
-
-    # Latency comparison
-    b_p95 = baseline.get("latency", {}).get("end_to_end", {}).get("p95_latency_ms", 0)
-    a_p95 = after.get("latency", {}).get("end_to_end", {}).get("p95_latency_ms", 0)
-    actual_improvement_pct = 0.0
-    if b_p95 > 0:
-        actual_improvement_pct = round(((b_p95 - a_p95) / b_p95) * 100, 3)
-
-    if actual_improvement_pct < 20.0:
-        reasons.append(f"actual_improvement_{actual_improvement_pct}_lt_20.0")
-
-    # Usage comparison — call counts must not increase
-    b_usage = baseline.get("usage", {})
-    a_usage = after.get("usage", {})
-    b_agent_calls = b_usage.get("logical_agent_calls", 0)
-    a_agent_calls = a_usage.get("logical_agent_calls", 0)
-    if a_agent_calls > b_agent_calls:
-        reasons.append("agent_call_count_increased")
-    b_tool_calls = b_usage.get("logical_tool_calls", 0)
-    a_tool_calls = a_usage.get("logical_tool_calls", 0)
-    if a_tool_calls > b_tool_calls:
-        reasons.append("tool_call_count_increased")
-
-    # Token comparison
-    b_per_run_tokens = b_usage.get("per_successful_run_tokens") or 0
-    a_per_run_tokens = a_usage.get("per_successful_run_tokens") or 0
-    if b_per_run_tokens > 0 and a_per_run_tokens > b_per_run_tokens * 1.05:
-        reasons.append(f"per_run_tokens_{a_per_run_tokens}_gt_{b_per_run_tokens}_105pct")
-
-    # Cost comparison
-    b_cost_str = baseline.get("cost", {}).get("per_successful_run_estimated_usd")
-    a_cost_str = after.get("cost", {}).get("per_successful_run_estimated_usd")
-    b_cost = Decimal(b_cost_str) if b_cost_str else Decimal(0)
-    a_cost = Decimal(a_cost_str) if a_cost_str else Decimal(0)
-    if b_cost > 0 and a_cost > b_cost * Decimal("1.05"):
-        reasons.append(f"per_run_cost_{a_cost}_gt_{b_cost}_105pct")
-
-    # Error rate comparison
-    b_err = baseline.get("reliability", {}).get("error_rate", 0)
-    a_err = after.get("reliability", {}).get("error_rate", 0)
-    if a_err > b_err + 0.05:
-        reasons.append(f"error_rate_{a_err}_gt_{b_err}_plus_5pp")
-
-    # Error distribution check
-    a_err_dist = after.get("reliability", {}).get("error_distribution", {})
-    b_err_dist = baseline.get("reliability", {}).get("error_distribution", {})
-    new_error_types = set(a_err_dist.keys()) - set(b_err_dist.keys())
-    if new_error_types:
-        reasons.append(f"new_error_types_{sorted(new_error_types)}")
-
-    # Independence gate
-    b_ind = baseline.get("independence", {})
-    b_unsafe = any(
-        f.get("finding", "") in ("unknown", "unsafe", "unbounded")
-        for f in (b_ind.values() if isinstance(b_ind, dict) else [])
-    )
-    if b_unsafe:
-        reasons.append("baseline_independence_failed")
-
-    success = len(reasons) == 0
+    reasons = list(dict.fromkeys(reasons))
+    success = all(contract_gates.values()) and not reasons
     return {
         "schema_version": "1.0",
         "stage": "stage-31-trace-guided-performance",
@@ -997,12 +1451,7 @@ def run_stage31_comparison(
         "success": success,
         "outcome": "optimization_accepted" if success else "optimization_rejected",
         "failure_reasons": reasons,
-        "trust": {
-            "trusted": (
-                baseline.get("trust", {}).get("trusted", False)
-                and after.get("trust", {}).get("trusted", False)
-            ),
-        },
+        "trust": {"trusted": artifacts_trusted and contract_gates["artifacts_schema_valid"]},
         "latency": {
             "actual_improvement_pct": actual_improvement_pct,
             "baseline_warm_p95_ms": b_p95,
@@ -1024,10 +1473,7 @@ def run_stage31_comparison(
             "baseline_error_rate": b_err,
             "after_error_rate": a_err,
         },
-        "contract_gates": {
-            "focused_gates_passed": focused_gates_passed,
-            "stage_gates_passed": stage_gates_passed,
-        },
+        "contract_gates": contract_gates,
     }
 
 
@@ -1141,8 +1587,8 @@ def _format_stage31_markdown(report: dict[str, Any]) -> str:
 
     role = report.get("artifact_role", "")
     decision = report.get("decision", "")
-    if role == "baseline":
-        lines.append("## Baseline Decision")
+    if role in {"baseline", "after"}:
+        lines.append(f"## {role.title()} Decision")
         lines.append(f"**Decision**: `{decision}`")
         lines.append(f"**Reasons**: {report.get('closed_reasons', [])}")
         lines.append("")
@@ -1187,7 +1633,11 @@ def _format_stage31_markdown(report: dict[str, Any]) -> str:
 
         usage = report.get("usage", {})
         lines.append("## Usage")
-        lines.append(f"- Provider calls: {usage.get('provider_call_count', 0)}")
+        lines.append(f"- Logical Agent calls: {usage.get('logical_agent_calls', 0)}")
+        lines.append(f"- Logical Tool calls: {usage.get('logical_tool_calls', 0)}")
+        lines.append(
+            f"- Provider transport attempts: {usage.get('provider_transport_attempts', 0)}"
+        )
         lines.append(f"- Total tokens: {usage.get('total_tokens')}")
         lines.append("")
 
