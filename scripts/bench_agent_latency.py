@@ -130,15 +130,11 @@ def _stage31_bench_authorized(
 def _cpu_identity() -> str | None:
     cpu = platform.processor()
     if not cpu or cpu.strip() == "":
-        cpu = platform.machine()
-    if not cpu or cpu.strip() == "":
         return None
     cpu = cpu.strip()
-    # Sanitize: reject strings containing potential identifiers
-    for marker in ("/", "\\", "@", " ", "\t", "\n", "\r"):
-        if marker in cpu and marker not in (" ",):
+    for marker in ("/", "\\", "@"):
+        if marker in cpu:
             return None
-    # Cap length — excessively long processor strings may contain serial info
     if len(cpu) > 128:
         return None
     return cpu
@@ -1281,6 +1277,11 @@ def run_stage31_comparison(
         and b_env.get("architecture") == a_env.get("architecture")
         and b_env.get("python") == a_env.get("python")
         and b_env.get("boundary") == a_env.get("boundary")
+        and isinstance(b_env.get("cpu"), str)
+        and bool(b_env.get("cpu", "").strip())
+        and isinstance(a_env.get("cpu"), str)
+        and bool(a_env.get("cpu", "").strip())
+        and b_env.get("cpu") == a_env.get("cpu")
     )
     if not environment_match:
         reasons.append("environment_mismatch")

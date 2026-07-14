@@ -2295,3 +2295,104 @@ def test_stage31_comparison_reject_cpu_missing(tmp_path: Path) -> None:
     )
     rep = json.loads(rep_path.read_text())
     assert any("cpu" in r for r in rep["failure_reasons"])
+
+
+def test_stage31_comparison_environment_match_includes_cpu(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report()
+    after = _make_minimal_stage31_report(
+        {
+            "artifact_role": "after",
+            "git_revision": "def456",
+            "latency": {
+                "end_to_end": {"p95_latency_ms": 900.0, "p50_latency_ms": 800.0},
+                "extraction_agent": {},
+                "rag_search": {},
+            },
+        }
+    )
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert rep["outcome"] == "optimization_accepted"
+    # CPU match is part of environment_match now
+
+
+def test_stage31_comparison_reject_empty_cpu_string(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report()
+    baseline.setdefault("environment", {})["cpu"] = ""
+    after = _make_minimal_stage31_report(
+        {
+            "artifact_role": "after",
+            "git_revision": "def456",
+        }
+    )
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert "environment_mismatch" in rep["failure_reasons"]
+
+
+def test_stage31_cpu_identity_sanitized_no_path_separator(monkeypatch, tmp_path: Path) -> None:
+    import platform as _plat
+
+    monkeypatch.setattr(_plat, "processor", lambda: "/usr/bin/cpu")
+    monkeypatch.setattr(bench_agent_latency, "platform", _plat)
+
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 1
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert any("cpu_identity" in r for r in report["closed_reasons"])
