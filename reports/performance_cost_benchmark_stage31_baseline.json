@@ -2,12 +2,13 @@
   "schema_version": "1.0",
   "stage": "stage-31-trace-guided-performance",
   "artifact_role": "baseline",
-  "evaluated_at": "2026-07-14T02:48:21.573143Z",
-  "git_revision": "6b75d1c89072318cf4cfea4465689eb7fad1ae22",
+  "evaluated_at": "2026-07-14T03:36:13.019280Z",
+  "git_revision": "b7468fd8ad8eb849a7811a3f8e0964da2912b631",
   "input_sha256": "252b547ba756af6d71fea1f8ce7ee7d448c6bf67172c4bbeb136116d937cbdca",
   "environment": {
     "os": "Darwin",
     "architecture": "arm64",
+    "cpu": "arm",
     "python": "3.11.15",
     "boundary": "offline benchmark; not production SLA"
   },
@@ -39,7 +40,7 @@
     "completeness_rate": 1.0,
     "samples": [
       {
-        "trace_id": "3e5bf706-b763-4058-bafb-268c3c68926c",
+        "trace_id": "c686e9bb-5837-43d1-abfb-4973b8376454",
         "is_complete": true,
         "failure_reason": null,
         "root_span": 1,
@@ -50,7 +51,128 @@
         "tool_count": 1
       },
       {
-        "trace_id": "7ec2ec98-17cb-4d45-bb0c-f979f843842b",
+        "trace_id": "6d975f13-71e8-4add-b5b3-9b07b4cddefb",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "807c6f3e-9875-4346-a85b-101eb1ad9db9",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "98532953-3f7f-46f2-b0ce-1d07b9f70868",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "c41302cc-78ae-4c28-b72f-ee2eecbad36a",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "7e9ca1e2-964f-46e6-b3e4-98a65d7664db",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "838870a6-fe7a-4777-bf37-493aa3c7d982",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "4f927424-60e5-44bd-8a3f-3b7ea4fa568f",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "d8daa0b9-6142-4d3b-a33e-700b6a0e4b04",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "def6587f-416d-492c-b6ad-6facabf892a2",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "815cf508-6bf2-43c0-9813-218536a97f48",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "fec2501a-eea8-4c70-b42c-f41fa763cf88",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "7f09847a-d004-43a7-beae-3d70fa2d75b8",
         "is_complete": true,
         "failure_reason": null,
         "root_span": 1,
@@ -61,7 +183,62 @@
         "tool_count": 2
       },
       {
-        "trace_id": "863735fd-fc78-4659-87e4-b9d2a854c298",
+        "trace_id": "aa8703ba-a013-4724-b531-4e78303d783a",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "a868d88b-23de-42fc-a950-0d590ce00280",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "b3b65478-0608-4d38-9510-cec853cdd701",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "6afef740-47ec-4196-ad56-73778d7ac6f6",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "392e02fe-9125-49bc-a7ea-391d3b35c65c",
+        "is_complete": true,
+        "failure_reason": null,
+        "root_span": 1,
+        "terminal_span": 1,
+        "ext_spans": 1,
+        "rag_spans": 1,
+        "agent_count": 2,
+        "tool_count": 1
+      },
+      {
+        "trace_id": "52d05a2c-cd05-4f94-b104-281e2360b57b",
         "is_complete": true,
         "failure_reason": null,
         "root_span": 1,
@@ -72,62 +249,7 @@
         "tool_count": 2
       },
       {
-        "trace_id": "8a19f9c6-df31-4f61-88ed-1ae653ef12b5",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "e9d4a3f0-1930-4039-a23c-87a96f20587b",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "ce746eb9-eab3-40f7-a981-62e7ea14ca14",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "7a376f7a-ec19-4b79-a093-fc59822b371d",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "d8832ce9-19e0-418e-9df7-963ff672929d",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "34a1daa2-8a30-4ce2-9666-cf7aea1a6a47",
+        "trace_id": "632da3e8-7717-4088-b45f-ffc49b2933a3",
         "is_complete": true,
         "failure_reason": null,
         "root_span": 1,
@@ -136,133 +258,12 @@
         "rag_spans": 1,
         "agent_count": 2,
         "tool_count": 2
-      },
-      {
-        "trace_id": "e6e68daa-e51c-42c7-b4ac-b4f60ac87cd7",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 2
-      },
-      {
-        "trace_id": "21a6a64c-4ad2-4e72-8fb9-6b001ac7676f",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "de359321-9928-4cfa-8ff8-bf20a1e25231",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "f61a947a-08a4-4208-856f-9bd575bc8868",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "ea36a230-0d94-48d6-a9aa-4b94acbd5121",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "e0312f1d-ef48-4ff8-9e34-4346cfd4390e",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "a2b3500e-5514-4b1b-8616-51b0dc6cf845",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 2
-      },
-      {
-        "trace_id": "14cc3deb-b902-47af-902b-181e51ab5086",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 2
-      },
-      {
-        "trace_id": "1806cb4b-41b1-487c-b35e-126ae4afd506",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
-      },
-      {
-        "trace_id": "5070a9b4-20f5-49c9-8f7f-c0c19a49d0b6",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 2
-      },
-      {
-        "trace_id": "06648312-acb2-4cd2-8202-e6837c8d3a0c",
-        "is_complete": true,
-        "failure_reason": null,
-        "root_span": 1,
-        "terminal_span": 1,
-        "ext_spans": 1,
-        "rag_spans": 1,
-        "agent_count": 2,
-        "tool_count": 1
       }
     ]
   },
   "contract_observations": [
     {
-      "trace_id": "3e5bf706-b763-4058-bafb-268c3c68926c",
+      "trace_id": "c686e9bb-5837-43d1-abfb-4973b8376454",
       "business_decision": "PENDING_HUMAN",
       "next_action": "PENDING_HUMAN",
       "rag": {
@@ -292,7 +293,337 @@
       ]
     },
     {
-      "trace_id": "7ec2ec98-17cb-4d45-bb0c-f979f843842b",
+      "trace_id": "6d975f13-71e8-4add-b5b3-9b07b4cddefb",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "807c6f3e-9875-4346-a85b-101eb1ad9db9",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "98532953-3f7f-46f2-b0ce-1d07b9f70868",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "c41302cc-78ae-4c28-b72f-ee2eecbad36a",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "7e9ca1e2-964f-46e6-b3e4-98a65d7664db",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "838870a6-fe7a-4777-bf37-493aa3c7d982",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "4f927424-60e5-44bd-8a3f-3b7ea4fa568f",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "d8daa0b9-6142-4d3b-a33e-700b6a0e4b04",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "def6587f-416d-492c-b6ad-6facabf892a2",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "815cf508-6bf2-43c0-9813-218536a97f48",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "fec2501a-eea8-4c70-b42c-f41fa763cf88",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "7f09847a-d004-43a7-beae-3d70fa2d75b8",
       "business_decision": "PENDING_HUMAN",
       "next_action": "PENDING_HUMAN",
       "rag": {
@@ -323,7 +654,157 @@
       ]
     },
     {
-      "trace_id": "863735fd-fc78-4659-87e4-b9d2a854c298",
+      "trace_id": "aa8703ba-a013-4724-b531-4e78303d783a",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "a868d88b-23de-42fc-a950-0d590ce00280",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "b3b65478-0608-4d38-9510-cec853cdd701",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "6afef740-47ec-4196-ad56-73778d7ac6f6",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "392e02fe-9125-49bc-a7ea-391d3b35c65c",
+      "business_decision": "PENDING_HUMAN",
+      "next_action": "PENDING_HUMAN",
+      "rag": {
+        "outcome": "RESULT",
+        "result_count": 5,
+        "evidence_ids": [
+          "bank_enterprise_amount_mismatch_advanced_005",
+          "bank_enterprise_amount_mismatch_playbook_001",
+          "bank_enterprise_exact_match_playbook_003",
+          "bank_enterprise_narrative_mismatch_advanced_004",
+          "bank_enterprise_narrative_mismatch_playbook_001"
+        ]
+      },
+      "fallback": {
+        "level": 0,
+        "path": "L1",
+        "terminal_type": "FALLBACK",
+        "terminal_outcome": "PENDING_HUMAN"
+      },
+      "trace_invariants_valid": true,
+      "agent_calls": [
+        "ExtractionAgent",
+        "AuditAgent"
+      ],
+      "tool_calls": [
+        "search_rules"
+      ]
+    },
+    {
+      "trace_id": "52d05a2c-cd05-4f94-b104-281e2360b57b",
       "business_decision": "PENDING_HUMAN",
       "next_action": "PENDING_HUMAN",
       "rag": {
@@ -354,157 +835,7 @@
       ]
     },
     {
-      "trace_id": "8a19f9c6-df31-4f61-88ed-1ae653ef12b5",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "e9d4a3f0-1930-4039-a23c-87a96f20587b",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "ce746eb9-eab3-40f7-a981-62e7ea14ca14",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "7a376f7a-ec19-4b79-a093-fc59822b371d",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "d8832ce9-19e0-418e-9df7-963ff672929d",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "34a1daa2-8a30-4ce2-9666-cf7aea1a6a47",
+      "trace_id": "632da3e8-7717-4088-b45f-ffc49b2933a3",
       "business_decision": "PENDING_HUMAN",
       "next_action": "PENDING_HUMAN",
       "rag": {
@@ -532,465 +863,131 @@
       "tool_calls": [
         "search_rules",
         "load_confirmed_cases"
-      ]
-    },
-    {
-      "trace_id": "e6e68daa-e51c-42c7-b4ac-b4f60ac87cd7",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 2,
-        "path": "L1->L2->HUMAN",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules",
-        "load_confirmed_cases"
-      ]
-    },
-    {
-      "trace_id": "21a6a64c-4ad2-4e72-8fb9-6b001ac7676f",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "de359321-9928-4cfa-8ff8-bf20a1e25231",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "f61a947a-08a4-4208-856f-9bd575bc8868",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "ea36a230-0d94-48d6-a9aa-4b94acbd5121",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "e0312f1d-ef48-4ff8-9e34-4346cfd4390e",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "a2b3500e-5514-4b1b-8616-51b0dc6cf845",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 2,
-        "path": "L1->L2->HUMAN",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules",
-        "load_confirmed_cases"
-      ]
-    },
-    {
-      "trace_id": "14cc3deb-b902-47af-902b-181e51ab5086",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 2,
-        "path": "L1->L2->HUMAN",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules",
-        "load_confirmed_cases"
-      ]
-    },
-    {
-      "trace_id": "1806cb4b-41b1-487c-b35e-126ae4afd506",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
-      ]
-    },
-    {
-      "trace_id": "5070a9b4-20f5-49c9-8f7f-c0c19a49d0b6",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 2,
-        "path": "L1->L2->HUMAN",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules",
-        "load_confirmed_cases"
-      ]
-    },
-    {
-      "trace_id": "06648312-acb2-4cd2-8202-e6837c8d3a0c",
-      "business_decision": "PENDING_HUMAN",
-      "next_action": "PENDING_HUMAN",
-      "rag": {
-        "outcome": "RESULT",
-        "result_count": 5,
-        "evidence_ids": [
-          "bank_enterprise_amount_mismatch_advanced_005",
-          "bank_enterprise_amount_mismatch_playbook_001",
-          "bank_enterprise_exact_match_playbook_003",
-          "bank_enterprise_narrative_mismatch_advanced_004",
-          "bank_enterprise_narrative_mismatch_playbook_001"
-        ]
-      },
-      "fallback": {
-        "level": 0,
-        "path": "L1",
-        "terminal_type": "FALLBACK",
-        "terminal_outcome": "PENDING_HUMAN"
-      },
-      "trace_invariants_valid": true,
-      "agent_calls": [
-        "ExtractionAgent",
-        "AuditAgent"
-      ],
-      "tool_calls": [
-        "search_rules"
       ]
     }
   ],
   "latency": {
     "cold_observations": [
       {
-        "e2e_ms": 17998.439,
-        "extraction_ms": 6842,
-        "rag_ms": 6660
+        "e2e_ms": 16679.503,
+        "extraction_ms": 4712,
+        "rag_ms": 6557
       }
     ],
     "end_to_end": {
-      "avg_latency_ms": 9743.837,
-      "p50_latency_ms": 9462.284,
-      "p95_latency_ms": 13621.027,
-      "min_latency_ms": 6811.572,
-      "max_latency_ms": 13621.027,
+      "avg_latency_ms": 8685.346,
+      "p50_latency_ms": 8668.141,
+      "p95_latency_ms": 10583.555,
+      "min_latency_ms": 6027.801,
+      "max_latency_ms": 10583.555,
       "samples_ms": [
-        13032.278,
-        8335.266,
-        8158.804,
-        11191.36,
-        9039.068,
-        10976.847,
-        10577.074,
-        10100.944,
-        11727.207,
-        10145.844,
-        6811.572,
-        7406.46,
-        8258.62,
-        13621.027,
-        9060.758,
-        9486.531,
-        9242.473,
-        9789.266,
-        9438.037,
-        8477.313
+        9033.565,
+        8908.41,
+        6027.801,
+        10461.713,
+        6563.326,
+        7886.295,
+        7614.728,
+        8652.731,
+        10133.267,
+        8683.55,
+        8175.344,
+        10249.309,
+        9898.807,
+        8117.924,
+        10583.555,
+        9837.862,
+        8218.206,
+        8893.87,
+        7806.61,
+        7960.056
       ]
     },
     "extraction_agent": {
-      "avg_latency_ms": 3281.65,
-      "p50_latency_ms": 3294.0,
-      "p95_latency_ms": 4944,
-      "min_latency_ms": 1845,
-      "max_latency_ms": 4944,
+      "avg_latency_ms": 2883.8,
+      "p50_latency_ms": 2806.5,
+      "p95_latency_ms": 4338,
+      "min_latency_ms": 1940,
+      "max_latency_ms": 4338,
       "samples_ms": [
-        4944,
-        3305,
-        3283,
-        2023,
-        3120,
-        1845,
-        4554,
-        3657,
-        2978,
-        3827,
-        2595,
-        2574,
-        2349,
-        3675,
-        3139,
-        2603,
-        4004,
-        3913,
-        3581,
-        3664
+        3289,
+        3376,
+        2611,
+        3994,
+        1940,
+        2135,
+        2790,
+        2823,
+        4338,
+        2381,
+        3044,
+        3493,
+        3247,
+        2415,
+        2493,
+        3575,
+        2451,
+        2077,
+        2334,
+        2870
       ]
     },
     "rag_search": {
       "avg_latency_ms": 66.75,
       "p50_latency_ms": 66.0,
-      "p95_latency_ms": 89,
-      "min_latency_ms": 58,
-      "max_latency_ms": 89,
+      "p95_latency_ms": 81,
+      "min_latency_ms": 55,
+      "max_latency_ms": 81,
       "samples_ms": [
-        66,
-        71,
-        68,
-        65,
-        65,
-        67,
-        65,
+        64,
         67,
         64,
-        58,
         63,
         68,
         66,
-        64,
-        68,
-        89,
+        55,
+        81,
         66,
-        65,
+        69,
+        66,
+        64,
+        66,
+        71,
         67,
-        63
+        69,
+        66,
+        66,
+        69,
+        68
       ]
     }
   },
   "theory": {
     "per_run_predicted_parallel_e2e_ms": [
-      12966.278,
-      8264.266,
-      8090.804,
-      11126.36,
-      8974.068,
-      10909.847,
-      10512.074,
-      10033.944,
-      11663.207,
-      10087.844,
-      6748.572,
-      7338.46,
-      8192.62,
-      13557.027,
-      8992.758,
-      9397.531,
-      9176.473,
-      9724.266,
-      9371.037,
-      8414.313
+      8969.565,
+      8841.41,
+      5963.801,
+      10398.713,
+      6495.326,
+      7820.295,
+      7559.728,
+      8571.731,
+      10067.267,
+      8614.55,
+      8109.344,
+      10185.309,
+      9832.807,
+      8046.924,
+      10516.555,
+      9768.862,
+      8152.206,
+      8827.87,
+      7737.61,
+      7892.056
     ],
-    "actual_warm_p95_ms": 13621.027,
-    "predicted_warm_p95_ms": 13557.027,
-    "theoretical_p95_improvement_pct": 0.47,
+    "actual_warm_p95_ms": 10583.555,
+    "predicted_warm_p95_ms": 10516.555,
+    "theoretical_p95_improvement_pct": 0.633,
     "formula": "actual_e2e_ms - extraction_duration_ms - rag_duration_ms + max(extraction_duration_ms, rag_duration_ms)"
   },
   "independence": {
@@ -1022,17 +1019,17 @@
   },
   "usage": {
     "logical_agent_calls": 40,
-    "logical_tool_calls": 27,
+    "logical_tool_calls": 23,
     "provider_transport_attempts": 40,
     "input_tokens": 58960,
-    "output_tokens": 14550,
-    "total_tokens": 73510,
-    "per_successful_run_tokens": 3675
+    "output_tokens": 14101,
+    "total_tokens": 73061,
+    "per_successful_run_tokens": 3653
   },
   "cost": {
     "assumptions": "DeepSeek v4 Pro pricing: input $0.89/1M, output $3.45/1M",
-    "total_estimated_usd": "0.0383061",
-    "per_successful_run_estimated_usd": "0.001915305",
+    "total_estimated_usd": "0.03791547",
+    "per_successful_run_estimated_usd": "0.0018957735",
     "unavailable_reason": null
   },
   "reliability": {
@@ -1044,6 +1041,6 @@
   "decision": "no_go",
   "closed_reasons": [
     "independence_gate_failed",
-    "theory_pct_0.47_lt_20.0"
+    "theory_pct_0.633_lt_20.0"
   ]
 }
