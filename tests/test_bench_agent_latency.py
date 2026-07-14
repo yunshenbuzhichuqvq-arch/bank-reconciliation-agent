@@ -1026,6 +1026,7 @@ def _make_minimal_stage31_report(overrides: dict | None = None) -> dict:
         "environment": {
             "os": "Darwin",
             "architecture": "arm64",
+            "cpu": "Apple M3 Pro",
             "python": "3.11",
             "boundary": "offline benchmark; not production SLA",
         },
@@ -2117,3 +2118,180 @@ def test_stage31_comparison_has_artifact_identity_fields(tmp_path: Path) -> None
     ]:
         assert key in rep, f"Missing identity field: {key}"
     assert rep["artifact_role"] == "comparison"
+
+
+# ---------------------------------------------------------------------------
+# TASK-31.11: CPU environment identity and comparison fail-closed
+# ---------------------------------------------------------------------------
+
+
+def test_stage31_environment_includes_cpu_field(monkeypatch, tmp_path: Path) -> None:
+    from bank_reconciliation_agent.rag import retriever as _retriever
+
+    monkeypatch.setattr(
+        _retriever.rule_retriever,
+        "search",
+        lambda req: type("RagResp", (), {"items": [], "rewritten_query": req.query})(),
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.workflow.run_item",
+        _make_mock_run_item(),
+    )
+
+    json_path = tmp_path / "bench31.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    env = report["environment"]
+    assert "cpu" in env
+    assert isinstance(env["cpu"], str)
+    assert len(env["cpu"]) > 0
+
+
+def test_stage31_cpu_identity_not_empty(monkeypatch, tmp_path: Path) -> None:
+    from bank_reconciliation_agent.rag import retriever as _retriever
+
+    monkeypatch.setattr(
+        _retriever.rule_retriever,
+        "search",
+        lambda req: type("RagResp", (), {"items": [], "rewritten_query": req.query})(),
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.workflow.run_item",
+        _make_mock_run_item(),
+    )
+
+    json_path = tmp_path / "bench31.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    cpu = report["environment"]["cpu"]
+    assert cpu.strip() == cpu
+    assert "/" not in cpu
+    assert "\\" not in cpu
+
+
+def test_stage31_cpu_identity_unavailable_triggers_env_gap(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(bench_agent_latency, "_cpu_identity", lambda: None)
+
+    json_path = tmp_path / "bench31.json"
+    exit_code = bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-critical-path",
+            "--runs",
+            "20",
+            "--cold-runs",
+            "1",
+            "--warmup-runs",
+            "1",
+            "--provider",
+            "fake",
+            "--json-report",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 1
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    assert report["decision"] == "environment_gap"
+    assert any("cpu_identity" in r for r in report["closed_reasons"])
+
+
+def test_stage31_comparison_reject_cpu_mismatch(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report()
+    baseline.setdefault("environment", {})["cpu"] = "Apple M3 Pro"
+    after = _make_minimal_stage31_report(
+        {
+            "artifact_role": "after",
+            "git_revision": "def456",
+            "environment": {
+                "os": "Darwin",
+                "architecture": "arm64",
+                "python": "3.11",
+                "cpu": "Intel Core i7",
+                "boundary": "offline benchmark; not production SLA",
+            },
+        }
+    )
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert "cpu_mismatch" in rep["failure_reasons"]
+
+
+def test_stage31_comparison_reject_cpu_missing(tmp_path: Path) -> None:
+    b_path = tmp_path / "b.json"
+    a_path = tmp_path / "a.json"
+
+    baseline = _make_minimal_stage31_report()
+    after = _make_minimal_stage31_report({"artifact_role": "after", "git_revision": "def456"})
+    # Remove cpu from after
+    if "cpu" in after.get("environment", {}):
+        del after["environment"]["cpu"]
+    b_path.write_text(json.dumps(baseline))
+    a_path.write_text(json.dumps(after))
+
+    rep_path = tmp_path / "comp.json"
+    bench_agent_latency.main(
+        [
+            "--scenario",
+            "stage31-comparison",
+            "--baseline-json",
+            str(b_path),
+            "--after-json",
+            str(a_path),
+            "--focused-gates-passed",
+            "--stage-gates-passed",
+            "--json-report",
+            str(rep_path),
+        ]
+    )
+    rep = json.loads(rep_path.read_text())
+    assert any("cpu" in r for r in rep["failure_reasons"])

@@ -127,6 +127,23 @@ def _stage31_bench_authorized(
     )
 
 
+def _cpu_identity() -> str | None:
+    cpu = platform.processor()
+    if not cpu or cpu.strip() == "":
+        cpu = platform.machine()
+    if not cpu or cpu.strip() == "":
+        return None
+    cpu = cpu.strip()
+    # Sanitize: reject strings containing potential identifiers
+    for marker in ("/", "\\", "@", " ", "\t", "\n", "\r"):
+        if marker in cpu and marker not in (" ",):
+            return None
+    # Cap length — excessively long processor strings may contain serial info
+    if len(cpu) > 128:
+        return None
+    return cpu
+
+
 def get_git_revision() -> str:
     try:
         return (
@@ -423,6 +440,15 @@ def run_stage31_critical_path(
 
     canonical_input = _stage31_canonical_input()
     input_sha256 = hashlib.sha256(json.dumps(canonical_input, sort_keys=True).encode()).hexdigest()
+
+    # -- Validate CPU identity --------------------------------------------
+
+    cpu = _cpu_identity()
+    if cpu is None and not env_gap:
+        env_gap = {
+            "reason": "cpu_identity_unavailable",
+            "message": "Could not determine CPU identity from host platform.",
+        }
 
     # -- Run plan gate -----------------------------------------------------
 
@@ -804,6 +830,9 @@ def run_stage31_critical_path(
         "environment": {
             "os": platform.system(),
             "architecture": platform.machine(),
+            "cpu": cpu
+            if not env_gap or env_gap.get("reason") != "cpu_identity_unavailable"
+            else None,
             "python": platform.python_version(),
             "boundary": "offline benchmark; not production SLA",
         },
@@ -1255,6 +1284,16 @@ def run_stage31_comparison(
     )
     if not environment_match:
         reasons.append("environment_mismatch")
+
+    # CPU identity must be present, non-empty and match
+    b_cpu = b_env.get("cpu")
+    a_cpu = a_env.get("cpu")
+    if not b_cpu or not isinstance(b_cpu, str) or not b_cpu.strip():
+        reasons.append("baseline_cpu_missing_or_empty")
+    if not a_cpu or not isinstance(a_cpu, str) or not a_cpu.strip():
+        reasons.append("after_cpu_missing_or_empty")
+    if b_cpu and a_cpu and b_cpu != a_cpu:
+        reasons.append("cpu_mismatch")
 
     run_plan_match = bool(
         b_plan.get("cold_runs") == a_plan.get("cold_runs")
