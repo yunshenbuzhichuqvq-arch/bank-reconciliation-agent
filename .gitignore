@@ -25,3 +25,4 @@ reports/rag_eval_metrics.json
 /docs/interview/*.md
 data/*.sqlite
 data/*.sqlite-*
+AGENTS.md
