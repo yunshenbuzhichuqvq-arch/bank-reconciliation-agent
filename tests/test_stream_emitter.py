@@ -65,11 +65,11 @@ def test_reconciliation_service_passes_emitter_to_workflow(monkeypatch) -> None:
     captured_emitters: list[QueueEmitter] = []
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_bank_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "银行流水"},
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_clear_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_clear_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "清算流水"},
     )
 
@@ -77,7 +77,9 @@ def test_reconciliation_service_passes_emitter_to_workflow(monkeypatch) -> None:
         captured_emitters.append(emitter)
         return state
 
-    monkeypatch.setattr("bank_reconciliation_agent.services.reconciliation.run_item", fake_run_item)
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.service.run_item", fake_run_item
+    )
 
     branch_result = BranchResult(
         flow_id="FLOW-STREAM",
@@ -318,7 +320,7 @@ def test_trace_span_emit_failure_isolated() -> None:
         "recorder": recorder,
     }
 
-    from bank_reconciliation_agent.services.workflow import _emit_trace_span
+    from bank_reconciliation_agent.services.workflow.runner import _emit_trace_span
 
     try:
         _emit_trace_span(state, recorder, emitter)
@@ -358,15 +360,15 @@ def test_production_path_sse_span_set_matches_persisted_rows(monkeypatch) -> Non
     trace_service = TraceService(engine)
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation_persistence.trace_service",
+        "bank_reconciliation_agent.services.reconciliation.persistence.trace_service",
         trace_service,
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_bank_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "银行流水"},
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_clear_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_clear_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "清算流水"},
     )
 
@@ -381,7 +383,8 @@ def test_production_path_sse_span_set_matches_persisted_rows(monkeypatch) -> Non
         )
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.run_item", deterministic_run_item
+        "bank_reconciliation_agent.services.reconciliation.service.run_item",
+        deterministic_run_item,
     )
 
     user_id, task_id, flow_id = "prod_u", "TASK-PROD", "FLOW-PROD"
@@ -435,11 +438,11 @@ def _prod_setup(monkeypatch):
     engine with deterministic spy agents; return the service."""
     service = ReconciliationService()  # uses the global engine, like the workers
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_bank_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "银行流水"},
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_clear_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_clear_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "清算流水"},
     )
 
@@ -454,7 +457,8 @@ def _prod_setup(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.run_item", deterministic_run_item
+        "bank_reconciliation_agent.services.reconciliation.service.run_item",
+        deterministic_run_item,
     )
     return service
 
@@ -491,10 +495,10 @@ def _install_event_failure(monkeypatch, emitter):
         raise RuntimeError(_SENSITIVE_MARKER)
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.workflow_runtime.to_trace_span_event", _boom
+        "bank_reconciliation_agent.services.workflow.runtime.to_trace_span_event", _boom
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation_flow.to_trace_span_event", _boom
+        "bank_reconciliation_agent.services.reconciliation.flow.to_trace_span_event", _boom
     )
     return emitter
 
@@ -519,10 +523,14 @@ def test_production_path_trace_span_failure_is_isolated(monkeypatch, installer) 
     """Each of the three trace_span failure classes (projection, event build,
     emit) is isolated: business commits, Trace persists, warnings stay clean."""
     recording_log = _RecordingLog()
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.log", recording_log)
-    monkeypatch.setattr("bank_reconciliation_agent.services.reconciliation.log", recording_log)
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow_runtime.log", recording_log)
-    monkeypatch.setattr("bank_reconciliation_agent.services.reconciliation_flow.log", recording_log)
+    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.runner.log", recording_log)
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.service.log", recording_log
+    )
+    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.runtime.log", recording_log)
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.flow.log", recording_log
+    )
 
     user_id = "iso_u"
     task_id = f"TASK-ISO-{installer.__name__}"

@@ -6,7 +6,7 @@ from threading import BoundedSemaphore, Lock
 from typing import Callable
 
 from bank_reconciliation_agent.core.config import settings
-from bank_reconciliation_agent.services.reconciliation_types import (
+from bank_reconciliation_agent.services.reconciliation.types import (
     ReconciliationFlowBundle,
     ReconciliationMatchResult,
     ReconciliationWriteBundle,

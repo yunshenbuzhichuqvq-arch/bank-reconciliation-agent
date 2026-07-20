@@ -11,25 +11,25 @@
 
 保持 API、数据库结构、状态枚举、事件顺序和失败语义不变，将已经稳定的职责拆分为以下模块：
 
-- `reconciliation_input.py`：文件边界、任务哈希和匹配结果转换。
-- `reconciliation_batch.py`：有界并发、准入控制、顺序归并和批次汇总。
-- `reconciliation_flow.py`：单条 flow 的工作流调用和写入数据组装。
-- `reconciliation_persistence.py`：核心事务与提交后的 best-effort 副作用。
-- `reconciliation_types.py`：批次与 flow 之间的数据契约。
-- `workflow_types.py`：工作流状态、分支常量和工具协议。
-- `workflow_runtime.py`：Trace、SSE、token 和日志投影。
-- `workflow_tools.py`：只读工具上下文、调用和失败语义。
-- `workflow_decision.py`：审计调用、Schema、业务约束和决策路由。
+- `reconciliation/input.py`：文件边界、任务哈希和匹配结果转换。
+- `reconciliation/batch.py`：有界并发、准入控制、顺序归并和批次汇总。
+- `reconciliation/flow.py`：单条 flow 的工作流调用和写入数据组装。
+- `reconciliation/persistence.py`：核心事务与提交后的 best-effort 副作用。
+- `reconciliation/types.py`：批次与 flow 之间的数据契约。
+- `workflow/types.py`：工作流状态、分支常量和工具协议。
+- `workflow/runtime.py`：Trace、SSE、token 和日志投影。
+- `workflow/tools.py`：只读工具上下文、调用和失败语义。
+- `workflow/decision.py`：审计调用、Schema、业务约束和决策路由。
 
-`ReconciliationService` 和 `run_item` 继续作为兼容入口。入口文件只负责编排，不重新定义已经下沉的实现。
+`services.reconciliation` 和 `services.workflow` 通过各自的 `__init__.py` 保留公开导入路径；实际入口分别位于 `service.py` 和 `runner.py`。
 
 依赖方向固定为：
 
 ```text
 API / Worker
-  -> reconciliation.py
-      -> input / batch / flow / persistence
-          -> workflow.py
+  -> reconciliation/service.py
+      -> reconciliation input / batch / flow / persistence
+          -> workflow/runner.py
               -> workflow types / runtime / tools / decision
 ```
 

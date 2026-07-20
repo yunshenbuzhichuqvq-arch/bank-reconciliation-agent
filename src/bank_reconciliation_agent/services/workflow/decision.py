@@ -15,7 +15,7 @@ from bank_reconciliation_agent.services.hooks import (
     schema_hook,
 )
 from bank_reconciliation_agent.services.stream_emitter import StreamEmitter
-from bank_reconciliation_agent.services.workflow_runtime import (
+from bank_reconciliation_agent.services.workflow.runtime import (
     append_agent_log,
     emit_stream_row,
     emit_trace_span,
@@ -24,7 +24,7 @@ from bank_reconciliation_agent.services.workflow_runtime import (
     recorder_for,
     to_decimal,
 )
-from bank_reconciliation_agent.services.workflow_types import (
+from bank_reconciliation_agent.services.workflow.types import (
     BANK_ENTERPRISE_LLM_AUDIT_BRANCHES,
     ReconciliationState,
 )

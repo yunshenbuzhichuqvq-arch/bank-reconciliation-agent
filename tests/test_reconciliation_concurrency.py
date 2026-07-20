@@ -22,8 +22,8 @@ from bank_reconciliation_agent.schemas.tools import (
 )
 from bank_reconciliation_agent.schemas.trace import SpanType
 from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
-from bank_reconciliation_agent.services import reconciliation as reconciliation_module
-from bank_reconciliation_agent.services import reconciliation_batch
+from bank_reconciliation_agent.services.reconciliation import batch as reconciliation_batch
+from bank_reconciliation_agent.services.reconciliation import service as reconciliation_module
 from bank_reconciliation_agent.services.reconciliation import (
     ReconciliationFlowBundle,
     ReconciliationMatchResult,
@@ -35,7 +35,7 @@ from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
 from bank_reconciliation_agent.services.tool_adapters import make_search_rules_adapter
 from bank_reconciliation_agent.services.tool_executor import get_shared_executor
 from bank_reconciliation_agent.services.trace import validate_trace_snapshot
-from bank_reconciliation_agent.services import workflow as workflow_module
+from bank_reconciliation_agent.services.workflow import runner as workflow_module
 
 
 def test_reconciliation_concurrency_config_defaults_and_bounds() -> None:

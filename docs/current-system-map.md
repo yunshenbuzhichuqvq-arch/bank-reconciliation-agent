@@ -29,28 +29,28 @@ flowchart LR
 | 顺序 | 职责 | 入口 |
 | --- | --- | --- |
 | 1 | HTTP/JWT/SSE 请求 | `api/v1/reconcile.py` |
-| 2 | 应用流程、任务状态、查询接口 | `services/reconciliation.py` |
-| 3 | 文件读取、任务哈希、匹配结果转换 | `services/reconciliation_input.py` |
+| 2 | 应用流程、任务状态、查询接口 | `services/reconciliation/service.py` |
+| 3 | 文件读取、任务哈希、匹配结果转换 | `services/reconciliation/input.py` |
 | 4 | 双源匹配与异常分支 | `services/exception_router.py`、`services/rule_engine.py` |
-| 5 | 批次并发、顺序归并、进程级并发上限 | `services/reconciliation_batch.py` |
-| 6 | 单条 flow 的工作流调用、日志和台账组装 | `services/reconciliation_flow.py` |
-| 7 | 单条异常编排 | `services/workflow.py` |
-| 8 | 状态类型与分支常量 | `services/workflow_types.py` |
-| 9 | Trace、SSE、token 与安全日志投影 | `services/workflow_runtime.py` |
-| 10 | ToolContext、工具调用与工具失败转人工 | `services/workflow_tools.py` |
-| 11 | 审计、Schema、业务约束与决策路由 | `services/workflow_decision.py` |
-| 12 | 账本、队列、任务统计事务及提交后副作用 | `services/reconciliation_persistence.py` |
+| 5 | 批次并发、顺序归并、进程级并发上限 | `services/reconciliation/batch.py` |
+| 6 | 单条 flow 的工作流调用、日志和台账组装 | `services/reconciliation/flow.py` |
+| 7 | 单条异常编排 | `services/workflow/runner.py` |
+| 8 | 状态类型与分支常量 | `services/workflow/types.py` |
+| 9 | Trace、SSE、token 与安全日志投影 | `services/workflow/runtime.py` |
+| 10 | ToolContext、工具调用与工具失败转人工 | `services/workflow/tools.py` |
+| 11 | 审计、Schema、业务约束与决策路由 | `services/workflow/decision.py` |
+| 12 | 账本、队列、任务统计事务及提交后副作用 | `services/reconciliation/persistence.py` |
 | 13 | 人工复核与可选 checkpoint 子图 | `services/review.py`、`services/review_graph.py` |
 
 ## 两个兼容入口
 
 ### `ReconciliationService`
 
-`services/reconciliation.py` 是应用服务入口，保留现有 API、Worker 和测试调用方式。它负责按顺序调用输入、批次、flow 和持久化模块，不再承载这些模块的具体算法。
+`services/reconciliation/__init__.py` 保留现有导入路径，实际应用服务位于 `services/reconciliation/service.py`。它负责按顺序调用输入、批次、flow 和持久化模块，不再承载这些模块的具体算法。
 
 ### `run_item`
 
-`services/workflow.py` 是单条异常的编排入口。状态定义、Trace/SSE、工具边界和审计决策分别位于独立模块；该文件只保留执行顺序和兼容导出。
+`services/workflow/__init__.py` 保留现有导入路径，实际编排位于 `services/workflow/runner.py`。状态定义、Trace/SSE、工具边界和审计决策分别位于同一子包的独立模块。
 
 ## 事务与失败边界
 
@@ -72,10 +72,10 @@ flowchart LR
 第一次阅读只看下面六个文件：
 
 1. `api/v1/reconcile.py`
-2. `services/reconciliation.py`
-3. `services/reconciliation_input.py`
+2. `services/reconciliation/service.py`
+3. `services/reconciliation/input.py`
 4. `services/exception_router.py`
-5. `services/workflow.py`
-6. `services/workflow_decision.py`
+5. `services/workflow/runner.py`
+6. `services/workflow/decision.py`
 
 理解主链后，再按需要阅读批次并发、工具、Trace、持久化和评测模块。`docs/stages/` 与大部分 ADR 用于解释历史演进，不应作为理解当前运行路径的入口。

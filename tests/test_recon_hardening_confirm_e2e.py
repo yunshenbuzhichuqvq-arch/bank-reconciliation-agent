@@ -192,11 +192,11 @@ def test_reconciliation_state_passes_fuzzy_candidate_to_workflow(monkeypatch) ->
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_bank_row",
         lambda **kwargs: {"flow_id": "BANK-001"},
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_clear_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_clear_row",
         lambda **kwargs: None,
     )
 
@@ -204,7 +204,9 @@ def test_reconciliation_state_passes_fuzzy_candidate_to_workflow(monkeypatch) ->
         captured.update(state)
         return state
 
-    monkeypatch.setattr("bank_reconciliation_agent.services.reconciliation.run_item", capture_state)
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation.service.run_item", capture_state
+    )
 
     service._run_workflow_for_result(
         user_id="demo_user",

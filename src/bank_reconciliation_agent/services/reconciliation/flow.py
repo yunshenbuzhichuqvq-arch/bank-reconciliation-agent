@@ -28,7 +28,7 @@ from bank_reconciliation_agent.schemas.trace import (
 )
 from bank_reconciliation_agent.services.agent_log import agent_log_service
 from bank_reconciliation_agent.services.rag_log import rag_log_service
-from bank_reconciliation_agent.services.reconciliation_types import (
+from bank_reconciliation_agent.services.reconciliation.types import (
     ReconciliationFlowBundle,
     ReconciliationMatchResult,
 )
@@ -37,7 +37,7 @@ from bank_reconciliation_agent.services.stream_emitter import (
     to_trace_span_event,
 )
 from bank_reconciliation_agent.services.trace import NoOpRecorder, TraceRecorder
-from bank_reconciliation_agent.services.workflow import ReconciliationState
+from bank_reconciliation_agent.services.workflow.types import ReconciliationState
 
 
 WorkflowRunner = Callable[..., ReconciliationState]

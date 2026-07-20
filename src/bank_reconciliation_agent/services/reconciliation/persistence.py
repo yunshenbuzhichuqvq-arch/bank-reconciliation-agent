@@ -10,7 +10,7 @@ from bank_reconciliation_agent.services.agent_log import agent_log_service
 from bank_reconciliation_agent.services.ledger import error_ledger_table, ledger_service
 from bank_reconciliation_agent.services.queue import queue_service, reconciliation_queue_table
 from bank_reconciliation_agent.services.rag_log import rag_log_service
-from bank_reconciliation_agent.services.reconciliation_types import ReconciliationWriteBundle
+from bank_reconciliation_agent.services.reconciliation.types import ReconciliationWriteBundle
 from bank_reconciliation_agent.services.task import reconciliation_task_table, task_service
 from bank_reconciliation_agent.services.trace import trace_service
 

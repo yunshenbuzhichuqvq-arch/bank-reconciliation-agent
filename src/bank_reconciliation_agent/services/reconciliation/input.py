@@ -8,7 +8,7 @@ from fastapi import HTTPException, UploadFile
 
 from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.services.exception_router import BranchResult, exception_router
-from bank_reconciliation_agent.services.reconciliation_types import (
+from bank_reconciliation_agent.services.reconciliation.types import (
     ReconciliationMatchResult,
     ReconciliationMatchSummary,
 )

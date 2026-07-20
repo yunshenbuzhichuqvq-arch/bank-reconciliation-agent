@@ -1,19 +1,16 @@
 """Application facade for reconciliation requests and task lifecycle.
 
-Stable implementation details live in ``reconciliation_input``,
-``reconciliation_batch``, ``reconciliation_flow`` and
-``reconciliation_persistence``. Keep this module focused on ordering those
-components and preserving the API/Worker compatibility surface.
+Stable implementation details live in the sibling ``input``, ``batch``,
+``flow`` and ``persistence`` modules. Keep this module focused on ordering
+those components and preserving the API/Worker compatibility surface.
 """
 
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import Future
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -24,7 +21,6 @@ from bank_reconciliation_agent.core.config import settings
 from bank_reconciliation_agent.db.session import get_engine
 from bank_reconciliation_agent.core.logging import log
 from bank_reconciliation_agent.schemas.ledger import LedgerQuery
-from bank_reconciliation_agent.schemas.rag import RagSearchItem
 from bank_reconciliation_agent.schemas.reconciliation import (
     ReconciliationAuditDecision,
     ReconciliationExceptionItem,
@@ -38,30 +34,20 @@ from bank_reconciliation_agent.services.hooks import auth_hook, validation_hook
 from bank_reconciliation_agent.services.exception_router import BranchResult
 from bank_reconciliation_agent.services.ledger import ledger_service
 from bank_reconciliation_agent.services.queue_client import enqueue_reconciliation
-from bank_reconciliation_agent.services.reconciliation_batch import (
-    build_flow_bundle_with_admission,
+from bank_reconciliation_agent.services.reconciliation.batch import (
     build_write_bundle,
     get_reconciliation_executor as _get_reconciliation_executor,
     merge_flow_bundles,
-    ordered_flow_results,
 )
-from bank_reconciliation_agent.services.reconciliation_flow import (
+from bank_reconciliation_agent.services.reconciliation.flow import (
     agent_error_workflow_state,
     build_flow_bundle,
-    build_rag_query,
-    emit_terminal_and_root,
-    emit_trace_span_safe,
     evidence_from_rag_source,
     finalize_recorder,
     format_optional_decimal,
-    ledger_discrepancy_amount,
-    new_recorder,
-    post_hook_results,
-    prompt_version_from_logs,
     to_reconciliation_audit_decision,
-    to_reconciliation_evidence,
 )
-from bank_reconciliation_agent.services.reconciliation_input import (
+from bank_reconciliation_agent.services.reconciliation.input import (
     build_match_results,
     generate_task_id,
     read_dataframe,
@@ -69,12 +55,11 @@ from bank_reconciliation_agent.services.reconciliation_input import (
     to_match_result,
     validate_file_size,
 )
-from bank_reconciliation_agent.services.reconciliation_persistence import (
+from bank_reconciliation_agent.services.reconciliation.persistence import (
     ensure_core_transaction_tables,
     persist_write_bundle,
-    run_side_effect,
 )
-from bank_reconciliation_agent.services.reconciliation_types import (
+from bank_reconciliation_agent.services.reconciliation.types import (
     ReconciliationFlowBundle,
     ReconciliationMatchResult,
     ReconciliationMatchSummary,
@@ -510,12 +495,6 @@ class ReconciliationService:
     ) -> list[ReconciliationRagEvidence]:
         return evidence_from_rag_source(rag_source, scenario_type=scenario_type)
 
-    def _build_rag_query(self, result: ReconciliationMatchResult) -> str:
-        return build_rag_query(result)
-
-    def _to_reconciliation_evidence(self, item: RagSearchItem) -> ReconciliationRagEvidence:
-        return to_reconciliation_evidence(item)
-
     def _to_reconciliation_audit_decision(
         self,
         decision: AuditDecision,
@@ -594,32 +573,6 @@ class ReconciliationService:
             emitter=emitter,
         )
 
-    def _build_flow_bundle_with_admission(
-        self,
-        result: ReconciliationMatchResult,
-        *,
-        user_id: str,
-        task_id: str,
-        scenario_type: str,
-        emitter: StreamEmitter | None,
-        stream_seq_start: int,
-    ) -> ReconciliationFlowBundle:
-        return build_flow_bundle_with_admission(
-            result,
-            user_id=user_id,
-            task_id=task_id,
-            scenario_type=scenario_type,
-            build_flow=self._build_flow_bundle,
-            emitter=emitter,
-            stream_seq_start=stream_seq_start,
-        )
-
-    @staticmethod
-    def _ordered_flow_results(
-        futures: list[Future[ReconciliationFlowBundle]],
-    ) -> list[ReconciliationFlowBundle]:
-        return ordered_flow_results(futures)
-
     @staticmethod
     def _merge_flow_bundles(
         flow_bundles: list[ReconciliationFlowBundle],
@@ -646,57 +599,12 @@ class ReconciliationService:
             stream_seq_start=stream_seq_start,
         )
 
-    def _run_side_effect(
-        self,
-        *,
-        side_effect_name: str,
-        operation: Callable[[], object],
-        task_id: str,
-        flow_id: str | None = None,
-    ) -> None:
-        run_side_effect(
-            side_effect_name=side_effect_name,
-            operation=operation,
-            task_id=task_id,
-            flow_id=flow_id,
-        )
-
-    def _new_recorder(
-        self,
-        *,
-        user_id: str,
-        task_id: str,
-        result: ReconciliationMatchResult,
-    ) -> TraceRecorder | NoOpRecorder:
-        return new_recorder(user_id=user_id, task_id=task_id, result=result)
-
     def _finalize_recorder(
         self,
         recorder: TraceRecorder | NoOpRecorder,
         audit_decision: AuditDecision,
     ) -> list[TraceSpan]:
         return finalize_recorder(recorder, audit_decision)
-
-    def _emit_terminal_and_root(
-        self,
-        spans: list[TraceSpan],
-        *,
-        emitter: StreamEmitter | None,
-        stream_seq: int,
-    ) -> int:
-        return emit_terminal_and_root(
-            spans,
-            emitter=emitter,
-            stream_seq=stream_seq,
-        )
-
-    @staticmethod
-    def _emit_trace_span_safe(
-        emitter: StreamEmitter,
-        span: TraceSpan,
-        seq: int,
-    ) -> None:
-        emit_trace_span_safe(emitter, span, seq)
 
     def _run_workflow_for_result(
         self,
@@ -773,15 +681,5 @@ class ReconciliationService:
             result=result,
             error=error,
         )
-
-    def _ledger_discrepancy_amount(self, result: ReconciliationMatchResult) -> Decimal:
-        return ledger_discrepancy_amount(result)
-
-    def _prompt_version_from_logs(self, logs: list[dict[str, object]]) -> str | None:
-        return prompt_version_from_logs(logs)
-
-    def _post_hook_results(self, workflow_state: ReconciliationState) -> dict[str, object]:
-        return post_hook_results(workflow_state)
-
 
 reconciliation_service = ReconciliationService()

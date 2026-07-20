@@ -14,7 +14,7 @@ from bank_reconciliation_agent.services.stream_emitter import (
     to_trace_span_event,
 )
 from bank_reconciliation_agent.services.trace import NoOpRecorder
-from bank_reconciliation_agent.services.workflow_types import (
+from bank_reconciliation_agent.services.workflow.types import (
     REVERSAL_HINTS,
     Recorder,
     ReconciliationState,

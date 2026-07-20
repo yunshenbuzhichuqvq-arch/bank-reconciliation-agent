@@ -1,8 +1,8 @@
 """Single-item workflow orchestration and compatibility exports.
 
 State contracts, runtime observability, Tool execution and audit decisions live
-in ``workflow_types``, ``workflow_runtime``, ``workflow_tools`` and
-``workflow_decision``. This module should describe execution order only.
+in the sibling ``types``, ``runtime``, ``tools`` and ``decision`` modules. This
+module should describe execution order only.
 """
 
 from __future__ import annotations
@@ -39,37 +39,35 @@ from bank_reconciliation_agent.schemas.trace import (
     SpanStatus,
     SpanType,
 )
-from bank_reconciliation_agent.services.workflow_decision import (
-    apply_post_hooks as _apply_post_hooks_impl,
-    audit_decision_for_state as _audit_decision_for_state_impl,
-    audit_decision_once as _audit_decision_once_impl,
-    fail_closed_item as _fail_closed_item_impl,
+from bank_reconciliation_agent.services.workflow.decision import (
+    apply_post_hooks as _apply_post_hooks,
+    audit_decision_for_state as _audit_decision_for_state,
+    audit_decision_once as _audit_decision_once,
+    fail_closed_item as _fail_closed_item,
 )
-from bank_reconciliation_agent.services.workflow_runtime import (
-    append_agent_log as _append_agent_log_impl,
-    build_rag_query as _build_rag_query_impl,
-    combined_text as _combined_text_impl,
-    contains_reversal_hint as _contains_reversal_hint_impl,
-    emit_stream_row as _emit_stream_row_impl,
+from bank_reconciliation_agent.services.workflow.runtime import (
+    append_agent_log as _append_agent_log,
+    build_rag_query as _build_rag_query,
+    combined_text as _combined_text,
+    contains_reversal_hint as _contains_reversal_hint,
+    emit_stream_row as _emit_stream_row,
     emit_trace_span as _emit_trace_span,
-    extract_reversal_hint as _extract_reversal_hint_impl,
+    extract_reversal_hint as _extract_reversal_hint,
     finish_agent_span as _finish_agent_span,
-    flow_id as _flow_id_impl,
-    llm_usage as _llm_usage_impl,
-    model_or_mapping_dump as _model_or_mapping_dump_impl,
-    optional_string as _optional_string_impl,
+    flow_id as _flow_id,
+    llm_usage as _llm_usage,
+    model_or_mapping_dump as _model_or_mapping_dump,
+    optional_string as _optional_string,
     recorder_for as _recorder,
-    to_decimal as _to_decimal_impl,
-    transaction_date as _transaction_date_impl,
-    zero_llm_usage as _zero_llm_usage_impl,
+    to_decimal as _to_decimal,
+    transaction_date as _transaction_date,
+    zero_llm_usage as _zero_llm_usage,
 )
-from bank_reconciliation_agent.services.workflow_tools import (
-    build_tool_context as _build_tool_context_impl,
-    execute_tool as _execute_tool_impl,
-    finish_tool_span_failed as _finish_tool_span_failed_impl,
-    tool_fail_closed_item as _tool_fail_closed_item_impl,
+from bank_reconciliation_agent.services.workflow.tools import (
+    execute_tool as _execute_tool,
+    tool_fail_closed_item as _tool_fail_closed_item,
 )
-from bank_reconciliation_agent.services.workflow_types import (
+from bank_reconciliation_agent.services.workflow.types import (
     TRACE_BRANCHES,
     ReconciliationState,
     ToolExecutorProtocol,
@@ -656,26 +654,3 @@ def _run_fuzzy_candidate_confirmation(
         StreamEventType.ITEM_DONE,
     )
     return state
-
-
-_fail_closed_item = _fail_closed_item_impl
-_audit_decision_once = _audit_decision_once_impl
-_audit_decision_for_state = _audit_decision_for_state_impl
-_build_tool_context = _build_tool_context_impl
-_execute_tool = _execute_tool_impl
-_finish_tool_span_failed = _finish_tool_span_failed_impl
-_tool_fail_closed_item = _tool_fail_closed_item_impl
-_apply_post_hooks = _apply_post_hooks_impl
-_append_agent_log = _append_agent_log_impl
-_emit_stream_row = _emit_stream_row_impl
-_to_decimal = _to_decimal_impl
-_build_rag_query = _build_rag_query_impl
-_contains_reversal_hint = _contains_reversal_hint_impl
-_extract_reversal_hint = _extract_reversal_hint_impl
-_flow_id = _flow_id_impl
-_combined_text = _combined_text_impl
-_transaction_date = _transaction_date_impl
-_optional_string = _optional_string_impl
-_model_or_mapping_dump = _model_or_mapping_dump_impl
-_llm_usage = _llm_usage_impl
-_zero_llm_usage = _zero_llm_usage_impl

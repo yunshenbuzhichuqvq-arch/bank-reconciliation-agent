@@ -12,7 +12,7 @@ from bank_reconciliation_agent.schemas.tools import ToolCallResult, ToolContext
 from bank_reconciliation_agent.schemas.trace import SpanStatus
 from bank_reconciliation_agent.services.stream_emitter import StreamEmitter
 from bank_reconciliation_agent.services.tool_executor import safe_tool_projection
-from bank_reconciliation_agent.services.workflow_runtime import (
+from bank_reconciliation_agent.services.workflow.runtime import (
     append_agent_log,
     complete_tool_span,
     emit_stream_row,
@@ -20,7 +20,7 @@ from bank_reconciliation_agent.services.workflow_runtime import (
     flow_id as resolve_flow_id,
     recorder_for,
 )
-from bank_reconciliation_agent.services.workflow_types import (
+from bank_reconciliation_agent.services.workflow.types import (
     ReconciliationState,
     ToolExecutorProtocol,
 )

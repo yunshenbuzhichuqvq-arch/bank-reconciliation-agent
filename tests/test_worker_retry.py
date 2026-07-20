@@ -835,7 +835,7 @@ def test_llm_item_failure_stays_in_job_without_arq_retry(
     from scripts.generate_mock_excel import generate_mvp1_mock_excel
 
     from bank_reconciliation_agent.core.llm.provider import LLMCallError, LLMResult
-    from bank_reconciliation_agent.services import workflow as workflow_module
+    from bank_reconciliation_agent.services.workflow import runner as workflow_module
     from bank_reconciliation_agent.worker import run_reconciliation_job as wfn
 
     class FailingProvider:

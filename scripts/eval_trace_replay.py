@@ -654,8 +654,8 @@ def scenario_trace_write_failure_isolation() -> dict[str, object]:
     Proves the business result is committed and the API call succeeds while the
     Trace batch is dropped (0 rows) and the failure counter increments by one.
     """
-    import bank_reconciliation_agent.services.reconciliation as recon_module
-    import bank_reconciliation_agent.services.reconciliation_persistence as persistence_module
+    from bank_reconciliation_agent.services.reconciliation import service as recon_module
+    from bank_reconciliation_agent.services.reconciliation import persistence as persistence_module
     from bank_reconciliation_agent.services.ledger import ledger_service
     from bank_reconciliation_agent.services.queue import queue_service
     from bank_reconciliation_agent.services.reconciliation import (

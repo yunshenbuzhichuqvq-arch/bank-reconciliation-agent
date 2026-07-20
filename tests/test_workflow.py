@@ -7,7 +7,8 @@ from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchRespon
 from bank_reconciliation_agent.schemas.trace import SpanStatus, SpanType
 from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
 from bank_reconciliation_agent.services.trace import TraceRecorder
-from bank_reconciliation_agent.services.workflow import ReconciliationState, _llm_usage, run_item
+from bank_reconciliation_agent.services.workflow import ReconciliationState, run_item
+from bank_reconciliation_agent.services.workflow.runner import _llm_usage
 from tests.tool_workflow_helpers import (
     RetrieverBackedToolExecutor,
     failed as _failed,
@@ -199,7 +200,7 @@ def test_run_item_binds_trace_context(monkeypatch) -> None:
     bound_contexts: list[dict[str, str]] = []
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.workflow.bind_trace_context",
+        "bank_reconciliation_agent.services.workflow.runner.bind_trace_context",
         lambda **kwargs: bound_contexts.append(kwargs),
     )
 

@@ -96,15 +96,15 @@ def test_reconciliation_service_propagates_t1_candidate_into_workflow_state(monk
     captured_states: list[dict[str, object]] = []
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_bank_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "核心 T+1 入账"},
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.transaction_service.get_clear_row",
+        "bank_reconciliation_agent.services.reconciliation.service.transaction_service.get_clear_row",
         lambda **kwargs: {"flow_id": kwargs["flow_id"], "summary": "清算跨日切"},
     )
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.run_item",
+        "bank_reconciliation_agent.services.reconciliation.service.run_item",
         lambda state: captured_states.append(state) or state,
     )
 
