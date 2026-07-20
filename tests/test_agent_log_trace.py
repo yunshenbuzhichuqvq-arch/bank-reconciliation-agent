@@ -95,7 +95,10 @@ def test_upload_writes_agent_logs_and_trace_spans(tmp_path: Path) -> None:
     span_types = {s.span_type for s in spans}
     assert "ROUTE" in span_types
     assert "TOOL" in span_types
-    assert "AGENT" in span_types
+    assert "AGENT" not in span_types
+    rule_audit = next(s for s in spans if s.span_type == "ROUTE" and s.name == "RuleAudit")
+    assert rule_audit.prompt_tokens is None
+    assert rule_audit.completion_tokens is None
     # Exactly one terminal span, cross-user isolation.
     terminals = [s for s in spans if s.span_type in {"FINAL", "FALLBACK"}]
     assert len(terminals) == 1

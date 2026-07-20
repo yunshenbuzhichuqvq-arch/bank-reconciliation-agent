@@ -40,7 +40,7 @@ def _state() -> ReconciliationState:
         "source_a_item": {"flow_id": "FLOW-FB-001", "summary": "普通摘要"},
         "source_b_item": {"flow_id": "FLOW-FB-001", "summary": "普通摘要"},
         "error_type": "AMOUNT_MISMATCH",
-        "exception_branch": "BE-R002",
+        "exception_branch": "BE-R007",
         "math_result": {
             "bank_amount": "100.00",
             "clear_amount": "99.00",

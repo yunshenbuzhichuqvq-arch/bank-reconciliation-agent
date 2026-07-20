@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from threading import Lock
 from typing import Callable, Protocol
 
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -60,31 +61,45 @@ def make_search_rules_adapter(
     retriever: _Retriever = rule_retriever,
     rag_breaker: CircuitBreaker,
 ) -> Callable[[SearchRulesArgs, ToolContext], SearchRulesOutput]:
+    search_lock = Lock()
+
     def adapter(args: SearchRulesArgs, context: ToolContext) -> SearchRulesOutput:
-        if not rag_breaker.allow_request():
-            raise CircuitOpenError("rag circuit breaker open")
+        # The default retriever owns lazy Chroma/model/index state. Its work is
+        # negligible beside the LLM calls, so serialize this small section rather
+        # than allowing flow workers to race during lazy initialization or breaker
+        # transitions.
+        with search_lock:
+            admission = rag_breaker.acquire()
+            if not admission.allowed:
+                raise CircuitOpenError("rag circuit breaker open")
+            permit = admission.permit
+            assert permit is not None
 
-        request = RagSearchRequest(
-            query=args.query,
-            top_k=settings.rag_rerank_top_k,
-            min_score=settings.rag_dense_min_score_for_backend(
-                _effective_embedding_backend(retriever)
-            ),
-            scenario_type=context.scenario_type,
-            enable_rewrite=settings.enable_rag_rewrite,
-            enable_hybrid=settings.enable_rag_hybrid,
-            enable_reranker=settings.enable_rag_reranker,
-        )
-        try:
-            response = retriever.search(request)
-        except (OperationalError, RedisConnectionError):
-            raise
-        except Exception:
-            rag_breaker.record_failure()
-            raise
+            request = RagSearchRequest(
+                query=args.query,
+                top_k=settings.rag_rerank_top_k,
+                min_score=settings.rag_dense_min_score_for_backend(
+                    _effective_embedding_backend(retriever)
+                ),
+                scenario_type=context.scenario_type,
+                enable_rewrite=settings.enable_rag_rewrite,
+                enable_hybrid=settings.enable_rag_hybrid,
+                enable_reranker=settings.enable_rag_reranker,
+            )
+            try:
+                response = retriever.search(request)
+            except (OperationalError, RedisConnectionError):
+                rag_breaker.release_permit(permit)
+                raise
+            except Exception:
+                rag_breaker.record_failure(permit)
+                raise
 
-        rag_breaker.record_success()
-        return SearchRulesOutput(items=list(response.items), rewritten_query=response.rewritten_query)
+            rag_breaker.record_success(permit)
+            return SearchRulesOutput(
+                items=list(response.items),
+                rewritten_query=response.rewritten_query,
+            )
 
     return adapter
 

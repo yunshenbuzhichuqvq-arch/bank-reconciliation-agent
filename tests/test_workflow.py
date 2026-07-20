@@ -4,7 +4,9 @@ from bank_reconciliation_agent.agents.trace_agent import TraceAgent
 from bank_reconciliation_agent.core.llm.provider import LLMResult
 from bank_reconciliation_agent.core.llm.structured import LLMCallSummary
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
+from bank_reconciliation_agent.schemas.trace import SpanStatus, SpanType
 from bank_reconciliation_agent.services.stream_emitter import QueueEmitter
+from bank_reconciliation_agent.services.trace import TraceRecorder
 from bank_reconciliation_agent.services.workflow import ReconciliationState, _llm_usage, run_item
 from tests.tool_workflow_helpers import (
     RetrieverBackedToolExecutor,
@@ -136,6 +138,11 @@ def _state(exception_branch: str, *, summary: str = "普通摘要") -> Reconcili
     }
 
 
+def _llm_state() -> ReconciliationState:
+    """BANK_ENTERPRISE's sole LLM allowlisted audit branch."""
+    return _state("BE-R007")
+
+
 def test_run_item_returns_audit_decision_for_five_bank_enterprise_branches() -> None:
     for branch in ["BE-R002", "BE-R004", "BE-R005", "BE-R006", "BE-R008"]:
         result = run_item(
@@ -170,7 +177,7 @@ def test_run_item_routes_extraction_for_reversal_narrative_only() -> None:
         tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
-    assert extraction_agent.calls == ["FLOW-BE-R004"]
+    assert extraction_agent.calls == []
 
 
 def test_run_item_routes_trace_for_single_side_branches() -> None:
@@ -185,7 +192,7 @@ def test_run_item_routes_trace_for_single_side_branches() -> None:
             tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
         )
 
-    assert trace_agent.calls == ["FLOW-BE-R005", "FLOW-BE-R006"]
+    assert trace_agent.calls == []
 
 
 def test_run_item_binds_trace_context(monkeypatch) -> None:
@@ -219,7 +226,7 @@ def test_run_item_schema_drift_falls_back_to_human_after_one_attempt() -> None:
     audit_agent = InvalidSchemaAuditAgent()
 
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=audit_agent,
@@ -277,7 +284,7 @@ def test_run_item_rag_recovered_success_continues_after_prior_failure() -> None:
 
 
 def test_run_item_constraint_c3_turns_low_risk_large_diff_to_human() -> None:
-    state = _state("BE-R002")
+    state = _llm_state()
     state["math_result"]["amount_diff"] = "10001.00"
 
     result = run_item(
@@ -295,7 +302,7 @@ def test_run_item_constraint_c3_turns_low_risk_large_diff_to_human() -> None:
 
 def test_run_item_constraint_c4_rejects_placeholder_reason() -> None:
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=PlaceholderReasonAuditAgent(),
@@ -308,7 +315,7 @@ def test_run_item_constraint_c4_rejects_placeholder_reason() -> None:
 
 def test_run_item_constraint_c5_rejects_low_confidence_auto_fix() -> None:
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.84),
@@ -324,7 +331,7 @@ def test_run_item_constraint_c5_rejects_low_confidence_auto_fix() -> None:
 
 def test_run_item_constraint_c6_rejects_auto_fix_on_low_rag_score() -> None:
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=LowRiskAutoFixedAuditAgent(confidence=0.90),
@@ -339,7 +346,7 @@ def test_run_item_decision_hook_keeps_compliant_auto_fix_without_extra_calls() -
     audit_agent = CountingAutoFixedAuditAgent(confidence=0.90)
 
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=audit_agent,
@@ -353,7 +360,7 @@ def test_run_item_decision_hook_keeps_compliant_auto_fix_without_extra_calls() -
 
 def test_run_item_invalid_llm_decision_literal_uses_agent_fallback_instead_of_outer_error() -> None:
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=InvalidDecisionLiteralProvider()),
@@ -363,7 +370,7 @@ def test_run_item_invalid_llm_decision_literal_uses_agent_fallback_instead_of_ou
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
     assert result["audit_decision"]["fallback_applied"] is True
     assert result["audit_decision"]["evidence"][0]["chunk_id"] == "rule-001"
-    assert "金额不一致" in result["audit_decision"]["reason"]
+    assert "建议人工复核" in result["audit_decision"]["reason"]
     assert "AI 处理异常" not in result["audit_decision"]["reason"]
     assert result["error_message"] is None
 
@@ -419,6 +426,9 @@ class SpyTraceAgent:
 
 
 class SpyAuditAgent:
+    def decide(self, flow_id: str, **kwargs) -> AuditDecision:
+        return self.decide_with_llm(flow_id=flow_id, **kwargs)
+
     def decide_with_llm(
         self,
         flow_id: str,
@@ -552,19 +562,22 @@ class UnsafeHighRiskProvider:
 
 
 def test_run_item_safety_policy_prevents_auto_fix_on_be_r008() -> None:
+    provider = UnsafeHighRiskProvider()
     result = run_item(
         _state("BE-R008"),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
-        audit_agent=AuditAgent(provider=UnsafeHighRiskProvider()),
+        audit_agent=AuditAgent(provider=provider),
         tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["next_action"] == "PENDING_HUMAN"
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
-    assert result["audit_decision"]["safety_policy_applied"] is True
-    assert result["audit_decision"]["raw_decision"] == "AUTO_FIXED"
-    assert result["audit_decision"]["raw_risk_level"] == "LOW"
+    assert result["audit_decision"]["risk_level"] == "HIGH"
+    assert result["audit_decision"]["safety_policy_applied"] is False
+    audit_log = next(row for row in result["agent_logs"] if row["agent_name"] == "AuditAgent")
+    assert audit_log["execution_mode"] == "DETERMINISTIC"
+    assert audit_log["llm_tokens"] == 0
 
 
 class InvalidDecisionLiteralProvider:
@@ -676,7 +689,7 @@ def test_workflow_uses_llm_summary_for_initial_plus_correction_tokens() -> None:
     )
 
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
@@ -704,7 +717,7 @@ def test_workflow_cache_hit_adds_zero_llm_tokens() -> None:
     )
 
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
@@ -725,7 +738,7 @@ def test_workflow_agent_log_contains_retry_and_repair_summary() -> None:
     )
 
     result = run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
@@ -749,7 +762,7 @@ def test_stream_payload_projects_safe_llm_governance_fields() -> None:
     emitter = QueueEmitter()
 
     run_item(
-        _state("BE-R002"),
+        _llm_state(),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=provider),
@@ -769,68 +782,145 @@ def test_stream_payload_projects_safe_llm_governance_fields() -> None:
     assert _INVALID_AUDIT not in str(projected)
 
 
-def test_extraction_final_llm_failure_returns_pending_human() -> None:
-    audit_agent = RecordingAuditAgent()
-
+def test_be_r004_reversal_uses_rule_extraction_without_llm() -> None:
     result = run_item(
         _state("BE-R004", summary="客户退款冲正"),
         extraction_agent=ExtractionAgent(provider=FailingProvider()),
         trace_agent=SpyTraceAgent(),
-        audit_agent=audit_agent,
+        audit_agent=AuditAgent(provider=FailingProvider()),
         tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["next_action"] == "PENDING_HUMAN"
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
-    assert audit_agent.calls == 0
+    assert result["extraction_result"]["standard_type"] == "REVERSAL"
+    extraction_log = next(
+        row for row in result["agent_logs"] if row["agent_name"] == "RuleExtractor"
+    )
+    assert extraction_log["execution_mode"] == "DETERMINISTIC"
+    assert extraction_log["llm_tokens"] == 0
 
 
-def test_trace_final_llm_failure_returns_pending_human() -> None:
-    audit_agent = RecordingAuditAgent()
-
+def test_be_r005_skips_trace_llm_and_uses_rule_audit() -> None:
     result = run_item(
         _state("BE-R005"),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=TraceAgent(provider=FailingProvider()),
-        audit_agent=audit_agent,
+        audit_agent=AuditAgent(provider=FailingProvider()),
         tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
     assert result["next_action"] == "PENDING_HUMAN"
     assert result["audit_decision"]["decision"] == "PENDING_HUMAN"
-    assert audit_agent.calls == 0
+    assert result["fallback_path"] == "RULE"
+    assert not any(row["agent_name"] == "TraceAgent" for row in result["agent_logs"])
 
 
-def test_final_llm_failure_records_stable_failure_and_fallback_reason() -> None:
+def test_be_r006_rule_audit_records_zero_llm_tokens() -> None:
     result = run_item(
-        _state("BE-R005"),
+        _state("BE-R006"),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=TraceAgent(provider=FailingProvider()),
-        audit_agent=RecordingAuditAgent(),
+        audit_agent=AuditAgent(provider=FailingProvider()),
         tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
-    trace_log = next(row for row in result["agent_logs"] if row["agent_name"] == "TraceAgent")
-    assert trace_log["final_failure_type"] == "provider_5xx"
-    assert trace_log["fallback_reason"] is not None
-    assert result["fallback_path"] == "AI_ERROR->HUMAN"
+    audit_log = next(row for row in result["agent_logs"] if row["agent_name"] == "AuditAgent")
+    assert audit_log["execution_mode"] == "DETERMINISTIC"
+    assert audit_log["transport_attempts"] == 0
+    assert audit_log["llm_tokens"] == 0
+    assert result["fallback_path"] == "RULE"
 
 
-def test_final_llm_failure_does_not_continue_to_auto_fix() -> None:
-    audit_agent = RecordingAuditAgent()
-
+def test_be_r004_rule_extraction_does_not_emit_llm_agent_logs() -> None:
     result = run_item(
         _state("BE-R004", summary="客户退款冲正"),
         extraction_agent=ExtractionAgent(provider=FailingProvider()),
         trace_agent=SpyTraceAgent(),
-        audit_agent=audit_agent,
+        audit_agent=AuditAgent(provider=FailingProvider()),
         tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
     )
 
-    assert audit_agent.calls == 0
-    audit_logs = [
+    llm_logs = [
         row
         for row in result["agent_logs"]
-        if row["agent_name"] == "AuditAgent" and row.get("step") == "decide_with_llm"
+        if row.get("execution_mode") == "LLM"
     ]
-    assert audit_logs == []
+    assert llm_logs == []
+
+
+def test_bank_enterprise_rule_first_branches_make_no_llm_calls_and_keep_trace() -> None:
+    provider = AuditSequenceProvider([])
+
+    for branch in ["BE-R002", "BE-R004", "BE-R005", "BE-R006", "BE-R008"]:
+        state = _state(branch, summary="客户退款冲正" if branch == "BE-R004" else "普通摘要")
+        recorder = TraceRecorder(
+            user_id=state["user_id"],
+            task_id=state["task_id"],
+            flow_id=f"FLOW-{branch}",
+        )
+        state["recorder"] = recorder
+        trace_agent = SpyTraceAgent()
+        extraction_agent = SpyExtractionAgent()
+
+        result = run_item(
+            state,
+            extraction_agent=extraction_agent,
+            trace_agent=trace_agent,
+            audit_agent=AuditAgent(provider=provider),
+            tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
+        )
+        recorder.close_root(status=SpanStatus.SUCCEEDED, outcome=result["next_action"])
+        spans = recorder.snapshot()
+
+        assert result["next_action"] == "PENDING_HUMAN"
+        assert result["fallback_path"] == "RULE"
+        assert trace_agent.calls == []
+        assert extraction_agent.calls == []
+        assert not any(span.span_type == SpanType.AGENT for span in spans)
+        assert any(
+            span.span_type == SpanType.ROUTE and span.name == "RuleAudit" for span in spans
+        )
+        audit_log = next(
+            row for row in result["agent_logs"] if row["agent_name"] == "AuditAgent"
+        )
+        assert audit_log["execution_mode"] == "DETERMINISTIC"
+        assert audit_log["transport_attempts"] == 0
+        assert audit_log["llm_tokens"] == 0
+
+    assert provider.calls == 0
+
+
+def test_be_r007_remains_the_only_bank_enterprise_audit_llm_branch() -> None:
+    provider = AuditSequenceProvider(
+        [LLMResult(text=_VALID_AUDIT, prompt_tokens=10, completion_tokens=5, model="x")]
+    )
+    state = _llm_state()
+    recorder = TraceRecorder(
+        user_id=state["user_id"],
+        task_id=state["task_id"],
+        flow_id="FLOW-BE-R007",
+    )
+    state["recorder"] = recorder
+
+    result = run_item(
+        state,
+        extraction_agent=SpyExtractionAgent(),
+        trace_agent=SpyTraceAgent(),
+        audit_agent=AuditAgent(provider=provider),
+        tool_executor=RetrieverBackedToolExecutor(retriever=StaticRetriever()),
+    )
+    recorder.close_root(status=SpanStatus.SUCCEEDED, outcome=result["next_action"])
+    spans = recorder.snapshot()
+
+    assert provider.calls == 1
+    assert any(
+        span.span_type == SpanType.AGENT
+        and span.name == "AuditAgent"
+        and span.prompt_tokens == 10
+        and span.completion_tokens == 5
+        for span in spans
+    )
+    audit_log = next(row for row in result["agent_logs"] if row["agent_name"] == "AuditAgent")
+    assert audit_log["execution_mode"] == "LLM"
+    assert audit_log["llm_tokens"] == 15

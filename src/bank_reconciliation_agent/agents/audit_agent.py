@@ -76,7 +76,6 @@ class LLMAuditDecision(BaseModel):
     risk_level: str
     reason: str
     ai_suggestion: str
-    evidence: list[str]
     confidence: float = Field(ge=0.0, le=1.0)
 
 
@@ -225,7 +224,7 @@ class AuditAgent:
             "bank_amount": bank_amount,
             "clear_amount": clear_amount,
             "amount_diff": amount_diff,
-            "evidence": [item.model_dump(mode="json") for item in evidence],
+            "evidence": [self._project_evidence(item) for item in evidence],
         }
         if error_type == "FUZZY_MATCH_CANDIDATE" and match_candidate_context is not None:
             user_payload["task"] = "confirm_match"
@@ -324,6 +323,17 @@ class AuditAgent:
             error_type=error_type,
             exception_branch=exception_branch,
         )
+
+    @staticmethod
+    def _project_evidence(item: RagSearchItem) -> dict[str, object]:
+        """Keep only the rule fields needed for the model's audit judgment."""
+        return {
+            "chunk_id": item.chunk_id,
+            "source_name": item.source_name,
+            "section_title": item.section_title,
+            "score": item.score,
+            "content": item.content,
+        }
 
     def _fallback_decision(
         self,

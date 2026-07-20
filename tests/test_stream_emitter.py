@@ -264,14 +264,21 @@ def test_run_item_trace_span_fields_present_in_sse(monkeypatch) -> None:
         assert "user_id" not in p
 
     span_types_emitted = {e.payload["span_type"] for e in trace_span_events}
-    assert span_types_emitted >= {"ROUTE", "TOOL", "AGENT", "GUARD"}
+    assert span_types_emitted >= {"ROUTE", "TOOL", "GUARD"}
+    assert "AGENT" not in span_types_emitted
+    rule_audit = next(
+        event for event in trace_span_events if event.payload["name"] == "RuleAudit"
+    )
+    assert rule_audit.payload.get("prompt_tokens") is None
+    assert rule_audit.payload.get("completion_tokens") is None
 
     type_counts = {}
     for e in trace_span_events:
         t = e.payload["span_type"]
         type_counts[t] = type_counts.get(t, 0) + 1
-    for count in type_counts.values():
-        assert count == 1, f"Span type emitted more than once: {type_counts}"
+    assert type_counts["ROUTE"] == 2
+    assert type_counts["TOOL"] == 1
+    assert type_counts["GUARD"] == 1
 
 
 def test_trace_span_emit_failure_isolated() -> None:

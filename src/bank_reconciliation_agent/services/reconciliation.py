@@ -3,10 +3,13 @@ from __future__ import annotations
 import hashlib
 import asyncio
 import json
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from decimal import Decimal
+from functools import partial
 from io import BytesIO
 from pathlib import Path
+from threading import BoundedSemaphore, Lock
 from typing import Callable, NamedTuple
 
 import pandas as pd
@@ -73,6 +76,37 @@ _WORKFLOW_OUTCOME_BY_DECISION: dict[str, WorkflowOutcome] = {
 }
 
 
+_RECONCILIATION_EXECUTOR_LOCK = Lock()
+_reconciliation_executor: ThreadPoolExecutor | None = None
+_RECONCILIATION_ADMISSION_LOCK = Lock()
+_reconciliation_admission_gate: BoundedSemaphore | None = None
+
+
+def get_reconciliation_executor() -> ThreadPoolExecutor:
+    """Return the process-wide flow executor, separate from the Tool executor."""
+
+    global _reconciliation_executor
+    with _RECONCILIATION_EXECUTOR_LOCK:
+        if _reconciliation_executor is None:
+            _reconciliation_executor = ThreadPoolExecutor(
+                max_workers=settings.reconciliation_max_concurrency,
+                thread_name_prefix="reconciliation-flow",
+            )
+        return _reconciliation_executor
+
+
+def get_reconciliation_admission_gate() -> BoundedSemaphore:
+    """Return the process-wide cap shared by executor and direct flow paths."""
+
+    global _reconciliation_admission_gate
+    with _RECONCILIATION_ADMISSION_LOCK:
+        if _reconciliation_admission_gate is None:
+            _reconciliation_admission_gate = BoundedSemaphore(
+                settings.reconciliation_max_concurrency
+            )
+        return _reconciliation_admission_gate
+
+
 AGENT_PROCESSING_ERRORS = (
     LLMUnavailable,
     ExtractionAgentError,
@@ -116,6 +150,20 @@ class ReconciliationWriteBundle(NamedTuple):
     @property
     def saved_cost(self) -> Decimal:
         return compute_cost(self.saved_prompt_tokens, self.saved_completion_tokens)
+
+
+class ReconciliationFlowBundle(NamedTuple):
+    ledger_row: LedgerRow
+    rag_log_row: dict[str, object]
+    agent_log_row: dict[str, object]
+    trace_snapshot: tuple[str, str, list[TraceSpan]] | None
+    prompt_tokens: int
+    completion_tokens: int
+    saved_prompt_tokens: int
+    saved_completion_tokens: int
+    fallback_l2_rows: int
+    fallback_l3_rows: int
+    stream_seq: int
 
 
 class ReconciliationService:
@@ -766,168 +814,240 @@ class ReconciliationService:
         results: list[ReconciliationMatchResult],
         emitter: StreamEmitter | None = None,
     ) -> ReconciliationWriteBundle:
-        rows: list[LedgerRow] = []
-        rag_log_rows: list[dict[str, object]] = []
-        agent_log_rows: list[dict[str, object]] = []
-        trace_snapshots: list[tuple[str, str, list[TraceSpan]]] = []
-        ai_processed_rows = 0
-        fallback_l2_rows = 0
-        fallback_l3_rows = 0
-        total_prompt_tokens = 0
-        total_completion_tokens = 0
-        saved_prompt_tokens = 0
-        saved_completion_tokens = 0
-        stream_seq = 0
-        for result in results:
-            if result.status == "AUTO_FIXED":
-                continue
-
-            rag_query = self._build_rag_query(result)
-            rule_hit = {
-                "error_type": result.error_type or "",
-                "exception_branch": result.exception_branch,
-            }
-            recorder = self._new_recorder(user_id=user_id, task_id=task_id, result=result)
-            try:
-                workflow_kwargs = {
-                    "user_id": user_id,
-                    "task_id": task_id,
-                    "scenario_type": scenario_type,
-                    "result": result,
-                    "rag_query": rag_query,
-                    "recorder": recorder,
-                }
-                if emitter is not None:
-                    workflow_kwargs["emitter"] = emitter
-                    workflow_kwargs["stream_seq_start"] = stream_seq
-                workflow_state = self._run_workflow_for_result(**workflow_kwargs)
-                if emitter is not None:
-                    stream_seq = int(workflow_state.get("stream_seq", stream_seq))
-            except AGENT_PROCESSING_ERRORS as exc:
-                log.warning(
-                    "reconciliation_row_agent_fallback",
-                    flow_id=result.flow_id,
-                    task_id=task_id,
-                    error_type=type(exc).__name__,
-                )
-                workflow_state = self._agent_error_workflow_state(
+        pending_results = [result for result in results if result.status != "AUTO_FIXED"]
+        if (
+            emitter is not None
+            or settings.reconciliation_max_concurrency == 1
+            or len(pending_results) <= 1
+        ):
+            flow_bundles: list[ReconciliationFlowBundle] = []
+            stream_seq = 0
+            for result in pending_results:
+                flow_bundle = self._build_flow_bundle_with_admission(
+                    result,
                     user_id=user_id,
                     task_id=task_id,
                     scenario_type=scenario_type,
-                    result=result,
-                    error=exc,
-                    recorder=recorder,
+                    emitter=emitter,
+                    stream_seq_start=stream_seq,
                 )
-            rag_items = [
-                RagSearchItem.model_validate(item) for item in workflow_state["rag_context"]
-            ]
-            rag_response = RagSearchResponse.model_validate(
-                workflow_state.get("rag_response", {"items": rag_items})
+                stream_seq = flow_bundle.stream_seq
+                flow_bundles.append(flow_bundle)
+        else:
+            build_flow = partial(
+                self._build_flow_bundle_with_admission,
+                user_id=user_id,
+                task_id=task_id,
+                scenario_type=scenario_type,
+                emitter=None,
+                stream_seq_start=0,
             )
-            rag_hit = {
-                "chunk_ids": [item.chunk_id for item in rag_items],
-                "best_score": max((item.score for item in rag_items), default=None),
-            }
-            rag_log_rows.append(
-                rag_log_service.build_row(
-                    user_id=user_id,
-                    task_id=task_id,
-                    query_text=rag_query,
-                    top_k=settings.rag_rerank_top_k,
-                    items=rag_items,
-                    response=rag_response,
-                )
+            executor = get_reconciliation_executor()
+            futures = [executor.submit(build_flow, result) for result in pending_results]
+            flow_bundles = self._ordered_flow_results(futures)
+
+        return self._merge_flow_bundles(flow_bundles)
+
+    def _build_flow_bundle_with_admission(
+        self,
+        result: ReconciliationMatchResult,
+        *,
+        user_id: str,
+        task_id: str,
+        scenario_type: str,
+        emitter: StreamEmitter | None,
+        stream_seq_start: int,
+    ) -> ReconciliationFlowBundle:
+        gate = get_reconciliation_admission_gate()
+        with gate:
+            return self._build_flow_bundle(
+                result,
+                user_id=user_id,
+                task_id=task_id,
+                scenario_type=scenario_type,
+                emitter=emitter,
+                stream_seq_start=stream_seq_start,
             )
-            audit_decision = AuditDecision.model_validate(workflow_state["audit_decision"])
-            fallback_path = workflow_state.get("fallback_path")
-            consumed_logs = [
-                row for row in workflow_state["agent_logs"] if not row.get("cached", False)
-            ]
-            cached_logs = [row for row in workflow_state["agent_logs"] if row.get("cached", False)]
-            prompt_tokens = sum(int(row.get("prompt_tokens", 0)) for row in consumed_logs)
-            completion_tokens = sum(int(row.get("completion_tokens", 0)) for row in consumed_logs)
-            saved_prompt_tokens += sum(int(row.get("prompt_tokens", 0)) for row in cached_logs)
-            saved_completion_tokens += sum(
-                int(row.get("completion_tokens", 0)) for row in cached_logs
-            )
-            llm_tokens = prompt_tokens + completion_tokens
-            ai_processed_rows += 1
-            fallback_l2_rows += int(bool(fallback_path and "L2" in fallback_path))
-            fallback_l3_rows += int(bool(fallback_path and "L3" in fallback_path))
-            total_prompt_tokens += prompt_tokens
-            total_completion_tokens += completion_tokens
-            agent_output = {
-                "decision": audit_decision.decision,
-                "risk_level": audit_decision.risk_level,
-                "ai_suggestion": audit_decision.ai_suggestion,
-                "reason": audit_decision.reason,
-                "confidence": audit_decision.confidence,
-                "fallback_applied": audit_decision.fallback_applied,
-                "fallback_level": audit_decision.fallback_level,
-                "next_action": audit_decision.next_action,
-                "fallback_path": fallback_path,
-            }
-            input_payload = {
-                "flow_id": result.flow_id,
-                "rule_hit": rule_hit,
-                "rag_hit": rag_hit,
-                "bank_amount": self._format_optional_decimal(result.bank_amount),
-                "clear_amount": self._format_optional_decimal(result.clear_amount),
-                "amount_diff": self._format_optional_decimal(result.amount_diff),
-            }
-            agent_log_rows.append(
-                agent_log_service.build_row(
-                    user_id=user_id,
-                    task_id=task_id,
-                    queue_id=None,
-                    agent_name="AuditAgent",
-                    event_type="AUDIT_DECISION",
-                    input_payload=input_payload,
-                    output_payload=agent_output,
-                    post_hook_results=self._post_hook_results(workflow_state),
-                    prompt_version=self._prompt_version_from_logs(workflow_state["agent_logs"]),
-                    fallback_level=audit_decision.fallback_level,
-                    llm_tokens=llm_tokens,
-                )
-            )
-            trace_spans = self._finalize_recorder(recorder, audit_decision)
-            if trace_spans:
-                trace_snapshots.append((result.flow_id, recorder.trace_id or "", trace_spans))
-                if emitter is not None:
-                    stream_seq = self._emit_terminal_and_root(
-                        trace_spans, emitter=emitter, stream_seq=stream_seq
-                    )
-            rows.append(
-                LedgerRow(
-                    id=0,
-                    task_id=task_id,
-                    flow_id=result.flow_id,
-                    error_type=result.error_type or "",
-                    exception_branch=result.exception_branch,
-                    bank_amount=result.bank_amount,
-                    clear_amount=result.clear_amount,
-                    discrepancy_amount=self._ledger_discrepancy_amount(result),
-                    ai_audit_opinion=audit_decision.reason,
-                    ai_confidence=Decimal(str(audit_decision.confidence)).quantize(
-                        Decimal("0.0001")
-                    ),
-                    rag_source=", ".join(item.chunk_id for item in rag_items) or None,
-                    fallback_path=fallback_path,
-                    handle_status=audit_decision.decision,
-                )
-            )
+
+    @staticmethod
+    def _ordered_flow_results(
+        futures: list[Future[ReconciliationFlowBundle]],
+    ) -> list[ReconciliationFlowBundle]:
+        """Join one batch completely, then return results in router order."""
+
+        try:
+            return [future.result() for future in futures]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            wait(futures)
+            raise
+
+    @staticmethod
+    def _merge_flow_bundles(
+        flow_bundles: list[ReconciliationFlowBundle],
+    ) -> ReconciliationWriteBundle:
         return ReconciliationWriteBundle(
-            ledger_rows=rows,
-            rag_log_rows=rag_log_rows,
-            agent_log_rows=agent_log_rows,
-            trace_snapshots=trace_snapshots,
-            ai_processed_rows=ai_processed_rows,
-            fallback_l2_rows=fallback_l2_rows,
-            fallback_l3_rows=fallback_l3_rows,
-            total_prompt_tokens=total_prompt_tokens,
-            total_completion_tokens=total_completion_tokens,
+            ledger_rows=[bundle.ledger_row for bundle in flow_bundles],
+            rag_log_rows=[bundle.rag_log_row for bundle in flow_bundles],
+            agent_log_rows=[bundle.agent_log_row for bundle in flow_bundles],
+            trace_snapshots=[
+                bundle.trace_snapshot
+                for bundle in flow_bundles
+                if bundle.trace_snapshot is not None
+            ],
+            ai_processed_rows=len(flow_bundles),
+            fallback_l2_rows=sum(bundle.fallback_l2_rows for bundle in flow_bundles),
+            fallback_l3_rows=sum(bundle.fallback_l3_rows for bundle in flow_bundles),
+            total_prompt_tokens=sum(bundle.prompt_tokens for bundle in flow_bundles),
+            total_completion_tokens=sum(bundle.completion_tokens for bundle in flow_bundles),
+            saved_prompt_tokens=sum(bundle.saved_prompt_tokens for bundle in flow_bundles),
+            saved_completion_tokens=sum(bundle.saved_completion_tokens for bundle in flow_bundles),
+        )
+
+    def _build_flow_bundle(
+        self,
+        result: ReconciliationMatchResult,
+        *,
+        user_id: str,
+        task_id: str,
+        scenario_type: str,
+        emitter: StreamEmitter | None,
+        stream_seq_start: int,
+    ) -> ReconciliationFlowBundle:
+        rag_query = self._build_rag_query(result)
+        rule_hit = {
+            "error_type": result.error_type or "",
+            "exception_branch": result.exception_branch,
+        }
+        recorder = self._new_recorder(user_id=user_id, task_id=task_id, result=result)
+        stream_seq = stream_seq_start
+        try:
+            workflow_kwargs = {
+                "user_id": user_id,
+                "task_id": task_id,
+                "scenario_type": scenario_type,
+                "result": result,
+                "rag_query": rag_query,
+                "recorder": recorder,
+            }
+            if emitter is not None:
+                workflow_kwargs["emitter"] = emitter
+                workflow_kwargs["stream_seq_start"] = stream_seq
+            workflow_state = self._run_workflow_for_result(**workflow_kwargs)
+            if emitter is not None:
+                stream_seq = int(workflow_state.get("stream_seq", stream_seq))
+        except AGENT_PROCESSING_ERRORS as exc:
+            log.warning(
+                "reconciliation_row_agent_fallback",
+                flow_id=result.flow_id,
+                task_id=task_id,
+                error_type=type(exc).__name__,
+            )
+            workflow_state = self._agent_error_workflow_state(
+                user_id=user_id,
+                task_id=task_id,
+                scenario_type=scenario_type,
+                result=result,
+                error=exc,
+                recorder=recorder,
+            )
+        rag_items = [RagSearchItem.model_validate(item) for item in workflow_state["rag_context"]]
+        rag_response = RagSearchResponse.model_validate(
+            workflow_state.get("rag_response", {"items": rag_items})
+        )
+        rag_hit = {
+            "chunk_ids": [item.chunk_id for item in rag_items],
+            "best_score": max((item.score for item in rag_items), default=None),
+        }
+        rag_log_row = rag_log_service.build_row(
+            user_id=user_id,
+            task_id=task_id,
+            query_text=rag_query,
+            top_k=settings.rag_rerank_top_k,
+            items=rag_items,
+            response=rag_response,
+        )
+        audit_decision = AuditDecision.model_validate(workflow_state["audit_decision"])
+        fallback_path = workflow_state.get("fallback_path")
+        consumed_logs = [
+            row for row in workflow_state["agent_logs"] if not row.get("cached", False)
+        ]
+        cached_logs = [row for row in workflow_state["agent_logs"] if row.get("cached", False)]
+        prompt_tokens = sum(int(row.get("prompt_tokens", 0)) for row in consumed_logs)
+        completion_tokens = sum(int(row.get("completion_tokens", 0)) for row in consumed_logs)
+        saved_prompt_tokens = sum(int(row.get("prompt_tokens", 0)) for row in cached_logs)
+        saved_completion_tokens = sum(int(row.get("completion_tokens", 0)) for row in cached_logs)
+        llm_tokens = prompt_tokens + completion_tokens
+        agent_output = {
+            "decision": audit_decision.decision,
+            "risk_level": audit_decision.risk_level,
+            "ai_suggestion": audit_decision.ai_suggestion,
+            "reason": audit_decision.reason,
+            "confidence": audit_decision.confidence,
+            "fallback_applied": audit_decision.fallback_applied,
+            "fallback_level": audit_decision.fallback_level,
+            "next_action": audit_decision.next_action,
+            "fallback_path": fallback_path,
+        }
+        input_payload = {
+            "flow_id": result.flow_id,
+            "rule_hit": rule_hit,
+            "rag_hit": rag_hit,
+            "bank_amount": self._format_optional_decimal(result.bank_amount),
+            "clear_amount": self._format_optional_decimal(result.clear_amount),
+            "amount_diff": self._format_optional_decimal(result.amount_diff),
+        }
+        agent_log_row = agent_log_service.build_row(
+            user_id=user_id,
+            task_id=task_id,
+            queue_id=None,
+            agent_name="AuditAgent",
+            event_type="AUDIT_DECISION",
+            input_payload=input_payload,
+            output_payload=agent_output,
+            post_hook_results=self._post_hook_results(workflow_state),
+            prompt_version=self._prompt_version_from_logs(workflow_state["agent_logs"]),
+            fallback_level=audit_decision.fallback_level,
+            llm_tokens=llm_tokens,
+        )
+        trace_spans = self._finalize_recorder(recorder, audit_decision)
+        trace_snapshot = None
+        if trace_spans:
+            trace_snapshot = (result.flow_id, recorder.trace_id or "", trace_spans)
+            if emitter is not None:
+                stream_seq = self._emit_terminal_and_root(
+                    trace_spans,
+                    emitter=emitter,
+                    stream_seq=stream_seq,
+                )
+        ledger_row = LedgerRow(
+            id=0,
+            task_id=task_id,
+            flow_id=result.flow_id,
+            error_type=result.error_type or "",
+            exception_branch=result.exception_branch,
+            bank_amount=result.bank_amount,
+            clear_amount=result.clear_amount,
+            discrepancy_amount=self._ledger_discrepancy_amount(result),
+            ai_audit_opinion=audit_decision.reason,
+            ai_confidence=Decimal(str(audit_decision.confidence)).quantize(Decimal("0.0001")),
+            rag_source=", ".join(item.chunk_id for item in rag_items) or None,
+            fallback_path=fallback_path,
+            handle_status=audit_decision.decision,
+        )
+        return ReconciliationFlowBundle(
+            ledger_row=ledger_row,
+            rag_log_row=rag_log_row,
+            agent_log_row=agent_log_row,
+            trace_snapshot=trace_snapshot,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             saved_prompt_tokens=saved_prompt_tokens,
             saved_completion_tokens=saved_completion_tokens,
+            fallback_l2_rows=int(bool(fallback_path and "L2" in fallback_path)),
+            fallback_l3_rows=int(bool(fallback_path and "L3" in fallback_path)),
+            stream_seq=stream_seq,
         )
 
     def _run_side_effect(

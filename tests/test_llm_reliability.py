@@ -1,3 +1,6 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from typing import Literal
 
 import pytest
@@ -389,6 +392,64 @@ def test_llm_breaker_half_open_failure_reopens() -> None:
         provider.complete([{"role": "user", "content": "x"}])
 
     assert breaker.state == "OPEN"
+
+
+def test_llm_breaker_late_success_keeps_new_open_and_records_atomic_states() -> None:
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=30, time_fn=lambda: 0.0)
+    barrier = Barrier(2)
+
+    class RacingInner:
+        model = "racing-inner"
+
+        def complete(self, messages, **kwargs) -> LLMResult:
+            del kwargs
+            outcome = messages[0]["content"]
+            barrier.wait(timeout=1)
+            if outcome == "fail":
+                raise _error("timeout", True)
+            deadline = time.monotonic() + 1
+            while breaker.state != "OPEN" and time.monotonic() < deadline:
+                time.sleep(0.001)
+            assert breaker.state == "OPEN"
+            return _result()
+
+    provider = CircuitBreakingLLMProvider(RacingInner(), breaker, time_fn=lambda: 0.0)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        failure = executor.submit(provider.complete, [{"role": "user", "content": "fail"}])
+        success = executor.submit(provider.complete, [{"role": "user", "content": "success"}])
+        with pytest.raises(LLMCallError) as failed:
+            failure.result(timeout=2)
+        succeeded = success.result(timeout=2)
+
+    failed_record = failed.value.attempts[0]
+    success_record = succeeded.attempts[0]
+    assert (failed_record.breaker_state_before, failed_record.breaker_state_after) == (
+        "CLOSED",
+        "OPEN",
+    )
+    assert (success_record.breaker_state_before, success_record.breaker_state_after) == (
+        "CLOSED",
+        "OPEN",
+    )
+    assert breaker.state == "OPEN"
+
+
+def test_llm_half_open_non_counted_failure_releases_probe() -> None:
+    clock = [0.0]
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=10, time_fn=lambda: clock[0])
+    inner = BreakerInner([_error("timeout", True), _error("rate_limited", True), _result()])
+    provider = CircuitBreakingLLMProvider(inner, breaker, time_fn=lambda: clock[0])
+
+    with pytest.raises(LLMCallError):
+        provider.complete([{"role": "user", "content": "open"}])
+    clock[0] = 11.0
+    with pytest.raises(LLMCallError) as neutral:
+        provider.complete([{"role": "user", "content": "neutral"}])
+
+    assert neutral.value.failure_type == "rate_limited"
+    assert breaker.state == "HALF_OPEN"
+    assert provider.complete([{"role": "user", "content": "retry"}]).text == '{"ok": true}'
+    assert breaker.state == "CLOSED"
 
 
 def test_llm_attempt_event_contains_required_fields() -> None:

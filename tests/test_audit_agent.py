@@ -120,9 +120,9 @@ def test_audit_agent_llm_path_returns_extended_decision_with_fake_provider() -> 
     assert decision.evidence == _evidence()
 
 
-def test_audit_agent_default_prompt_version_is_v3() -> None:
+def test_audit_agent_default_prompt_version_is_v4() -> None:
     agent = AuditAgent(provider=FakeLLMProvider())
-    assert agent.prompt_version == "v3"
+    assert agent.prompt_version == "v4"
 
 
 def test_audit_agent_llm_unavailable_falls_back_to_deterministic_pending_human() -> None:
@@ -160,7 +160,8 @@ def test_audit_agent_invalid_llm_output_falls_back_without_raising() -> None:
     ]
 
     for provider in providers:
-        decision = AuditAgent(provider=provider).decide_with_llm(
+        agent = AuditAgent(provider=provider)
+        decision = agent.decide_with_llm(
             flow_id="F1008-BAD",
             error_type="AMOUNT_MISMATCH",
             exception_branch="BE-R002",
@@ -176,6 +177,8 @@ def test_audit_agent_invalid_llm_output_falls_back_without_raising() -> None:
         assert decision.fallback_level == 1
         assert decision.next_action == "PENDING_HUMAN"
         assert "金额不一致" in decision.reason
+        assert agent.last_llm_result is not None
+        assert agent.last_llm_summary is not None
 
 
 def test_audit_agent_no_evidence_short_circuit_clears_previous_summary() -> None:
@@ -379,6 +382,106 @@ def test_audit_agent_injects_few_shot_and_trace_context_into_llm_messages() -> N
     assert user_payload["trace_context"] == trace_context
 
 
+def test_audit_agent_projects_evidence_for_llm_but_preserves_full_decision_evidence() -> None:
+    provider = RecordingProvider()
+    evidence = _evidence()
+
+    decision = AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F-EVIDENCE-PROJECTION",
+        error_type="AMOUNT_MISMATCH",
+        exception_branch="BE-R002",
+        bank_amount="300.00",
+        clear_amount="295.00",
+        amount_diff="5.00",
+        evidence=evidence,
+    )
+
+    projected = provider.user_payload()["evidence"]
+    assert projected == [
+        {
+            "chunk_id": evidence[0].chunk_id,
+            "source_name": evidence[0].source_name,
+            "section_title": evidence[0].section_title,
+            "score": evidence[0].score,
+            "content": evidence[0].content,
+        }
+    ]
+    assert "source_url" not in projected[0]
+    assert "source_file" not in projected[0]
+    assert "business_tags" not in projected[0]
+    assert "dense_score" not in projected[0]
+    assert "bm25_score" not in projected[0]
+    assert "reranker_score" not in projected[0]
+    assert "fusion_rank" not in projected[0]
+    assert decision.evidence == evidence
+    assert decision.evidence[0].source_url == evidence[0].source_url
+    assert decision.evidence[0].source_file == evidence[0].source_file
+
+
+def test_audit_agent_accepts_llm_output_without_evidence_and_preserves_rag_evidence() -> None:
+    evidence = _evidence()
+    provider = AuditSequenceProvider(
+        [
+            '{"decision":"PENDING_HUMAN","risk_level":"MEDIUM",'
+            '"reason":"候选关系需人工复核","ai_suggestion":"PENDING_HUMAN",'
+            '"confidence":0.86}'
+        ]
+    )
+
+    decision = AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F-OUTPUT-WITHOUT-EVIDENCE",
+        error_type="FUZZY_MATCH_CANDIDATE",
+        exception_branch="BE-R007",
+        bank_amount="100.00",
+        clear_amount=None,
+        amount_diff=None,
+        evidence=evidence,
+        match_candidate_context={"flow_id": "CLEAR-009", "amount": "100.00"},
+    )
+
+    assert provider.calls == 1
+    assert decision.fallback_applied is False
+    assert decision.reason == "候选关系需人工复核"
+    assert decision.evidence == evidence
+    assert decision.evidence[0].source_url == evidence[0].source_url
+
+
+def test_audit_agent_projects_evidence_on_confirm_match_path() -> None:
+    provider = RecordingProvider()
+    evidence = _evidence()
+    match_candidate = {
+        "flow_id": "CLEAR-009",
+        "amount": "100.00",
+        "trade_date": "2026-06-22",
+        "counterparty": "示例公司",
+    }
+
+    decision = AuditAgent(provider=provider).decide_with_llm(
+        flow_id="F-CONFIRM-PROJECTION",
+        error_type="FUZZY_MATCH_CANDIDATE",
+        exception_branch="BE-R007",
+        bank_amount="100.00",
+        clear_amount=None,
+        amount_diff=None,
+        evidence=evidence,
+        match_candidate_context=match_candidate,
+    )
+
+    payload = provider.user_payload()
+    assert payload["task"] == "confirm_match"
+    assert payload["match_candidate"] == match_candidate
+    assert payload["evidence"] == [
+        {
+            "chunk_id": evidence[0].chunk_id,
+            "source_name": evidence[0].source_name,
+            "section_title": evidence[0].section_title,
+            "score": evidence[0].score,
+            "content": evidence[0].content,
+        }
+    ]
+    assert decision.evidence == evidence
+
+
 def test_reconciliation_audit_decision_schema_includes_fallback_fields() -> None:
     decision = AuditAgent(provider=FakeLLMProvider()).decide_with_llm(
         flow_id="F1010",
@@ -551,6 +654,7 @@ class RecordingProvider:
 
 class UnsafeHighRiskProvider:
     """Provider that returns unsafe AUTO_FIXED/LOW for DUPLICATE_BOOKING."""
+
     def __init__(self) -> None:
         self.calls = 0
 
@@ -683,6 +787,7 @@ def test_safety_policy_does_not_override_already_compliant_decision() -> None:
 
 class CompliantHighRiskProvider:
     """Provider that returns already-compliant PENDING_HUMAN/HIGH for BE-R008."""
+
     def complete(
         self,
         messages: list[dict[str, str]],

@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import chromadb
@@ -29,6 +30,9 @@ EMBEDDING_BACKEND_MODELS = {
     "bge_small": (BGE_SMALL_MODEL_NAME, BGE_SMALL_EMBEDDING_DIMENSIONS),
     "bge_m3": (BGE_M3_MODEL_NAME, BGE_M3_EMBEDDING_DIMENSIONS),
 }
+COLLECTION_SYNC_SCHEMA_VERSION = "1"
+COLLECTION_FINGERPRINT_KEY = "bank_reconciliation_source_fingerprint"
+COLLECTION_SCHEMA_VERSION_KEY = "bank_reconciliation_sync_schema_version"
 
 
 @dataclass(frozen=True)
@@ -142,23 +146,32 @@ class ChromaRuleStore:
         )
         self.embedding_function = built_embedding.embedding_function
         self._collections: dict[str, Collection] = {}
+        self._collection_lock = RLock()
 
     def collection(self, scenario_type: str = "BANK_ENTERPRISE") -> Collection:
         collection_name = self._collection_name_for_scenario(
             scenario_type,
             self.embedding_backend,
         )
-        collection = self._collections.get(collection_name)
-        if collection is None:
+        with self._collection_lock:
+            collection = self._collections.get(collection_name)
+            if collection is not None:
+                return collection
+
             self.chroma_path.mkdir(parents=True, exist_ok=True)
             client = chromadb.PersistentClient(path=str(self.chroma_path))
             collection = client.get_or_create_collection(
                 name=collection_name,
                 embedding_function=self.embedding_function,
             )
+            self._ensure_collection_synced(collection, scenario_type=scenario_type)
             self._collections[collection_name] = collection
-            self._sync_chunks(scenario_type)
-        return collection
+            return collection
+
+    def warmup(self, scenario_type: str = "BANK_ENTERPRISE") -> int:
+        """Initialize and synchronize one scenario without issuing a fake search."""
+
+        return self.collection(scenario_type).count()
 
     def rebuild_indexes(
         self,
@@ -190,6 +203,11 @@ class ChromaRuleStore:
                     documents=[chunk["content"] for chunk in chunks],
                     metadatas=[self._to_metadata(chunk) for chunk in chunks],
                 )
+            self._mark_collection_synced(
+                collection,
+                dict(collection.metadata or {}),
+                self._source_fingerprint(chunks, scenario_type=scenario_type),
+            )
             rebuilt_counts[scenario_type] = collection.count()
         return rebuilt_counts
 
@@ -233,16 +251,110 @@ class ChromaRuleStore:
             for metadata, document in zip(metadatas, documents, strict=True)
         ]
 
-    def _sync_chunks(self, scenario_type: str) -> None:
+    def _ensure_collection_synced(
+        self,
+        collection: Collection,
+        *,
+        scenario_type: str,
+    ) -> None:
         chunks = self._load_chunks(scenario_type)
-        if not chunks:
+        fingerprint = self._source_fingerprint(chunks, scenario_type=scenario_type)
+        metadata = dict(collection.metadata or {})
+        if metadata.get(COLLECTION_FINGERPRINT_KEY) == fingerprint:
             return
 
-        collection = self.collection(scenario_type=scenario_type)
-        collection.upsert(
-            ids=[chunk["chunk_id"] for chunk in chunks],
-            documents=[chunk["content"] for chunk in chunks],
-            metadatas=[self._to_metadata(chunk) for chunk in chunks],
+        # Collections created before fingerprinting may already contain exactly
+        # the canonical source. Compare their persisted payload without invoking
+        # the embedding function, then only add the marker when it matches.
+        if COLLECTION_FINGERPRINT_KEY not in metadata and self._collection_matches_chunks(
+            collection,
+            chunks,
+        ):
+            self._mark_collection_synced(collection, metadata, fingerprint)
+            return
+
+        self._sync_chunks(collection, chunks)
+        self._mark_collection_synced(collection, metadata, fingerprint)
+
+    def _sync_chunks(self, collection: Collection, chunks: list[dict[str, Any]]) -> None:
+        persisted = collection.get(include=[])
+        persisted_ids = {str(chunk_id) for chunk_id in persisted.get("ids") or []}
+        desired_ids = {str(chunk["chunk_id"]) for chunk in chunks}
+        stale_ids = sorted(persisted_ids - desired_ids)
+        if stale_ids:
+            collection.delete(ids=stale_ids)
+        if chunks:
+            collection.upsert(
+                ids=[chunk["chunk_id"] for chunk in chunks],
+                documents=[chunk["content"] for chunk in chunks],
+                metadatas=[self._to_metadata(chunk) for chunk in chunks],
+            )
+
+    def _collection_matches_chunks(
+        self,
+        collection: Collection,
+        chunks: list[dict[str, Any]],
+    ) -> bool:
+        persisted = collection.get(include=["documents", "metadatas"])
+        ids = persisted.get("ids") or []
+        documents = persisted.get("documents") or []
+        metadatas = persisted.get("metadatas") or []
+        if not (len(ids) == len(documents) == len(metadatas) == len(chunks)):
+            return False
+        persisted_by_id = {
+            str(chunk_id): (document, dict(metadata or {}))
+            for chunk_id, document, metadata in zip(
+                ids,
+                documents,
+                metadatas,
+                strict=True,
+            )
+        }
+        expected_by_id = {
+            str(chunk["chunk_id"]): (
+                chunk["content"],
+                {
+                    key: value
+                    for key, value in self._to_metadata(chunk).items()
+                    if value is not None
+                },
+            )
+            for chunk in chunks
+        }
+        return persisted_by_id == expected_by_id
+
+    def _source_fingerprint(
+        self,
+        chunks: list[dict[str, Any]],
+        *,
+        scenario_type: str,
+    ) -> str:
+        payload = {
+            "schema_version": COLLECTION_SYNC_SCHEMA_VERSION,
+            "scenario_type": scenario_type,
+            "embedding_backend": self.embedding_backend,
+            "chunks": chunks,
+        }
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _mark_collection_synced(
+        collection: Collection,
+        metadata: dict[str, Any],
+        fingerprint: str,
+    ) -> None:
+        collection.modify(
+            metadata={
+                **metadata,
+                COLLECTION_FINGERPRINT_KEY: fingerprint,
+                COLLECTION_SCHEMA_VERSION_KEY: COLLECTION_SYNC_SCHEMA_VERSION,
+            }
         )
 
     def _load_chunks(self, scenario_type: str) -> list[dict[str, Any]]:
@@ -373,6 +485,11 @@ class RuleRetriever:
 
     def collection_count(self) -> int:
         return self.store.count()
+
+    def warmup(self, scenario_type: str = "BANK_ENTERPRISE") -> int:
+        """Prepare the configured store for real searches in one scenario."""
+
+        return self.store.warmup(scenario_type)
 
     def get_by_chunk_ids(
         self,

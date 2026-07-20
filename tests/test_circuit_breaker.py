@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
 
 def test_circuit_breaker_opens_after_threshold_and_recovers_after_half_open_success() -> None:
@@ -56,6 +58,69 @@ def test_circuit_breaker_success_resets_intermittent_failures() -> None:
     assert breaker.record_failure() == "CLOSED"
     assert breaker.record_failure() == "CLOSED"
     assert breaker.state == "CLOSED"
+
+
+def test_stale_success_cannot_close_new_open_generation() -> None:
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=30, time_fn=lambda: 0.0)
+    opening = breaker.acquire()
+    late_success = breaker.acquire()
+    assert opening.permit is not None
+    assert late_success.permit is not None
+
+    assert breaker.record_failure(opening.permit) == "OPEN"
+    assert breaker.record_success(late_success.permit) == "OPEN"
+    assert breaker.state == "OPEN"
+
+
+def test_stale_failure_does_not_extend_new_open_generation() -> None:
+    now = [0.0]
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=10, time_fn=lambda: now[0])
+    opening = breaker.acquire()
+    late_failure = breaker.acquire()
+    assert opening.permit is not None
+    assert late_failure.permit is not None
+
+    assert breaker.record_failure(opening.permit) == "OPEN"
+    now[0] = 5.0
+    assert breaker.record_failure(late_failure.permit) == "OPEN"
+    now[0] = 11.0
+    assert breaker.state == "HALF_OPEN"
+
+
+def test_half_open_admission_is_atomic_and_only_probe_can_close() -> None:
+    now = [0.0]
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=1, time_fn=lambda: now[0])
+    assert breaker.record_failure() == "OPEN"
+    denied = breaker.acquire()
+    assert denied.allowed is False
+    assert denied.state_before == "OPEN"
+    now[0] = 2.0
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        admissions = list(executor.map(lambda _: breaker.acquire(), range(8)))
+
+    allowed = [admission for admission in admissions if admission.allowed]
+    assert len(allowed) == 1
+    assert {admission.state_before for admission in admissions} == {"HALF_OPEN"}
+    permit = allowed[0].permit
+    assert permit is not None
+    assert breaker.record_success(permit) == "CLOSED"
+
+
+def test_neutral_half_open_result_releases_probe_for_next_admission() -> None:
+    now = [0.0]
+    breaker = CircuitBreaker(fail_threshold=1, open_seconds=1, time_fn=lambda: now[0])
+    assert breaker.record_failure() == "OPEN"
+    now[0] = 2.0
+    neutral = breaker.acquire()
+    assert neutral.permit is not None
+
+    assert breaker.release_permit(neutral.permit) == "HALF_OPEN"
+    retry = breaker.acquire()
+    assert retry.allowed is True
+    assert retry.state_before == "HALF_OPEN"
+    assert retry.permit is not None
+    assert breaker.record_success(retry.permit) == "CLOSED"
 
 
 def test_search_rules_adapter_drives_breaker_state_machine() -> None:

@@ -227,7 +227,7 @@ def test_search_rules_succeeded_continues_to_audit() -> None:
     audit = CountingAuditAgent([0.9])
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=ForbiddenTraceAgent(),
         audit_agent=audit,
@@ -244,7 +244,7 @@ def test_search_rules_empty_short_circuits_to_human_with_zero_audit() -> None:
     audit = CountingAuditAgent([0.9])
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=ForbiddenTraceAgent(),
         audit_agent=audit,
@@ -265,7 +265,7 @@ def test_search_rules_failed_short_circuits_to_human_with_zero_audit() -> None:
     audit = CountingAuditAgent([0.9])
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=ForbiddenTraceAgent(),
         audit_agent=audit,
@@ -285,14 +285,14 @@ def test_breaker_open_and_real_empty_are_distinguishable_in_logs_but_both_human(
     empty_executor = RecordingToolExecutor({"search_rules": [_empty("search_rules")]})
 
     open_result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=ForbiddenTraceAgent(),
         audit_agent=CountingAuditAgent([0.9]),
         tool_executor=open_executor,
     )
     empty_result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=ForbiddenTraceAgent(),
         audit_agent=CountingAuditAgent([0.9]),
@@ -325,7 +325,7 @@ def test_load_confirmed_cases_succeeded_runs_second_audit() -> None:
     audit = CountingAuditAgent([0.4, 0.9])
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=CountingTraceAgent(),
         audit_agent=audit,
@@ -346,7 +346,7 @@ def test_load_confirmed_cases_empty_stops_before_second_audit_and_l3() -> None:
     trace = CountingTraceAgent()
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=trace,
         audit_agent=audit,
@@ -372,7 +372,7 @@ def test_load_confirmed_cases_failed_stops_before_second_audit_and_l3() -> None:
     trace = CountingTraceAgent()
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=trace,
         audit_agent=audit,
@@ -390,7 +390,7 @@ def test_high_confidence_l1_never_calls_load_confirmed_cases() -> None:
     audit = CountingAuditAgent([0.95])
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=ForbiddenTraceAgent(),
         audit_agent=audit,
@@ -518,7 +518,7 @@ def test_tool_executor_logs_only_safe_projection() -> None:
     audit = CountingAuditAgent([0.4, 0.9])
 
     result = run_item(
-        _state("BE-R002"),
+        _state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=CountingTraceAgent(),
         audit_agent=audit,
@@ -565,7 +565,7 @@ def test_no_stream_event_leaks_full_query_or_amounts() -> None:
     emitter = RecordingEmitter()
 
     run_item(
-        _sensitive_amount_state("BE-R002"),
+        _sensitive_amount_state("BE-R007"),
         extraction_agent=NoopExtractionAgent(),
         trace_agent=ForbiddenTraceAgent(),
         audit_agent=CountingAuditAgent([0.95]),

@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Any, NotRequired, Protocol, TypedDict
+from threading import local
+from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.exc import OperationalError
 
-from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision, audit_agent
+from bank_reconciliation_agent.agents.audit_agent import AuditAgent, AuditDecision
 from bank_reconciliation_agent.agents.extraction_agent import (
     ExtractionAgent,
-    ExtractionAgentError,
-    extraction_agent,
+    ExtractionResult,
 )
-from bank_reconciliation_agent.agents.trace_agent import TraceAgent, TraceAgentError, trace_agent
+from bank_reconciliation_agent.agents.trace_agent import TraceAgent, TraceAgentError
+from bank_reconciliation_agent.core.llm.provider import get_llm_provider
 from bank_reconciliation_agent.core.logging import bind_trace_context, log
 from bank_reconciliation_agent.schemas.rag import RagSearchItem, RagSearchResponse
 from bank_reconciliation_agent.schemas.stream import StreamEventType
@@ -56,8 +57,36 @@ from bank_reconciliation_agent.schemas.trace import (
 Recorder = TraceRecorder | NoOpRecorder
 
 
+class WorkflowAgentSuite(NamedTuple):
+    audit_agent: AuditAgent
+    extraction_agent: ExtractionAgent
+    trace_agent: TraceAgent
+
+
+_WORKFLOW_AGENT_LOCAL = local()
+
+
+def _thread_agent_suite() -> WorkflowAgentSuite:
+    suite = getattr(_WORKFLOW_AGENT_LOCAL, "suite", None)
+    provider_factory = get_llm_provider
+    if (
+        suite is None
+        or getattr(_WORKFLOW_AGENT_LOCAL, "provider_factory", None) is not provider_factory
+    ):
+        provider = provider_factory()
+        suite = WorkflowAgentSuite(
+            audit_agent=AuditAgent(provider=provider),
+            extraction_agent=ExtractionAgent(provider=provider),
+            trace_agent=TraceAgent(provider=provider),
+        )
+        _WORKFLOW_AGENT_LOCAL.suite = suite
+        _WORKFLOW_AGENT_LOCAL.provider_factory = provider_factory
+    return suite
+
+
 REVERSAL_HINTS = ("冲正", "红冲", "退款", "抹账", "撤销")
 TRACE_BRANCHES = {"BE-R005", "BE-R006", "BC-R003"}
+BANK_ENTERPRISE_LLM_AUDIT_BRANCHES = {"BE-R007"}
 
 
 class ReconciliationState(TypedDict):
@@ -233,12 +262,17 @@ def _finish_agent_span(
 def run_item(
     state: ReconciliationState,
     *,
-    extraction_agent: ExtractionAgent = extraction_agent,
-    trace_agent: TraceAgent = trace_agent,
-    audit_agent: AuditAgent = audit_agent,
+    extraction_agent: ExtractionAgent | None = None,
+    trace_agent: TraceAgent | None = None,
+    audit_agent: AuditAgent | None = None,
     tool_executor: ToolExecutorProtocol = default_tool_executor,
     emitter: StreamEmitter | None = None,
 ) -> ReconciliationState:
+    if extraction_agent is None or trace_agent is None or audit_agent is None:
+        suite = _thread_agent_suite()
+        extraction_agent = extraction_agent or suite.extraction_agent
+        trace_agent = trace_agent or suite.trace_agent
+        audit_agent = audit_agent or suite.audit_agent
     emitter = emitter or NullEmitter()
     recorder = _recorder(state)
     bind_trace_context(
@@ -266,45 +300,19 @@ def run_item(
     trace_payload: dict[str, Any] | None = None
 
     if exception_branch == "BE-R004" and _contains_reversal_hint(summary, remark):
-        _extract_handle = recorder.start_agent("ExtractionAgent")
-        try:
-            extraction_result = extraction_agent.extract(
-                flow_id=flow_id,
-                summary=summary,
-                remark=remark,
-            )
-        except ExtractionAgentError:
-            _finish_agent_span(
-                state,
-                _extract_handle,
-                agent=extraction_agent,
-                status=SpanStatus.FAILED,
-                emitter=emitter,
-            )
-            return _fail_closed_item(
-                state,
-                flow_id=flow_id,
-                agent=extraction_agent,
-                agent_name="ExtractionAgent",
-                step="extract",
-                emitter=emitter,
-            )
-        _finish_agent_span(
-            state,
-            _extract_handle,
-            agent=extraction_agent,
-            status=SpanStatus.SUCCEEDED,
-            emitter=emitter,
-        )
+        with recorder.span(SpanType.ROUTE, "RuleExtraction"):
+            extraction_result = _extract_reversal_hint(summary=summary, remark=remark)
+        _emit_trace_span(state, recorder, emitter)
         state["extraction_result"] = _model_or_mapping_dump(extraction_result)
         _append_agent_log(
             state,
             {
-                "agent_name": "ExtractionAgent",
-                "step": "extract",
+                "agent_name": "RuleExtractor",
+                "step": "extract_deterministic",
                 "flow_id": flow_id,
-                "prompt_version": getattr(extraction_agent, "prompt_version", None),
-                **_llm_usage(extraction_agent),
+                "execution_mode": "DETERMINISTIC",
+                "output": state["extraction_result"],
+                **_zero_llm_usage(),
             },
             emitter,
         )
@@ -331,7 +339,10 @@ def run_item(
                 "accounting_date": t1_result.result.accounting_date.isoformat(),
             }
 
-    if exception_branch in TRACE_BRANCHES:
+    if exception_branch in TRACE_BRANCHES and not (
+        state["scenario_type"] == "BANK_ENTERPRISE"
+        and exception_branch in {"BE-R005", "BE-R006"}
+    ):
         trace_kwargs = {
             "flow_id": flow_id,
             "summary": summary,
@@ -436,7 +447,7 @@ def run_item(
     if exception_branch == "BC-R003":
         audit_kwargs["trace_context"] = trace_payload
 
-    audit_decision = _audit_decision_once(
+    audit_decision, audit_execution_mode = _audit_decision_for_state(
         state=state,
         audit_agent=audit_agent,
         audit_kwargs=audit_kwargs,
@@ -446,18 +457,29 @@ def run_item(
         state,
         {
             "agent_name": "AuditAgent",
-            "step": "decide_with_llm",
+            "step": (
+                "decide_with_llm"
+                if audit_execution_mode == "LLM"
+                else "decide_deterministic"
+            ),
             "flow_id": flow_id,
             "fallback_level": 1,
+            "execution_mode": audit_execution_mode,
             "output_payload": audit_decision.model_dump(mode="json"),
-            "prompt_version": getattr(audit_agent, "prompt_version", None),
+            "prompt_version": (
+                getattr(audit_agent, "prompt_version", None)
+                if audit_execution_mode == "LLM"
+                else None
+            ),
             **_llm_usage(audit_agent),
         },
         emitter,
     )
 
     fallback_path = "L1"
-    if state.get("error_message") == "schema validation failed":
+    if audit_execution_mode == "DETERMINISTIC":
+        fallback_path = "RULE"
+    elif state.get("error_message") == "schema validation failed":
         fallback_path = "HUMAN"
     elif l1_requires_l2(audit_decision):
         fallback_path = "L1->L2"
@@ -677,7 +699,7 @@ def _run_fuzzy_candidate_confirmation(
         "evidence": rag_items,
         "match_candidate_context": candidate,
     }
-    decision = _audit_decision_once(
+    decision, audit_execution_mode = _audit_decision_for_state(
         state=state,
         audit_agent=audit_agent,
         audit_kwargs=audit_kwargs,
@@ -690,6 +712,7 @@ def _run_fuzzy_candidate_confirmation(
             "step": "confirm_match",
             "flow_id": flow_id,
             "fallback_level": 0,
+            "execution_mode": audit_execution_mode,
             "output_payload": decision.model_dump(mode="json"),
             "prompt_version": getattr(audit_agent, "prompt_version", None),
             **_llm_usage(audit_agent),
@@ -719,7 +742,7 @@ def _run_fuzzy_candidate_confirmation(
             "clear_amount": _optional_string(candidate_amount),
             "amount_diff": _optional_string(difference),
         }
-        decision = _audit_decision_once(
+        decision, audit_execution_mode = _audit_decision_for_state(
             state=state,
             audit_agent=audit_agent,
             audit_kwargs={
@@ -733,15 +756,26 @@ def _run_fuzzy_candidate_confirmation(
             },
             emitter=emitter,
         )
+        if audit_execution_mode == "DETERMINISTIC":
+            fallback_path = "RULE"
         _append_agent_log(
             state,
             {
                 "agent_name": "AuditAgent",
-                "step": "decide_with_llm",
+                "step": (
+                    "decide_with_llm"
+                    if audit_execution_mode == "LLM"
+                    else "decide_deterministic"
+                ),
                 "flow_id": flow_id,
                 "fallback_level": 0,
+                "execution_mode": audit_execution_mode,
                 "output_payload": decision.model_dump(mode="json"),
-                "prompt_version": getattr(audit_agent, "prompt_version", None),
+                "prompt_version": (
+                    getattr(audit_agent, "prompt_version", None)
+                    if audit_execution_mode == "LLM"
+                    else None
+                ),
                 **_llm_usage(audit_agent),
             },
             emitter,
@@ -899,6 +933,49 @@ def _audit_decision_once(
         emitter=emitter,
     )
     return decision
+
+
+def _audit_decision_for_state(
+    *,
+    state: ReconciliationState,
+    audit_agent: AuditAgent,
+    audit_kwargs: dict[str, Any],
+    emitter: StreamEmitter,
+) -> tuple[AuditDecision, str]:
+    """Use rules for BANK_ENTERPRISE, retaining LLM confirmation only for R007.
+
+    BANK_CLEARING intentionally keeps its existing LLM-backed behaviour.  The
+    deterministic branch is still represented in Trace, but as a ROUTE span so
+    Agent-span/token metrics continue to mean an actual model invocation.
+    """
+    exception_branch = str(audit_kwargs.get("exception_branch") or "")
+    use_rule_first = (
+        state["scenario_type"] == "BANK_ENTERPRISE"
+        and exception_branch not in BANK_ENTERPRISE_LLM_AUDIT_BRANCHES
+    )
+    if not use_rule_first:
+        return (
+            _audit_decision_once(
+                state=state,
+                audit_agent=audit_agent,
+                audit_kwargs=audit_kwargs,
+                emitter=emitter,
+            ),
+            "LLM",
+        )
+
+    state["error_message"] = None
+    state["retry_count"] = 0
+    # Thread-local agents are reused across flows.  Clear stale usage only for
+    # a fresh rule decision; the LLM path must retain invalid-call telemetry
+    # when ``decide_with_llm`` falls back through ``AuditAgent.decide``.
+    audit_agent.last_llm_result = None
+    audit_agent.last_llm_summary = None
+    recorder = _recorder(state)
+    with recorder.span(SpanType.ROUTE, "RuleAudit"):
+        decision = schema_hook(audit_agent.decide(**audit_kwargs))
+    _emit_trace_span(state, recorder, emitter)
+    return decision, "DETERMINISTIC"
 
 
 def _build_tool_context(
@@ -1146,6 +1223,30 @@ def _contains_reversal_hint(summary: str, remark: str | None) -> bool:
     return any(keyword in text for keyword in REVERSAL_HINTS)
 
 
+def _extract_reversal_hint(*, summary: str, remark: str | None) -> ExtractionResult:
+    """Classify explicit reversal keywords without a model call.
+
+    This path runs only after ``_contains_reversal_hint`` succeeds.  It never
+    guesses an original flow id; an id that is not supplied as a structured
+    input remains ``None``.
+    """
+    text = " ".join(part.strip() for part in (summary, remark or "") if part.strip())
+    if "冲正" in text or "红冲" in text:
+        standard_type = "REVERSAL"
+    elif "退款" in text:
+        standard_type = "REFUND"
+    elif "抹账" in text or "撤销" in text:
+        standard_type = "CANCEL"
+    else:
+        standard_type = "UNKNOWN"
+    return ExtractionResult(
+        standard_type=standard_type,
+        original_flow_id=None,
+        cleaned_remark=text,
+        confidence=1.0,
+    )
+
+
 def _flow_id(state: ReconciliationState) -> str:
     return str(
         state["source_a_item"].get("flow_id")
@@ -1232,3 +1333,7 @@ def _llm_usage(agent: Any) -> dict[str, Any]:
         "final_failure_type": None,
         "fallback_reason": None,
     }
+
+
+def _zero_llm_usage() -> dict[str, Any]:
+    return _llm_usage(object())

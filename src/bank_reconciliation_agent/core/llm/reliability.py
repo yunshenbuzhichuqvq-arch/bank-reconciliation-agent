@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from threading import Lock
 from typing import Callable
 from uuid import uuid4
 
@@ -45,6 +46,7 @@ def _attempt_retryable(record: LLMAttemptRecord) -> bool:
     return record.failure_type in _RETRYABLE_FAILURE_TYPES
 
 _llm_breaker: CircuitBreaker | None = None
+_llm_breaker_lock = Lock()
 
 
 def get_llm_breaker() -> CircuitBreaker:
@@ -52,10 +54,12 @@ def get_llm_breaker() -> CircuitBreaker:
 
     global _llm_breaker
     if _llm_breaker is None:
-        _llm_breaker = CircuitBreaker(
-            fail_threshold=settings.llm_breaker_fail_threshold,
-            open_seconds=settings.llm_breaker_open_seconds,
-        )
+        with _llm_breaker_lock:
+            if _llm_breaker is None:
+                _llm_breaker = CircuitBreaker(
+                    fail_threshold=settings.llm_breaker_fail_threshold,
+                    open_seconds=settings.llm_breaker_open_seconds,
+                )
     return _llm_breaker
 
 
@@ -88,8 +92,9 @@ class CircuitBreakingLLMProvider:
         response_format: str = "json_object",
         response_validator: ResponseValidator | None = None,
     ) -> LLMResult:
-        state_before = self.breaker.state
-        if not self.breaker.allow_request():
+        admission = self.breaker.acquire()
+        state_before = admission.state_before
+        if not admission.allowed:
             record = LLMAttemptRecord(
                 physical_attempt=1,
                 outcome="breaker_open",
@@ -105,6 +110,8 @@ class CircuitBreakingLLMProvider:
                 attempts=[record],
                 fallback_reason="breaker_open",
             )
+        permit = admission.permit
+        assert permit is not None
 
         started_at = self._time_fn()
         try:
@@ -118,9 +125,9 @@ class CircuitBreakingLLMProvider:
             duration_ms = self._elapsed_ms(started_at)
             if exc.failure_type in _BREAKER_FAILURE_TYPES:
                 self._last_failure_type = exc.failure_type
-                state_after = self.breaker.record_failure()
+                state_after = self.breaker.record_failure(permit)
             else:
-                state_after = self.breaker.state
+                state_after = self.breaker.release_permit(permit)
             exc.attempts = [
                 LLMAttemptRecord(
                     physical_attempt=1,
@@ -132,9 +139,12 @@ class CircuitBreakingLLMProvider:
                 )
             ]
             raise
+        except Exception:
+            self.breaker.release_permit(permit)
+            raise
 
         duration_ms = self._elapsed_ms(started_at)
-        state_after = self.breaker.record_success()
+        state_after = self.breaker.record_success(permit)
         record = LLMAttemptRecord(
             physical_attempt=1,
             outcome="success",

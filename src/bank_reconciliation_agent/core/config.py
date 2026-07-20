@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     rag_breaker_fail_threshold: int = 5
     rag_breaker_open_seconds: int = 30
     cutoff_window: str = "22:00-24:00"
+    reconciliation_max_concurrency: int = Field(default=6, ge=1, le=8)
     arq_job_max_attempts: int = Field(default=3, ge=1)
     arq_job_timeout_seconds: int = Field(default=300, ge=1)
 

@@ -81,6 +81,7 @@ class CandidateAuditAgent:
     def __init__(self, decisions: list[tuple[str, float]]) -> None:
         self.decisions = decisions
         self.calls: list[dict[str, object]] = []
+        self.rule_calls: list[dict[str, object]] = []
 
     def decide_with_llm(self, flow_id: str, **kwargs) -> AuditDecision:
         self.calls.append(kwargs)
@@ -94,6 +95,19 @@ class CandidateAuditAgent:
             evidence=kwargs["evidence"],
             confidence=confidence if kwargs["evidence"] else 0.0,
             next_action=decision,
+        )
+
+    def decide(self, flow_id: str, **kwargs) -> AuditDecision:
+        self.rule_calls.append(kwargs)
+        return AuditDecision(
+            flow_id=flow_id,
+            decision="PENDING_HUMAN",
+            risk_level="MEDIUM",
+            reason="金额不一致，建议人工复核。",
+            ai_suggestion="PENDING_HUMAN",
+            evidence=kwargs["evidence"],
+            confidence=0.82,
+            next_action="PENDING_HUMAN",
         )
 
 
@@ -126,12 +140,13 @@ def test_confirmed_unequal_candidate_becomes_amount_mismatch_without_fallback_lo
 
     result = _run(_state(candidate_amount="101.00"), agent)
 
-    assert len(agent.calls) == 2
-    assert agent.calls[1]["error_type"] == "AMOUNT_MISMATCH"
-    assert agent.calls[1].get("match_candidate_context") is None
+    assert len(agent.calls) == 1
+    assert len(agent.rule_calls) == 1
+    assert agent.rule_calls[0]["error_type"] == "AMOUNT_MISMATCH"
+    assert agent.rule_calls[0].get("match_candidate_context") is None
     assert result["error_type"] == "AMOUNT_MISMATCH"
     assert result["exception_branch"] == "BE-R002"
-    assert result["fallback_path"] == "L1"
+    assert result["fallback_path"] == "RULE"
 
 
 def test_rejected_candidate_restores_true_single_side() -> None:

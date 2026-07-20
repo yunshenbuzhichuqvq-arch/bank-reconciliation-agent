@@ -856,9 +856,7 @@ def test_llm_item_failure_stays_in_job_without_arq_retry(
                 sanitized_reason="upstream down",
             )
 
-    monkeypatch.setattr(workflow_module.extraction_agent, "provider", FailingProvider())
-    monkeypatch.setattr(workflow_module.trace_agent, "provider", FailingProvider())
-    monkeypatch.setattr(workflow_module.audit_agent, "provider", FailingProvider())
+    monkeypatch.setattr(workflow_module, "get_llm_provider", FailingProvider)
 
     bank_path, clear_path = generate_mvp1_mock_excel(tmp_path)
     task_id = "TASK-LLM-BOUNDARY"

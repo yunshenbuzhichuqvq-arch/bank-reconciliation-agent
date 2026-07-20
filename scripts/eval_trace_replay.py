@@ -188,6 +188,9 @@ class _SpyAuditAgent:
             next_action="PENDING_HUMAN",
         )
 
+    def decide(self, flow_id: str, **kwargs) -> AuditDecision:
+        return self.decide_with_llm(flow_id, **kwargs)
+
 
 class _AutoFixedAuditAgent:
     def __init__(self) -> None:
@@ -295,7 +298,8 @@ def _state(
     *,
     recorder: TraceRecorder | None = None,
 ) -> ReconciliationState:
-    return {
+    is_fuzzy = exception_branch == "BE-R007"
+    state: ReconciliationState = {
         "task_id": "TASK-EVAL",
         "user_id": "eval_user",
         "thread_id": "TASK-EVAL",
@@ -303,12 +307,12 @@ def _state(
         "current_queue_id": None,
         "source_a_item": {"flow_id": flow_id, "summary": "摘要"},
         "source_b_item": {"flow_id": flow_id, "summary": "摘要"},
-        "error_type": "AMOUNT_MISMATCH",
+        "error_type": "FUZZY_MATCH_CANDIDATE" if is_fuzzy else "AMOUNT_MISMATCH",
         "exception_branch": exception_branch,
         "math_result": {
             "bank_amount": "100.00",
-            "clear_amount": "99.00",
-            "amount_diff": "1.00",
+            "clear_amount": None if is_fuzzy else "99.00",
+            "amount_diff": None if is_fuzzy else "1.00",
         },
         "extraction_result": {},
         "rag_context": [],
@@ -321,6 +325,14 @@ def _state(
         "agent_logs": [],
         "recorder": recorder,
     }
+    if is_fuzzy:
+        state["fuzzy_candidate"] = {
+            "flow_id": f"{flow_id}-CANDIDATE",
+            "amount": "100.00",
+            "trade_date": "2026-06-22",
+            "counterparty": "示例公司",
+        }
+    return state
 
 
 def _run_flow(
@@ -436,7 +448,12 @@ def _base_scenario(
 def scenario_success() -> dict[str, object]:
     ts = _make_trace_service()
     recorder = TraceRecorder(user_id="eval_user", task_id="TASK-EVAL", flow_id="F-SUCCESS")
-    state = _run_flow("F-SUCCESS", recorder, audit_agent=_AutoFixedAuditAgent())
+    state = _run_flow(
+        "F-SUCCESS",
+        recorder,
+        exception_branch="BE-R007",
+        audit_agent=_AutoFixedAuditAgent(),
+    )
     spans = _finalize_from_state(recorder, state)
     persisted = _persist_and_verify(ts, "eval_user", "TASK-EVAL", "F-SUCCESS", spans)
     passed = persisted and _terminal_type(spans) == "FINAL"
@@ -478,7 +495,12 @@ def scenario_agent_repair_failure() -> dict[str, object]:
     ts = _make_trace_service()
     recorder = TraceRecorder(user_id="eval_user", task_id="TASK-EVAL", flow_id="F-AGENT-FAIL")
     agent = AuditAgent(provider=_StructuredRepairFailureProvider())
-    state = _run_flow("F-AGENT-FAIL", recorder, audit_agent=agent)
+    state = _run_flow(
+        "F-AGENT-FAIL",
+        recorder,
+        exception_branch="BE-R007",
+        audit_agent=agent,
+    )
     spans = _finalize_from_state(recorder, state)
     persisted = _persist_and_verify(ts, "eval_user", "TASK-EVAL", "F-AGENT-FAIL", spans)
     facts = _agent_span_facts(spans)
@@ -502,7 +524,12 @@ def scenario_agent_repair_failure() -> dict[str, object]:
 def scenario_guard_blocked() -> dict[str, object]:
     ts = _make_trace_service()
     recorder = TraceRecorder(user_id="eval_user", task_id="TASK-EVAL", flow_id="F-GUARD")
-    state = _run_flow("F-GUARD", recorder, audit_agent=_GuardBlockAuditAgent())
+    state = _run_flow(
+        "F-GUARD",
+        recorder,
+        exception_branch="BE-R007",
+        audit_agent=_GuardBlockAuditAgent(),
+    )
     spans = _finalize_from_state(recorder, state)
     persisted = _persist_and_verify(ts, "eval_user", "TASK-EVAL", "F-GUARD", spans)
     guard = next((s for s in spans if s.span_type == SpanType.GUARD), None)

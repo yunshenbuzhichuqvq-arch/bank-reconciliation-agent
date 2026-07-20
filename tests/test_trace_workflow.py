@@ -166,7 +166,7 @@ def _match_result(flow_id: str) -> ReconciliationMatchResult:
 def test_run_item_records_route_tool_agent_guard_spans() -> None:
     recorder = _recorder()
     run_item(
-        _state("BE-R002", recorder),
+        _state("BE-R007", recorder),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
@@ -188,7 +188,7 @@ def test_run_item_records_route_tool_agent_guard_spans() -> None:
     assert SpanType.GUARD in types
     # No SKIPPED node exists in the closed enum; only executed nodes are recorded.
     route = [s for s in spans if s.span_type == SpanType.ROUTE][0]
-    assert route.name == "BE-R002"
+    assert route.name == "BE-R007"
     tool = [s for s in spans if s.span_type == SpanType.TOOL][0]
     assert tool.name == "search_rules"
     assert tool.outcome == "RESULT"
@@ -200,7 +200,7 @@ def test_run_item_records_route_tool_agent_guard_spans() -> None:
 def test_agent_span_only_holds_token_fields() -> None:
     recorder = _recorder()
     run_item(
-        _state("BE-R002", recorder),
+        _state("BE-R007", recorder),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
@@ -232,7 +232,7 @@ class _SearchFailExecutor:
 def test_tool_failed_short_circuit_has_no_agent_or_guard_spans() -> None:
     recorder = _recorder()
     run_item(
-        _state("BE-R002", recorder),
+        _state("BE-R007", recorder),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
@@ -468,7 +468,7 @@ def test_tool_span_allocated_before_execute_call() -> None:
     recorder = _recorder()
     probe = _AllocationProbeToolExecutor(recorder, StaticRetriever())
     run_item(
-        _state("BE-R002", recorder),
+        _state("BE-R007", recorder),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=SpyAuditAgent(),
@@ -494,7 +494,7 @@ def test_agent_span_allocated_before_agent_call() -> None:
     recorder = _recorder()
     probe = _AllocationProbeAuditAgent(recorder)
     run_item(
-        _state("BE-R002", recorder),
+        _state("BE-R007", recorder),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=probe,
@@ -548,7 +548,7 @@ class _RetryRecoveredProvider:
 def test_agent_span_recovered_error_type_from_attempts() -> None:
     recorder = _recorder()
     run_item(
-        _state("BE-R002", recorder),
+        _state("BE-R007", recorder),
         extraction_agent=SpyExtractionAgent(),
         trace_agent=SpyTraceAgent(),
         audit_agent=AuditAgent(provider=_RetryRecoveredProvider()),

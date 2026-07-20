@@ -4,6 +4,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
+from threading import Lock
 from typing import Callable, Mapping
 
 from pydantic import BaseModel, ValidationError
@@ -70,15 +71,18 @@ class ToolDefinition:
 
 
 _shared_executor: ThreadPoolExecutor | None = None
+_shared_executor_lock = Lock()
 
 
 def get_shared_executor() -> ThreadPoolExecutor:
     global _shared_executor
     if _shared_executor is None:
-        _shared_executor = ThreadPoolExecutor(
-            max_workers=SHARED_EXECUTOR_MAX_WORKERS,
-            thread_name_prefix="tool-executor",
-        )
+        with _shared_executor_lock:
+            if _shared_executor is None:
+                _shared_executor = ThreadPoolExecutor(
+                    max_workers=SHARED_EXECUTOR_MAX_WORKERS,
+                    thread_name_prefix="tool-executor",
+                )
     return _shared_executor
 
 
