@@ -14,7 +14,9 @@
 - YAML 规则和任务/队列状态机决定异常类型、处理分支和终态。
 - Agent 只读取受控上下文，用于摘要提取、交易追溯、审计建议和报告叙述。
 - RAG 提供可引用的规则证据；无证据、低置信、冲突或工具失败时 fail closed 转人工。
-- 人工终态沉淀为可追溯的历史确认案例，在后续低置信分支中按需复用。
+- 低置信分支可以按需读取近期已复核差错台账；读取失败或证据不足时转人工。
+
+第一次阅读项目时，请先看 [`docs/current-system-map.md`](docs/current-system-map.md)。该文档只描述当前代码路径，不混入历史 Stage 和未来规划。
 
 ## 核心能力
 
@@ -23,7 +25,7 @@
 - **受约束 Agent 链路**：ExtractionAgent、TraceAgent、AuditAgent 和 ReportAgent 通过 Pydantic 结构化输出、硬约束与决策 Hook 接入业务流程。
 - **RAG 证据检索**：ChromaDB dense 检索，可选 BM25、RRF、Reranker 和 Query Rewrite；检索结果保留来源、分数和 chunk ID。
 - **确定性工具调用**：工作流而非 LLM 自主选择 `search_rules`、`lookup_t1_context` 和 `load_confirmed_cases`；工具具有白名单、严格参数、租户上下文、超时、重试和稳定结果状态。
-- **Historical Case Store**：人工终态形成版本化案例；只有租户一致、规则兼容且通过质量门禁的 `ACTIVE` 案例可进入 L2，上下文冲突、空结果或读取失败均转人工。
+- **复核台账证据**：L2 只读工具按租户和异常分支读取近期已复核差错台账；空结果、冲突或读取失败均转人工。
 - **Human-in-the-Loop**：支持待复核列表、确认平账、强制挂账和可选 LangGraph SQLite checkpoint 子图。
 - **可观测闭环**：structlog、Prompt 版本、Agent/Tool attempt、SSE 实时事件、持久化 Trace 和只读 Replay 页面共同还原执行过程。
 - **可运行交付**：FastAPI + Vue 前后端、JWT、MySQL、Redis/ARQ、五服务 Docker Compose、外部 smoke 和 GitHub Actions CI。
@@ -40,11 +42,11 @@ flowchart TB
     FLOW["Plain Python Workflow"]
     TOOLS["Deterministic Tool Executor<br/>allowlist / timeout / retry / breaker"]
     RAG["RAG<br/>Chroma dense + BM25 / RRF / Reranker"]
-    CASES["Historical Case Store<br/>tenant-scoped / versioned / ACTIVE only"]
+    CASES["Reviewed Ledger Evidence<br/>tenant-scoped / read-only"]
     AGENTS["Extraction / Trace / Audit / Report Agents"]
     GUARDS["Schema + Hard Constraints + Decision Hooks"]
     REVIEW["Human Review<br/>plain transaction / optional LangGraph checkpoint"]
-    MYSQL["MySQL<br/>任务 / 流水 / 队列 / 台账 / 复核 / Trace / 案例"]
+    MYSQL["MySQL<br/>任务 / 流水 / 队列 / 台账 / 复核 / Trace"]
     OBS["structlog + SSE + Trace Replay + Eval Reports"]
 
     UI --> API
@@ -75,11 +77,11 @@ flowchart TB
   → 标准化与 Decimal 金额计算
   → 精确匹配 / 模糊候选 / 单边残留识别
   → YAML 规则命中与异常分支路由
-  → 确定性工具读取规则、T+1 上下文和历史确认案例
+  → 确定性工具读取规则、T+1 上下文和近期已复核台账
   → Agent 生成结构化建议
   → Schema 校验 → 硬约束 → 决策/Fallback
   → 自动平账，或写入差错台账并进入人工复核
-  → 人工确认/挂账 → 原子更新状态并沉淀历史案例
+  → 人工确认/挂账 → 原子更新台账、队列和任务状态
   → 报告、指标、Trace Replay 和离线 Eval
 ```
 
@@ -106,12 +108,12 @@ flowchart TB
 1. **确定性逻辑优先**：金额使用 `Decimal`，LLM 不参与账务计算、候选唯一性或数据库写入。
 2. **结构化输出不是最终防线**：Pydantic Schema 之后仍执行硬约束和决策 Hook；高风险、低置信、无证据和异常输出统一转人工。
 3. **工具是代码编排的只读边界**：Tool Executor 校验名称、参数、场景、`user_id/task_id/flow_id` 归属，并将结果归一为 `SUCCEEDED / EMPTY / FAILED`。
-4. **历史案例不是通用记忆**：Historical Case Store 保存人工确认事实及其规则版本、证据和版本链，只在 L2 低置信路径按需检索，不建立用户画像，也不替代当前 RAG 证据。
-5. **副作用延后且可审计**：Agent 阶段只产生候选决策，校验通过后再事务落库；人工复核、台账终态与案例写入保持原子边界。
+4. **复核台账不是独立记忆系统**：L2 当前只读取近期已复核差错台账，不存在版本化 Confirmed Case Store，也不建立用户画像。
+5. **副作用延后且可审计**：Agent 阶段只产生候选决策，校验通过后再事务落库；人工复核、台账终态与任务统计保持原子边界。
 6. **Trace 与业务结果解耦**：每个 flow 记录 Workflow、Route、Tool、Agent、Guard 和终态 span；Trace 写入失败不会改写已经确定的业务结果。
 7. **评测证据分层**：Fake/hash 确定性检查用于默认 CI；真实 provider、真实 embedding、延迟/token/成本只作为 opt-in 离线诊断，不包装为生产 SLA。
 
-长期决策见 [`decisions/`](decisions/)，历史案例库设计见 [`ADR-33.1`](decisions/ADR-33.1-confirmed-case-store.md)。
+当前模块边界见 [`ADR-34.1`](decisions/ADR-34.1-current-application-module-boundaries.md)。长期决策见 [`decisions/`](decisions/)；[`ADR-33.1`](decisions/ADR-33.1-confirmed-case-store.md) 仅描述尚未落地的案例库方案。
 
 ## 目录结构
 
@@ -123,7 +125,7 @@ src/bank_reconciliation_agent/
   db/              SQLAlchemy engine 与 MySQL DDL
   rag/             Dense、BM25、RRF、Reranker、Query Rewrite
   schemas/         API、Agent、Tool、Trace 的 Pydantic contract
-  services/        对账、规则、工作流、复核、台账、队列、Trace
+  services/        应用入口及按输入、批次、flow、决策、持久化拆分的服务模块
 frontend/          Vue 工作台与前端测试
 rules/             两类场景的 YAML 规则
 prompts/           版本化 Agent Prompt
@@ -340,7 +342,7 @@ uv run python -m scripts.eval_gates
 - **LLM**：调用级 timeout、最多 3 次 transport attempt、指数退避、熔断、一次结构化修复；最终失败转人工。
 - **Tool**：只读白名单、严格输入/输出、最长 5/30 秒 timeout、最多 2 次 attempt、RAG breaker；`EMPTY` 与 `FAILED` 不交给 LLM 猜测。
 - **Job**：Redis 幂等 key、ARQ attempt-aware retry、300 秒默认超时和终态条件更新，避免重复 worker 覆盖完成状态。
-- **Fallback**：L1 当前规则证据 → L2 历史确认案例 → L3 追溯/换角度；RAG 无命中、案例冲突、硬约束失败或模型失败均转 `PENDING_HUMAN`。
+- **Fallback**：L1 当前规则证据 → L2 近期已复核台账 → L3 追溯/换角度；RAG 无命中、台账为空、硬约束失败或模型失败均转 `PENDING_HUMAN`。
 - **Trace**：span 记录 attempt、token、恢复后的错误类型、工具证据 ID、Fallback 原因和终态；Replay 按 JWT user → task → flow → trace 顺序校验归属。
 - **日志**：structlog 携带 `trace_id`、`task_id`、`flow_id`、Agent/Tool 名称与 Prompt 版本，不把原始异常文本直接作为稳定业务状态。
 - **隔离**：业务查询和写入显式携带 `user_id`；跨租户资源返回不泄露存在性的 404。
@@ -355,8 +357,8 @@ uv run python -m scripts.eval_gates
 - Trace 在 flow 完成后批量写入；进程在持久化前崩溃会留下 crash gap，当前也没有 retention/delete 机制。
 - `vite preview` 只用于本地演示，不是生产静态资源服务器或反向代理方案。
 - JWT 当前是演示级认证，默认账号和 secret 不安全；项目没有完整 RBAC、maker-checker、密钥托管或生产级数据治理。
-- Historical Case Store V1 只对 `BE-R002 / AMOUNT_MISMATCH` 和 `BC-R003 / CUTOFF_CROSS_DAY` 提供激活检索 policy；其他分支仅记录案例，不自动用于 Prompt。
-- 历史案例 V1 使用可解释的结构化匹配，不使用向量相似度；`BC-R003` 也不包含节假日日历，因此不能宣称识别“下一工作日”。
+- L2 当前只按 `user_id + exception_branch` 读取最近 3 条 `FIXED / HELD` 台账记录，没有独立案例版本、质量门禁或规则兼容性判断。
+- `BC-R003` 的 T+1 上下文不包含节假日日历，因此不能宣称识别“下一工作日”。
 - MySQL DDL 和 SQLAlchemy `Table` 需要同步维护；当前没有通用 schema migration 与生产 existing-volume 升级方案。
 
 ## Roadmap

@@ -358,7 +358,8 @@ def test_production_path_sse_span_set_matches_persisted_rows(monkeypatch) -> Non
     trace_service = TraceService(engine)
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.trace_service", trace_service
+        "bank_reconciliation_agent.services.reconciliation_persistence.trace_service",
+        trace_service,
     )
     monkeypatch.setattr(
         "bank_reconciliation_agent.services.reconciliation.transaction_service.get_bank_row",
@@ -489,9 +490,11 @@ def _install_event_failure(monkeypatch, emitter):
     def _boom(view, *, seq):
         raise RuntimeError(_SENSITIVE_MARKER)
 
-    monkeypatch.setattr("bank_reconciliation_agent.services.workflow.to_trace_span_event", _boom)
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.to_trace_span_event", _boom
+        "bank_reconciliation_agent.services.workflow_runtime.to_trace_span_event", _boom
+    )
+    monkeypatch.setattr(
+        "bank_reconciliation_agent.services.reconciliation_flow.to_trace_span_event", _boom
     )
     return emitter
 
@@ -518,6 +521,8 @@ def test_production_path_trace_span_failure_is_isolated(monkeypatch, installer) 
     recording_log = _RecordingLog()
     monkeypatch.setattr("bank_reconciliation_agent.services.workflow.log", recording_log)
     monkeypatch.setattr("bank_reconciliation_agent.services.reconciliation.log", recording_log)
+    monkeypatch.setattr("bank_reconciliation_agent.services.workflow_runtime.log", recording_log)
+    monkeypatch.setattr("bank_reconciliation_agent.services.reconciliation_flow.log", recording_log)
 
     user_id = "iso_u"
     task_id = f"TASK-ISO-{installer.__name__}"

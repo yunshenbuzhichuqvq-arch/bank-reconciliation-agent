@@ -578,7 +578,7 @@ def test_reconciliation_service_build_match_results_passes_scenario_type(monkeyp
         return []
 
     monkeypatch.setattr(
-        "bank_reconciliation_agent.services.reconciliation.exception_router.classify",
+        "bank_reconciliation_agent.services.reconciliation_input.exception_router.classify",
         fake_classify,
     )
 

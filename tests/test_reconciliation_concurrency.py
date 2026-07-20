@@ -23,6 +23,7 @@ from bank_reconciliation_agent.schemas.tools import (
 from bank_reconciliation_agent.schemas.trace import SpanType
 from bank_reconciliation_agent.services.circuit_breaker import CircuitBreaker
 from bank_reconciliation_agent.services import reconciliation as reconciliation_module
+from bank_reconciliation_agent.services import reconciliation_batch
 from bank_reconciliation_agent.services.reconciliation import (
     ReconciliationFlowBundle,
     ReconciliationMatchResult,
@@ -255,8 +256,8 @@ def test_config_one_caps_parallel_direct_batches_process_wide(monkeypatch) -> No
 
     monkeypatch.setattr(settings, "reconciliation_max_concurrency", 1)
     monkeypatch.setattr(
-        reconciliation_module,
-        "_reconciliation_admission_gate",
+        reconciliation_batch,
+        "_admission_gate",
         BoundedSemaphore(1),
     )
 

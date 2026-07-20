@@ -655,6 +655,7 @@ def scenario_trace_write_failure_isolation() -> dict[str, object]:
     Trace batch is dropped (0 rows) and the failure counter increments by one.
     """
     import bank_reconciliation_agent.services.reconciliation as recon_module
+    import bank_reconciliation_agent.services.reconciliation_persistence as persistence_module
     from bank_reconciliation_agent.services.ledger import ledger_service
     from bank_reconciliation_agent.services.queue import queue_service
     from bank_reconciliation_agent.services.reconciliation import (
@@ -698,14 +699,14 @@ def scenario_trace_write_failure_isolation() -> dict[str, object]:
             emitter=emitter,
         )
 
-    orig_trace = recon_module.trace_service
+    orig_trace = persistence_module.trace_service
     orig_run = recon_module.run_item
     orig_bank = recon_module.transaction_service.get_bank_row
     orig_clear = recon_module.transaction_service.get_clear_row
     before_fail = TraceService.metrics_snapshot()["trace_write_failure_count"]
     business_raised = False
     try:
-        recon_module.trace_service = broken_ts
+        persistence_module.trace_service = broken_ts
         recon_module.run_item = _det_run_item
         recon_module.transaction_service.get_bank_row = lambda **k: {
             "flow_id": k["flow_id"],
@@ -732,7 +733,7 @@ def scenario_trace_write_failure_isolation() -> dict[str, object]:
         except Exception:
             business_raised = True
     finally:
-        recon_module.trace_service = orig_trace
+        persistence_module.trace_service = orig_trace
         recon_module.run_item = orig_run
         recon_module.transaction_service.get_bank_row = orig_bank
         recon_module.transaction_service.get_clear_row = orig_clear
